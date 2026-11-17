@@ -115,6 +115,7 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
     initialize_economy(scenario);
     initialize_logistics(scenario);
     initialize_forces(scenario);
+    initialize_operations(scenario);
 }
 
 const SectorState& CampaignState::sector_state(SectorId sector) const
@@ -133,8 +134,8 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
     while (clock_.tick() < target.tick()) {
         const auto boundary_step = economy_interval_ticks_ - clock_.tick() % economy_interval_ticks_;
         auto next = target.tick();
-        bool activity_due = logistics_awake || economy_awake || forces_awake;
-        if (logistics_awake || forces_awake) {
+        bool activity_due = logistics_awake || economy_awake || forces_awake || operations_.enabled;
+        if (logistics_awake || forces_awake || operations_.enabled) {
             next = clock_.tick() + 1;
         } else if (economy_awake && boundary_step <= next - clock_.tick()) {
             next = clock_.tick() + boundary_step;
@@ -169,6 +170,10 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
             economy_awake = economy_awake || (forces_awake && !installations_.empty());
         }
         clock_.advance(step);
+        if (operations_.enabled && update_operations()) {
+            forces_awake = true;
+            economy_awake = !installations_.empty();
+        }
     }
     clock_ = target;
 }

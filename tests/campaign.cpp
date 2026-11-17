@@ -558,6 +558,129 @@ void test_forces_and_maintenance()
                                           "Cross-faction organizational ownership accepted");
 }
 
+void test_operations_and_intelligence()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr SectorId enemy{2};
+    constexpr EquipmentId scout{1};
+    constexpr StockpileId base{1};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    auto campaign = operations_example_campaign(42, west);
+    require(!campaign.faction_view(west).sectors.contains(enemy) &&
+            campaign.faction_view(west).contacts.empty() &&
+            campaign.faction_view(west).installations.size() == 1,
+            "Initial faction view revealed hidden information");
+    require(!campaign.issue_order(east, MissionKind::recon, SectorId{0}).mission &&
+            !campaign.issue_order(west, MissionKind::defend, enemy).mission &&
+            !campaign.issue_order(west, MissionKind::recon, SectorId{5}).mission &&
+            !campaign.issue_order(west, MissionKind::recon, SectorId{99}).mission,
+            "Order bypassed faction authority or target validation");
+    const auto order = campaign.issue_order(west, MissionKind::recon, enemy);
+    require(order.mission && campaign.stockpiles().at(base).reserved[fuel] == 5 &&
+            campaign.equipment().at(scout).status == EquipmentStatus::reserved &&
+            !campaign.issue_order(west, MissionKind::recon, enemy).mission &&
+            !campaign.cancel_order(east, *order.mission), "Equipment or fuel was reserved twice");
+    require(campaign.cancel_order(west, *order.mission) &&
+            campaign.stockpiles().at(base).reserved[fuel] == 0 &&
+            campaign.equipment().at(scout).status == EquipmentStatus::available,
+            "Cancellation did not release the allocation");
+    require(campaign.issue_order(west, MissionKind::recon, enemy).mission.has_value(),
+            "Unknown territory prevented reconnaissance");
+    campaign.advance_ticks(1);
+    require(campaign.faction_view(west).missions.back().status == MissionStatus::preparing &&
+            campaign.faction_view(west).contacts.empty(), "Preparation granted early intelligence");
+    campaign.advance_ticks(2);
+    require(campaign.faction_view(west).missions.back().status == MissionStatus::in_progress &&
+            campaign.stockpiles().at(base).reserved[fuel] == 0 &&
+            campaign.stockpiles().at(base).quantity[fuel] == 90,
+            "Launch bypassed preparation or fuel consumption");
+    campaign.advance_ticks(4);
+    const auto fresh = campaign.faction_view(west);
+    require(fresh.missions.back().status == MissionStatus::completed &&
+            !fresh.contacts.empty() && fresh.contacts.front().confidence == 1000 &&
+            fresh.contacts.front().observed_tick == 7 && fresh.installations.size() == 2 &&
+            campaign.faction_view(east).contacts.empty() &&
+            !campaign.faction_view(east).sectors.contains(SectorId{0}) &&
+            campaign.equipment().at(scout).status == EquipmentStatus::returning,
+            "Reconnaissance reports leaked or bypassed turnaround");
+    campaign.advance_ticks(4);
+    require(campaign.faction_view(west).contacts.front().confidence == 500 &&
+            campaign.faction_view(west).contacts.front().estimated_sector == enemy,
+            "Contact confidence did not halve from the observation timestamp");
+
+    auto blocked = operations_example_campaign(42, west);
+    ResourceAmounts all_fuel{};
+    all_fuel[fuel] = 100;
+    require(blocked.consume(base, all_fuel) &&
+            !blocked.issue_order(west, MissionKind::recon, enemy).mission,
+            "An unfunded mission was scheduled");
+    auto empty = operations_example_campaign(42, west);
+    require(empty.issue_order(west, MissionKind::recon, SectorId{1}).mission.has_value(),
+            "Unknown sector was ineligible for reconnaissance");
+    empty.advance_ticks(6);
+    require(empty.faction_view(west).missions.front().status == MissionStatus::completed &&
+            empty.faction_view(west).missions.front().detections == 0 &&
+            empty.faction_view(west).contacts.empty(), "Reconnaissance invented a detection");
+
+    auto guard = operations_example_campaign(42, west);
+    const auto defense = guard.issue_order(west, MissionKind::defend, SectorId{3});
+    require(defense.mission.has_value(), "Defense of a confirmed friendly sector was rejected");
+    guard.advance_ticks(6);
+    require(guard.faction_view(west).missions.front().status == MissionStatus::completed &&
+            guard.sector_state(SectorId{3}).controller == west, "Defense did not complete cleanly");
+    auto patrol = operations_example_campaign(42, west);
+    require(patrol.issue_order(west, MissionKind::patrol, SectorId{3}).mission.has_value(),
+            "Patrol of a friendly sector was rejected");
+    patrol.advance_ticks(6);
+    require(patrol.faction_view(west).sectors.at(SectorId{3}).observed_tick == 6,
+            "Patrol failed to report its observation");
+    auto lost = operations_example_campaign(42, west);
+    require(lost.issue_order(west, MissionKind::recon, enemy).mission.has_value() &&
+            lost.lose_equipment(scout), "Failed to set up unavailable equipment");
+    lost.advance_ticks(1);
+    require(lost.faction_view(west).missions.front().status == MissionStatus::failed &&
+            lost.stockpiles().at(base).reserved[fuel] == 0 &&
+            lost.stockpiles().at(base).quantity[fuel] == 100,
+            "Failure did not release unspent mission fuel");
+
+    auto moved = operations_example_campaign(42, west);
+    require(moved.reserve_equipment(scout), "Could not hold the scout at its base");
+    moved.advance_ticks(11);
+    auto old_report = moved.faction_view(east);
+    const auto air = std::ranges::find(old_report.contacts, "aircraft", &ContactReport::classification);
+    require(air != old_report.contacts.end() && air->estimated_sector == SectorId{0},
+            "East did not observe the aircraft before it moved");
+    require(moved.cancel_equipment_reservation(scout) &&
+            moved.issue_order(west, MissionKind::reposition, SectorId{3}).mission.has_value(),
+            "Repositioning to a friendly facility was rejected");
+    moved.advance_ticks(6);
+    const auto after_move = moved.faction_view(east);
+    const auto stale = std::ranges::find(after_move.contacts, air->id, &ContactReport::id);
+    require(moved.units().at(UnitId{3}).sector == SectorId{3} &&
+            stale != after_move.contacts.end() && stale->estimated_sector == air->estimated_sector &&
+            stale->observed_tick == air->observed_tick && stale->confidence < air->confidence,
+            "An old enemy contact silently followed a relocation");
+
+    auto batch = operations_example_campaign(42);
+    auto steps = operations_example_campaign(42);
+    require(!batch.issue_order(west, MissionKind::recon, enemy).mission,
+            "Observer could issue faction orders");
+    batch.advance_ticks(32);
+    for (int tick = 0; tick < 32; ++tick) {
+        steps.advance_ticks(1);
+    }
+    for (auto faction : {west, east}) {
+        const auto first = batch.faction_view(faction);
+        const auto second = steps.faction_view(faction);
+        require(!first.missions.empty() && !first.contacts.empty() &&
+                first.missions == second.missions && first.events == second.events,
+                "Autonomous missions depend on tick batching");
+    }
+    require(std::ranges::equal(batch.economy_ledger(), steps.economy_ledger()),
+            "Mission fuel depends on tick batching");
+}
+
 }  // namespace
 
 int main()
@@ -570,4 +693,5 @@ int main()
     test_logistics();
     test_realtime_pacing();
     test_forces_and_maintenance();
+    test_operations_and_intelligence();
 }

@@ -1,6 +1,8 @@
 #ifndef OPENWAR_CAMPAIGN_HPP
 #define OPENWAR_CAMPAIGN_HPP
 
+#include "operations.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace openwar {
@@ -203,6 +206,7 @@ struct EquipmentType {
     ServiceProfile scheduled;
     ServiceProfile repair;
     std::uint32_t service_interval_seconds;
+    std::uint32_t operation_range = 0;
 };
 
 struct MaintenanceFacility {
@@ -287,6 +291,8 @@ struct ScenarioDefinition {
     std::vector<MaintenanceFacility> facilities{};
     std::vector<MilitaryUnit> units{};
     std::vector<EquipmentAssignment> equipment{};
+    OperationsSettings operations{};
+    std::vector<Objective> objectives{};
 };
 
 class SimulationClock {
@@ -338,6 +344,10 @@ public:
     bool lose_equipment(EquipmentId id);
     bool authorize_reinforcement(EquipmentId id, std::uint64_t eta);
     void set_facility_conditions(FacilityId id, bool operational, std::uint32_t technicians);
+    FactionView faction_view(FactionId faction, bool include_events = true) const;
+    std::span<const OperationsEvent> observer_operations_log() const { return operations_log_; }
+    OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target);
+    bool cancel_order(FactionId actor, MissionId id);
 
 private:
     void initialize_economy(ScenarioDefinition& scenario);
@@ -354,6 +364,15 @@ private:
     bool update_forces(std::uint64_t tick);
     void set_equipment_status(Equipment& equipment, EquipmentStatus status, std::uint64_t tick);
     void queue_service(Equipment& equipment, ServiceKind kind, std::uint64_t tick);
+    void initialize_operations(const ScenarioDefinition& scenario);
+    bool update_operations();
+    OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
+    std::uint32_t observe(FactionId faction, SectorId sector);
+    struct IntelStore {
+        std::map<SectorId, SectorReport> sectors;
+        std::map<EquipmentId, ContactReport> contacts;  // True IDs remain internal to observation.
+        std::map<SectorId, InstallationReport> installations;
+    };
 
     WorldDefinition world_;
     SimulationClock clock_;
@@ -375,11 +394,17 @@ private:
     std::map<UnitId, MilitaryUnit> units_;
     std::map<EquipmentId, Equipment> equipment_;
     std::vector<ForcesEvent> forces_log_;
+    OperationsSettings operations_;
+    std::vector<Objective> objectives_;
+    std::map<FactionId, IntelStore> intelligence_;
+    std::map<std::pair<FactionId, MissionId>, Mission> missions_;
+    std::vector<OperationsEvent> operations_log_;
 };
 
 ScenarioDefinition example_scenario();
 ScenarioDefinition logistics_example_scenario();
 CampaignState maintenance_example_campaign(std::uint32_t seed);
+CampaignState operations_example_campaign(std::uint32_t seed, std::optional<FactionId> player = {});
 
 }  // namespace openwar
 

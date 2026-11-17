@@ -53,7 +53,9 @@ ScenarioDefinition logistics_example_scenario()
     return scenario;
 }
 
-CampaignState maintenance_example_campaign(std::uint32_t seed)
+namespace {
+
+ScenarioDefinition force_example_scenario()
 {
     auto scenario = example_scenario();
     constexpr StockpileId west_stock{1};
@@ -113,11 +115,41 @@ CampaignState maintenance_example_campaign(std::uint32_t seed)
     scenario.equipment.front().operating_seconds = 3600;
     scenario.equipment.push_back({EquipmentId{11}, EquipmentTypeId{6}, east_air, "External air reserve"});
 
-    CampaignState campaign(std::move(scenario), seed);
+    return scenario;
+}
+
+}  // namespace
+
+CampaignState maintenance_example_campaign(std::uint32_t seed)
+{
+    CampaignState campaign(force_example_scenario(), seed);
     campaign.damage_equipment(EquipmentId{1}, 20);
-    campaign.request_supply({ShipmentId{1}, parts_depot, west_stock, Resource::spare_parts, 3});
+    campaign.request_supply({ShipmentId{1}, StockpileId{3}, StockpileId{1}, Resource::spare_parts, 3});
     campaign.authorize_reinforcement(EquipmentId{11}, 8);
     return campaign;
+}
+
+CampaignState operations_example_campaign(std::uint32_t seed, std::optional<FactionId> player)
+{
+    auto scenario = force_example_scenario();
+    scenario.operations = {true, 4, 12 * 60, 4 * 60, 24 * 60, player};
+    scenario.objectives = {
+        {FactionId::west, SectorId{2}, 3},
+        {FactionId::west, SectorId{3}, 2},
+        {FactionId::east, SectorId{0}, 3},
+        {FactionId::east, SectorId{5}, 1}
+    };
+    const auto fuel = static_cast<std::size_t>(Resource::fuel);
+    scenario.stockpiles[1].capacity[fuel] = scenario.stockpiles[1].quantity[fuel] = 100;
+    scenario.stockpiles[2].capacity[fuel] = scenario.stockpiles[2].quantity[fuel] = 40;
+    scenario.facilities.push_back({FacilityId{3}, StockpileId{3}, 1, 1});
+    scenario.equipment.front().operating_seconds = 0;
+    for (auto& type : scenario.equipment_types) {
+        if (type.category == EquipmentCategory::helicopter) {
+            type.operation_range = 2;
+        }
+    }
+    return CampaignState(std::move(scenario), seed);
 }
 
 }  // namespace openwar

@@ -22,9 +22,11 @@ inline std::uint64_t ticks_due(std::chrono::duration<long double> elapsed,
 }
 
 void print_events(const CampaignState& campaign);
+void print_operations(const CampaignState& campaign, FactionId perspective, bool events);
 void report_forces(std::ostream& out, const CampaignState& campaign, bool compact = false);
 void run_realtime(CampaignState& campaign, std::uint32_t speed,
-                  std::optional<std::uint64_t> tick_limit, bool events);
+                  std::optional<std::uint64_t> tick_limit, bool events,
+                  std::optional<FactionId> perspective = {});
 
 }  // namespace openwar::cli
 

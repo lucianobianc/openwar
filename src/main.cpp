@@ -15,11 +15,14 @@ constexpr std::string_view usage = R"(Usage: openwar [--demo NAME] [--speed N] [
 Without a tick limit, the dashboard runs in real time until Ctrl+C.
 
 Options
-  --demo NAME  Select economy (default), logistics, or maintenance.
+  --demo NAME  Select economy (default), logistics, maintenance, or operations.
   --speed N    Pace the run at N simulated seconds per real second (default 60).
   --ticks N    Stop after N ticks. Runs in batch mode unless speed is specified.
   --events     Show timestamped campaign events.
   --seed N     Set the deterministic seed (default 0).
+  --faction WEST|EAST  Use one faction's view in the operations demo.
+  --order TYPE:SECTOR  Queue a recon, patrol, defend, or reposition order.
+  --cancel ID         Cancel a scheduled order before the simulation starts.
   --help       Show this help.
 
 Examples
@@ -27,9 +30,10 @@ Examples
   openwar --speed 600
   openwar --demo logistics --ticks 100
   openwar --demo maintenance --speed 600 --ticks 12 --events
+  openwar --demo operations --faction WEST --order recon:2 --ticks 12 --events
 )";
 
-enum class Demo { economy, logistics, maintenance };
+enum class Demo { economy, logistics, maintenance, operations };
 
 Demo parse_demo(std::string_view name)
 {
@@ -42,10 +46,13 @@ Demo parse_demo(std::string_view name)
     if (name == "maintenance") {
         return Demo::maintenance;
     }
+    if (name == "operations") {
+        return Demo::operations;
+    }
     throw std::invalid_argument("Unknown demonstration: " + std::string(name));
 }
 
-openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed)
+openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed, std::optional<openwar::FactionId> faction)
 {
     using namespace openwar;
     switch (demo) {
@@ -53,6 +60,8 @@ openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed)
         return CampaignState(example_scenario(), seed);
     case Demo::maintenance:
         return maintenance_example_campaign(seed);
+    case Demo::operations:
+        return operations_example_campaign(seed, faction);
     case Demo::logistics: {
         CampaignState campaign(logistics_example_scenario(), seed);
         campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
@@ -72,6 +81,29 @@ std::uint64_t parse_number(std::string_view text, std::string_view option)
         throw std::invalid_argument("Invalid unsigned integer for " + std::string(option));
     }
     return value;
+}
+
+void apply_order(openwar::CampaignState& campaign, openwar::FactionId faction, std::string_view order)
+{
+    using namespace openwar;
+    const auto separator = order.find(':');
+    if (separator == std::string_view::npos) {
+        throw std::invalid_argument("Expected order TYPE:SECTOR");
+    }
+    const auto sector = parse_number(order.substr(separator + 1), "--order sector");
+    if (sector > UINT32_MAX) {
+        throw std::out_of_range("Order sector must fit in 32 bits");
+    }
+    for (const auto kind : {MissionKind::recon, MissionKind::patrol, MissionKind::defend, MissionKind::reposition}) {
+        if (order.substr(0, separator) == mission_name(kind)) {
+            const auto result = campaign.issue_order(faction, kind, SectorId{static_cast<std::uint32_t>(sector)});
+            if (!result.mission) {
+                throw std::invalid_argument(std::string(result.reason));
+            }
+            return;
+        }
+    }
+    throw std::invalid_argument("Unknown order type");
 }
 
 void report(const openwar::CampaignState& campaign, std::uint32_t seed)
@@ -134,6 +166,8 @@ int main(int argc, char* argv[])
     std::optional<std::uint64_t> ticks;
     std::optional<std::uint32_t> speed;
     std::optional<Demo> demo;
+    std::optional<openwar::FactionId> faction;
+    std::vector<std::pair<std::string_view, std::string_view>> commands;
     bool legacy_realtime = false;
     bool events = false;
     try {
@@ -165,7 +199,8 @@ int main(int argc, char* argv[])
                 events = true;
                 continue;
             }
-            if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed") {
+            if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed" &&
+                option != "--faction" && option != "--order" && option != "--cancel") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
             if (++i == argc) {
@@ -173,6 +208,21 @@ int main(int argc, char* argv[])
             }
             if (option == "--demo") {
                 select_demo(parse_demo(argv[i]));
+                continue;
+            }
+            if (option == "--faction") {
+                const std::string_view name = argv[i];
+                if (name == "WEST" || name == "west") {
+                    faction = openwar::FactionId::west;
+                } else if (name == "EAST" || name == "east") {
+                    faction = openwar::FactionId::east;
+                } else {
+                    throw std::invalid_argument("Faction must be WEST or EAST");
+                }
+                continue;
+            }
+            if (option == "--order" || option == "--cancel") {
+                commands.emplace_back(option, argv[i]);
                 continue;
             }
             const auto value = parse_number(argv[i], option);
@@ -190,15 +240,37 @@ int main(int argc, char* argv[])
                 speed = static_cast<std::uint32_t>(value);
             }
         }
-        auto campaign = make_campaign(demo.value_or(Demo::economy), seed);
+        if ((faction || !commands.empty()) && demo != Demo::operations) {
+            throw std::invalid_argument("Faction controls require --demo operations");
+        }
+        if (!commands.empty() && !faction) {
+            throw std::invalid_argument("Orders require --faction WEST or EAST");
+        }
+        auto campaign = make_campaign(demo.value_or(Demo::economy), seed, faction);
+        for (const auto& [command, value] : commands) {
+            if (command == "--order") {
+                apply_order(campaign, *faction, value);
+            } else {
+                const auto id = parse_number(value, "--cancel");
+                if (id > UINT32_MAX || !campaign.cancel_order(*faction, openwar::MissionId{static_cast<std::uint32_t>(id)})) {
+                    throw std::invalid_argument("No cancellable order with that ID");
+                }
+            }
+        }
+        const auto perspective = demo == Demo::operations ?
+            std::optional{faction.value_or(openwar::FactionId::neutral)} : std::nullopt;
         if (!ticks || speed || legacy_realtime) {
-            openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events);
+            openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events, perspective);
         } else {
             campaign.advance_ticks(*ticks);
-            if (events) {
-                openwar::cli::print_events(campaign);
+            if (perspective) {
+                openwar::cli::print_operations(campaign, *perspective, events);
+            } else {
+                if (events) {
+                    openwar::cli::print_events(campaign);
+                }
+                report(campaign, seed);
             }
-            report(campaign, seed);
         }
     } catch (const std::exception& error) {
         std::cerr << "openwar: " << error.what() << '\n' << usage;

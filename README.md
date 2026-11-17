@@ -117,6 +117,35 @@ Reserve equipment has an explicit source and becomes active only after its
 authorized arrival tick and a friendly, operational entry. Permanent losses
 retain their IDs in the inventory history.
 
+## Intelligence and operations
+
+```sh
+./openwar --demo operations --ticks 16 --events
+./openwar --demo operations --faction WEST --order recon:1 --ticks 12 --events
+```
+
+The operations observer shows separate WEST and EAST reports. Select a
+faction to see its reports and issue orders on its behalf. Startup orders
+accept `recon:SECTOR`, `patrol:SECTOR`, `defend:SECTOR`, and
+`reposition:SECTOR`. Use `--cancel ID` after an order to cancel it while
+it is scheduled. Patrols, defense, and repositioning require confirmed
+friendly sectors. Repositioning moves a single-equipment unit to another
+compatible friendly facility.
+
+Every four demo ticks the planner ranks known objectives by priority and
+the need to refresh uncertain intelligence. It tries the ranked options
+against friendly availability, range, and depot stock. Missions reserve
+equipment and fuel, prepare through a workshop, consume reserved mission
+fuel on launch, and return through inspection and turnaround. Preparation
+costs use the workshop's normal stock debit.
+
+A reconnaissance pass samples its target sector and reports on return.
+Forest limits detection in the demo, and a mission can return without a
+contact. Reports preserve the last observation and decay from its timestamp
+using an integer table sampled at sixteenths of a half-life. Contact IDs
+and mission IDs are local to each faction. The demo shortens half-lives to make
+decay visible in a short run. Report publication is immediate on return.
+
 ## Roadmap
 
 1. M0 — Core. Clock, world, sectors, and factions.

@@ -183,14 +183,89 @@ struct EventCursor {
     }
 };
 
+void report_operations(std::ostream& out, const CampaignState& campaign, FactionId perspective, bool compact)
+{
+    if (perspective == FactionId::neutral) {
+        out << "Operations observer | separate faction reports\n";
+    }
+    for (const auto faction : {FactionId::west, FactionId::east}) {
+        if (perspective != FactionId::neutral && perspective != faction) {
+            continue;
+        }
+        const auto view = campaign.faction_view(faction, false);
+        out << faction_name(faction) << " intelligence | " << view.sectors.size() << " reports | "
+            << campaign.world().sectors().size() - view.sectors.size() << " unknown sectors | "
+            << view.installations.size() << " known installation sites\n";
+        for (const auto& [sector, info] : view.sectors) {
+            if (!compact) {
+                out << "  Sector " << static_cast<std::uint32_t>(sector) << " last reported "
+                    << faction_name(info.estimated_controller) << " at tick " << info.observed_tick
+                    << " (" << confidence_name(info.confidence) << ")\n";
+            }
+        }
+        const auto visible_contacts = compact ? std::min<std::size_t>(view.contacts.size(), 2) : view.contacts.size();
+        for (std::size_t i = 0; i < visible_contacts; ++i) {
+            const auto& info = view.contacts[i];
+            out << "  Contact " << static_cast<std::uint32_t>(info.id) << ' ' << info.classification
+                << " at sector " << static_cast<std::uint32_t>(info.estimated_sector)
+                << " | " << confidence_name(info.confidence) << ' ' << info.confidence << "/1000"
+                << " | seen tick " << info.observed_tick << '\n';
+        }
+        const auto first = compact && view.missions.size() > 2 ? view.missions.size() - 2 : 0;
+        for (std::size_t i = first; i < view.missions.size(); ++i) {
+            const auto& mission = view.missions[i];
+            const auto& item = campaign.equipment().at(mission.equipment);
+            out << "  Mission " << static_cast<std::uint32_t>(mission.id) << ' '
+                << mission_name(mission.kind) << " to sector " << static_cast<std::uint32_t>(mission.target)
+                << " | " << mission_status_name(mission.status)
+                << " | equipment " << static_cast<std::uint32_t>(mission.equipment) << ' '
+                << equipment_status_name(item.status);
+            if (mission.status == MissionStatus::completed && mission.kind == MissionKind::recon) {
+                out << " | " << mission.detections << " detected";
+            }
+            out << '\n';
+        }
+    }
+}
+
+template<class Output>
+void drain_operations(const CampaignState& campaign, FactionId perspective, std::size_t& next, Output output)
+{
+    FactionView view;
+    auto events = campaign.observer_operations_log();
+    if (perspective != FactionId::neutral) {
+        view = campaign.faction_view(perspective);
+        events = view.events;
+    }
+    while (next < events.size()) {
+        const auto& entry = events[next++];
+        std::ostringstream line;
+        line << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
+             << "s): " << faction_name(entry.faction) << " sector " << static_cast<std::uint32_t>(entry.sector);
+        if (entry.mission) {
+            line << " mission " << static_cast<std::uint32_t>(*entry.mission);
+        }
+        line << ' ' << entry.reason;
+        output(line.str());
+    }
+}
+
 std::string dashboard(const CampaignState& campaign, std::uint32_t speed,
-                      const std::deque<std::string>& recent_events)
+                      const std::deque<std::string>& recent_events, std::optional<FactionId> perspective)
 {
     std::ostringstream frame;
     frame << "OpenWar | Ctrl+C to stop\n"
           << "Tick: " << campaign.clock().tick()
           << " | Elapsed seconds: " << campaign.clock().elapsed_seconds()
           << " | Speed: " << speed << "x\n";
+
+    if (perspective) {
+        report_operations(frame, campaign, *perspective, true);
+        for (const auto& event : recent_events) {
+            frame << event << '\n';
+        }
+        return frame.str();
+    }
 
     std::array<std::size_t, 3> sectors{};
     for (const auto& sector : campaign.world().sectors()) {
@@ -276,8 +351,19 @@ void print_events(const CampaignState& campaign)
     EventCursor{}.drain(campaign, [](const std::string& event) { std::cout << event << '\n'; });
 }
 
+void print_operations(const CampaignState& campaign, FactionId perspective, bool events)
+{
+    if (events) {
+        std::size_t next = 0;
+        drain_operations(campaign, perspective, next, [](const std::string& event) { std::cout << event << '\n'; });
+    }
+    std::cout << "Tick: " << campaign.clock().tick() << '\n'
+              << "Elapsed seconds: " << campaign.clock().elapsed_seconds() << '\n';
+    report_operations(std::cout, campaign, perspective, false);
+}
+
 void run_realtime(CampaignState& campaign, std::uint32_t speed,
-                  std::optional<std::uint64_t> tick_limit, bool events)
+                  std::optional<std::uint64_t> tick_limit, bool events, std::optional<FactionId> perspective)
 {
     using Clock = std::chrono::steady_clock;
     using namespace std::chrono_literals;
@@ -295,10 +381,11 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
     {
         const TerminalScreen screen(ansi);
         EventCursor cursor;
+        std::size_t next_operation = 0;
         std::deque<std::string> recent_events;
         const auto draw = [&] {
             if (events) {
-                cursor.drain(campaign, [&](std::string event) {
+                const auto output = [&](std::string event) {
                     if (!ansi) {
                         std::cout << event << '\n';
                         return;
@@ -307,9 +394,14 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
                         recent_events.pop_front();
                     }
                     recent_events.push_back(std::move(event));
-                });
+                };
+                if (perspective) {
+                    drain_operations(campaign, *perspective, next_operation, output);
+                } else {
+                    cursor.drain(campaign, output);
+                }
             }
-            screen.draw(dashboard(campaign, speed, recent_events));
+            screen.draw(dashboard(campaign, speed, recent_events, perspective));
         };
 
         draw();

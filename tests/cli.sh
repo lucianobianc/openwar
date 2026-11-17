@@ -51,7 +51,7 @@ printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
 printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--demo NAME] [--speed N] [--ticks N] [--events] [--seed N]'
-printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, or maintenance.'
+printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, or operations.'
 if printf '%s\n' "$help" | grep -E -- '--(logistics-demo|maintenance-demo|realtime)'; then
     exit 1
 fi
@@ -119,3 +119,18 @@ printf '%s\n' "$service" | grep -Fx 'WEST West air squadron | sector 0 | ready 1
 printf '%s\n' "$service" | grep -Fx 'EAST East air squadron | sector 2 | ready 2/2'
 paced=$("$openwar" --demo maintenance --speed 3600 --ticks 12 --events)
 test "$(printf '%s\n' "$service" | grep '^Event tick ')" = "$(printf '%s\n' "$paced" | tr -d '\r' | grep '^Event tick ')"
+
+operations=$("$openwar" --demo operations --ticks 16 --events)
+printf '%s\n' "$operations" | grep -F 'WEST sector 2 mission 1 planner: refresh incomplete intelligence'
+printf '%s\n' "$operations" | grep -F 'EAST sector 0 mission 1 planner: refresh incomplete intelligence'
+printf '%s\n' "$operations" | grep -F 'ground at sector 2 | uncertain '
+manual=$("$openwar" --demo operations --faction WEST --order recon:1 --ticks 6 --events)
+printf '%s\n' "$manual" | grep -F 'observation reported: no contacts detected'
+if printf '%s\n' "$manual" | grep -E 'EAST intelligence|\): EAST sector'; then
+    exit 1
+fi
+cancelled=$("$openwar" --demo operations --faction WEST --order recon:2 --cancel 1 --ticks 0)
+printf '%s\n' "$cancelled" | grep -F 'Mission 1 recon to sector 2 | cancelled'
+reject --demo operations --order recon:2 --ticks 1
+reject --demo operations --faction WEST --order defend:2 --ticks 1
+reject --demo operations --faction NEUTRAL --ticks 1
