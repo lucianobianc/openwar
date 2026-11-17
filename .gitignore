@@ -21,8 +21,8 @@
 /build/
 /openwar
 /openwar.exe
-/openwar-viewer
-/openwar-viewer.exe
+/openwar-gui
+/openwar-gui.exe
 /campaign-tests
 /campaign-tests.exe
 /viewer-model-tests

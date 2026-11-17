@@ -422,7 +422,7 @@ int main(int argc, char* argv[])
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
             if (option == "--help") {
-                std::cout << "Usage: openwar-viewer [--demo combat|operations] [--seed UINT32]\n";
+                std::cout << "Usage: openwar-gui [--demo combat|operations] [--seed UINT32]\n";
                 return 0;
             }
             if ((option != "--seed" && option != "--demo") || i + 1 == argc) {
@@ -446,7 +446,7 @@ int main(int argc, char* argv[])
                                                operations_example_campaign(seed);
         run(campaign);
     } catch (const std::exception& error) {
-        std::cerr << "openwar-viewer: " << error.what() << '\n';
+        std::cerr << "openwar-gui: " << error.what() << '\n';
         return 1;
     }
 }

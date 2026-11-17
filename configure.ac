@@ -15,9 +15,9 @@ CXXFLAGS=$saved_CXXFLAGS
 AC_LANG_POP([C++])
 
 AC_ARG_ENABLE([viewer],
-    [AS_HELP_STRING([--enable-viewer], [build the optional raylib campaign viewer])],
-    [], [enable_viewer=no])
-AS_CASE([$enable_viewer], [yes|no], [], [AC_MSG_ERROR([--enable-viewer expects yes or no])])
+    [AS_HELP_STRING([--disable-viewer], [build only the headless command-line program])],
+    [], [enable_viewer=yes])
+AS_CASE([$enable_viewer], [yes|no], [], [AC_MSG_ERROR([viewer setting expects yes or no])])
 AC_ARG_VAR([RAYLIB_CFLAGS], [preprocessor flags for raylib])
 AC_ARG_VAR([RAYLIB_LIBS], [linker flags for raylib])
 AS_IF([test "x$enable_viewer" = xyes], [
@@ -26,7 +26,7 @@ AS_IF([test "x$enable_viewer" = xyes], [
         AS_IF([test -n "$PKG_CONFIG" && "$PKG_CONFIG" --exists raylib], [
             AS_IF([test -z "$RAYLIB_CFLAGS"], [RAYLIB_CFLAGS=`"$PKG_CONFIG" --cflags raylib`])
             RAYLIB_LIBS=`"$PKG_CONFIG" --libs raylib`
-        ], [AC_MSG_ERROR([raylib is required for the viewer. Set RAYLIB_CFLAGS and RAYLIB_LIBS if it is installed outside pkg-config.])])
+        ], [AC_MSG_ERROR([raylib is required for openwar-gui. Install raylib, set RAYLIB_CFLAGS and RAYLIB_LIBS for a custom installation, or use --disable-viewer for a CLI-only build.])])
     ])
     AC_LANG_PUSH([C++])
     saved_CPPFLAGS=$CPPFLAGS
@@ -36,7 +36,7 @@ AS_IF([test "x$enable_viewer" = xyes], [
     AC_MSG_CHECKING([whether raylib can be linked])
     AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <raylib.h>]], [[return IsWindowReady();]])],
         [AC_MSG_RESULT([yes])],
-        [AC_MSG_FAILURE([could not compile and link raylib. Check RAYLIB_CFLAGS and RAYLIB_LIBS.])])
+        [AC_MSG_FAILURE([could not compile and link raylib for openwar-gui. Check RAYLIB_CFLAGS and RAYLIB_LIBS, or use --disable-viewer for a CLI-only build.])])
     CPPFLAGS=$saved_CPPFLAGS
     LIBS=$saved_LIBS
     AC_LANG_POP([C++])

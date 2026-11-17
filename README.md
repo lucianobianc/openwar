@@ -15,7 +15,11 @@ autoreconf -fi
 make
 make check
 ./openwar --seed 42 --ticks 5
+./openwar-gui
 ```
+
+The default build includes `openwar-gui` and requires raylib. For a CLI-only
+build, run `./configure --disable-viewer` before `make`.
 
 Set `CXX=clang++` when running `configure` to select Clang. Use
 `./configure --prefix=/your/install/path` to choose where `make install`
@@ -185,21 +189,15 @@ working installations, confirmed capitulation, formal surrender, or a time
 limit. Simultaneous outcomes produce a draw. A final result freezes the
 campaign at its terminal tick.
 
-## Optional campaign viewer
+## Campaign viewer
 
-Build the temporary 2D debugging viewer with raylib available through
-`pkg-config`:
-
-```sh
-autoreconf -fi
-./configure --enable-viewer
-make
-./openwar-viewer --demo combat --seed 42
-```
+With raylib available through `pkg-config`, the build commands above
+create `openwar-gui` alongside `openwar` in the directory where you ran
+`make`. An out-of-tree build places both executables in its build directory.
+On Windows, the executable is named `openwar-gui.exe`.
 
 For a raylib installation outside `pkg-config`, pass its include and link
 flags through `RAYLIB_CFLAGS` and `RAYLIB_LIBS` when running `configure`.
-The default build produces the headless CLI without raylib.
 
 The viewer starts paused for inspection. Click a sector for details, use
 Space to pause or resume, and use `[` and `]` to change speed. Scroll over the
