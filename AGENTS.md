@@ -4,6 +4,12 @@ Read `docs/DESIGN.md` and `docs/TERRITORY.md` thoroughly before making any chang
 
 These documents define the project's design, architecture, and technical requirements. Treat them as authoritative. Do not invent requirements or implement features beyond the current milestone.
 
+## Project language and documentation
+
+Use English for project materials, including code identifiers, comments, documentation, README files, user-facing text, and commit messages. Existing source documents in Portuguese may be used as references.
+
+Document project decisions, requirements, and technical rationale in terms that stand on their own. Leave out private conversation details, chat excerpts, and personal context.
+
 ## Technology and coding standards
 
 - **Language:** C++20 (ISO/IEC 14882:2020).

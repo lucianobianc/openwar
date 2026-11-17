@@ -1,0 +1,179 @@
+#include "campaign.hpp"
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string_view>
+#include <vector>
+
+namespace {
+
+using namespace openwar;
+
+void require(bool condition, std::string_view message)
+{
+    if (!condition) {
+        std::cerr << message << '\n';
+        std::exit(1);
+    }
+}
+
+template<class Exception, class Action>
+void require_throws(Action action, std::string_view message)
+{
+    try {
+        action();
+    } catch (const Exception&) {
+        return;
+    }
+    require(false, message);
+}
+
+void test_clock()
+{
+    SimulationClock clock(60);
+    require(clock.tick() == 0 && clock.elapsed_seconds() == 0, "Clock must start at zero");
+    clock.advance(2);
+    clock.advance(0);
+    clock.advance(3);
+    require(clock.tick() == 5 && clock.elapsed_seconds() == 300, "Wrong simulated time");
+    require_throws<std::invalid_argument>([] { SimulationClock invalid(0); },
+                                          "Zero tick duration accepted");
+
+    SimulationClock limit(2);
+    const auto max_tick = std::numeric_limits<std::uint64_t>::max() / 2;
+    limit.advance(max_tick);
+    require_throws<std::overflow_error>([&] { limit.advance(1); }, "Clock overflow accepted");
+    require(limit.tick() == max_tick && limit.elapsed_seconds() == max_tick * 2,
+            "Rejected advance changed the clock");
+}
+
+void test_topology()
+{
+    WorldDefinition world(3, 3, 1500, std::vector<SectorProperties>(9));
+    const std::vector<std::vector<SectorId>> expected{
+        {SectorId{3}, SectorId{1}},
+        {SectorId{4}, SectorId{2}, SectorId{0}},
+        {SectorId{5}, SectorId{1}},
+        {SectorId{0}, SectorId{6}, SectorId{4}},
+        {SectorId{1}, SectorId{7}, SectorId{5}, SectorId{3}},
+        {SectorId{2}, SectorId{8}, SectorId{4}},
+        {SectorId{3}, SectorId{7}},
+        {SectorId{4}, SectorId{8}, SectorId{6}},
+        {SectorId{5}, SectorId{7}},
+    };
+    require(world.sector_size_m() == 1500, "Incorrect sector size");
+    for (std::uint32_t i = 0; i < expected.size(); ++i) {
+        const auto id = SectorId{i};
+        const auto& sector = world.sector(id);
+        require(sector.id == id && sector.x == i % 3 && sector.y == i / 3 &&
+                world.sector_id(sector.x, sector.y) == id, "Invalid row-major sector ID");
+        require(sector.neighbors == expected[i], "Incorrect orthogonal adjacency");
+        for (const auto neighbor : sector.neighbors) {
+            const auto& reverse = world.sector(neighbor).neighbors;
+            require(std::ranges::find(reverse, id) != reverse.end(), "One-way adjacency");
+        }
+    }
+
+    WorldDefinition singleton(1, 1, 10, {SectorProperties{}});
+    require(singleton.sector(SectorId{0}).neighbors.empty(), "Singleton has neighbors");
+    require_throws<std::out_of_range>([&] { world.sector_id(3, 0); }, "Invalid coordinate accepted");
+    require_throws<std::out_of_range>([&] { world.sector(SectorId{9}); }, "Invalid ID accepted");
+    require_throws<std::invalid_argument>([] { WorldDefinition invalid(0, 1, 1, {}); },
+                                          "Empty world accepted");
+    require_throws<std::invalid_argument>([] { WorldDefinition invalid(1, 1, 0, {{}}); },
+                                          "Zero sector size accepted");
+    require_throws<std::invalid_argument>([] { WorldDefinition invalid(65536, 65537, 1, {}); },
+                                          "Grid exceeds the sector ID range");
+    require_throws<std::invalid_argument>([] { WorldDefinition invalid(2, 2, 1, {{}}); },
+                                          "Mismatched properties accepted");
+    require_throws<std::invalid_argument>(
+        [] { WorldDefinition invalid(1, 1, 1, {{static_cast<Terrain>(99), true}}); },
+        "Unknown terrain accepted");
+}
+
+void test_initialization()
+{
+    static_assert(static_cast<int>(FactionId::neutral) == 0);
+    static_assert(static_cast<int>(FactionId::west) == 1);
+    static_assert(static_cast<int>(FactionId::east) == 2);
+    require(faction_name(FactionId::neutral) == "NEUTRAL" &&
+            faction_name(FactionId::west) == "WEST" &&
+            faction_name(FactionId::east) == "EAST", "Incorrect faction names");
+
+    auto scenario = example_scenario();
+    const CampaignState campaign(scenario, 0);
+    const auto& world = campaign.world();
+    require(world.width() == 3 && world.height() == 2 && world.sectors().size() == 6,
+            "Incorrect example dimensions");
+    require(campaign.sector_state(SectorId{0}).controller == FactionId::west &&
+            campaign.sector_state(SectorId{2}).controller == FactionId::east &&
+            campaign.sector_state(SectorId{4}).controller == FactionId::neutral,
+            "Incorrect initial ownership");
+    require(campaign.sector_state(SectorId{2}).objective_points == 1, "Incorrect objective points");
+    const auto& water = world.sector(SectorId{4});
+    require(water.properties.terrain == Terrain::water && !water.properties.traversable &&
+            water.neighbors.size() == 3, "Passability changed geometric adjacency");
+    require_throws<std::out_of_range>([&] { campaign.sector_state(SectorId{6}); },
+                                       "Invalid campaign sector lookup accepted");
+
+    scenario.initial_sectors.push_back({SectorId{0}, {FactionId::east}});
+    require_throws<std::invalid_argument>([&] { CampaignState invalid(scenario, 0); },
+                                          "Duplicate ownership accepted");
+    scenario.initial_sectors.back() = {SectorId{6}, {FactionId::east}};
+    require_throws<std::out_of_range>([&] { CampaignState invalid(scenario, 0); },
+                                       "Invalid scenario sector accepted");
+    scenario.initial_sectors.back() = {SectorId{1}, {static_cast<FactionId>(99)}};
+    require_throws<std::invalid_argument>([&] { CampaignState invalid(scenario, 0); },
+                                          "Invalid faction accepted");
+
+    CampaignState custom({WorldDefinition(1, 1, 500, {{}}), {}, 7}, 1);
+    custom.advance_ticks(2);
+    require(custom.world().sector_size_m() == 500 &&
+            custom.sector_state(SectorId{0}).controller == FactionId::neutral &&
+            custom.clock().elapsed_seconds() == 14,
+            "Campaign initialization depends on the example");
+}
+
+void test_reproducibility()
+{
+    CampaignState first(example_scenario(), 5489);
+    CampaignState second(example_scenario(), 5489);
+    CampaignState different(example_scenario(), 1);
+    first.advance_ticks(10);
+    second.advance_ticks(4);
+    second.advance_ticks(6);
+
+    require(first.clock().tick() == second.clock().tick() &&
+            first.clock().elapsed_seconds() == second.clock().elapsed_seconds(),
+            "Batching changes simulated time");
+    for (const auto& sector : first.world().sectors()) {
+        const auto& state = first.sector_state(sector.id);
+        const auto& repeated = second.sector_state(sector.id);
+        require(state.controller == repeated.controller &&
+                state.objective_points == repeated.objective_points,
+                "Repeated campaigns diverged");
+    }
+
+    const auto first_draw = first.next_random();
+    require(first_draw == 3499211612u && first_draw == second.next_random(),
+            "Unexpected standard MT19937 sequence");
+    require(first_draw != different.next_random(), "Changing the seed has no effect");
+    for (int i = 0; i < 16; ++i) {
+        require(first.next_random() == second.next_random(), "Identical seeds diverged");
+    }
+}
+
+}  // namespace
+
+int main()
+{
+    test_clock();
+    test_topology();
+    test_initialization();
+    test_reproducibility();
+}
