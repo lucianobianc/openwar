@@ -2,8 +2,32 @@
 set -eu
 
 openwar=${OPENWAR:-./openwar}
+
+(
+    # The default has no tick limit. Observe live output before stopping the child.
+    scratch=$(mktemp -d)
+    "$openwar" >"$scratch/output" &
+    pid=$!
+    cleanup() {
+        kill "$pid" 2>/dev/null || :
+        wait "$pid" 2>/dev/null || :
+        rm -f "$scratch/output"
+        rmdir "$scratch"
+    }
+    trap cleanup 0
+    remaining=10
+    while ! grep -Eq '^Tick: [1-9][0-9]* \| Elapsed seconds: [0-9]+ \| Speed: 60x' "$scratch/output"; do
+        kill -0 "$pid"
+        test "$remaining" -gt 0
+        remaining=$((remaining - 1))
+        sleep 1
+    done
+    grep -F 'Tick: 0 | Elapsed seconds: 0 | Speed: 60x' "$scratch/output"
+    grep -F 'Refinery | work ' "$scratch/output"
+)
+
 output=$("$openwar" --seed 42 --ticks 5)
-repeat=$("$openwar" --seed 42 --ticks 5)
+repeat=$("$openwar" --demo economy --seed 42 --ticks 5)
 test "$output" = "$repeat"
 output=$(printf '%s' "$output" | tr -d '\r')
 printf '%s\n' "$output" | grep -Fx 'Seed: 42'
@@ -26,28 +50,36 @@ printf '%s\n' "$output" | grep -Fx '  fuel (L): 900/2400'
 printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
-printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]'
-printf '%s\n' "$help" | grep -F '[--realtime [--speed N]] [--events]'
-output=$("$openwar" --logistics-demo --ticks 6)
+printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--demo NAME] [--speed N] [--ticks N] [--events] [--seed N]'
+printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, or maintenance.'
+if printf '%s\n' "$help" | grep -E -- '--(logistics-demo|maintenance-demo|realtime)'; then
+    exit 1
+fi
+output=$("$openwar" --demo logistics --ticks 6)
+legacy=$("$openwar" --logistics-demo --ticks 6)
+test "$output" = "$legacy"
 printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Shipment 1: delivered, cargo on carrier: 0'
 printf '%s\n' "$output" | tr -d '\r' | grep -Fx '  fuel (L): 80/120'
-output=$("$openwar" --logistics-demo --ticks 16 --events)
+output=$("$openwar" --demo logistics --ticks 16 --events)
 output=$(printf '%s\n' "$output" | tr -d '\r')
 printf '%s\n' "$output" | grep -Fx 'Event tick 11 (660s): shipment 2 assigned [40]'
 printf '%s\n' "$output" | grep -Fx 'Event tick 15 (900s): shipment 2 arrived [40] in sector 3'
 printf '%s\n' "$output" | grep -Fx 'Event tick 16 (960s): shipment 2 delivered [40]'
 printf '%s\n' "$output" | grep -Fx '  fuel (L): 120/120'
 
-batch=$("$openwar" --seed 42 --logistics-demo --ticks 10 --events)
-live=$("$openwar" --seed 42 --logistics-demo --realtime --speed 3600 --ticks 10 --events)
+batch=$("$openwar" --seed 42 --demo logistics --ticks 10 --events)
+live=$("$openwar" --seed 42 --demo logistics --speed 3600 --ticks 10 --events)
 printf '%s\n' "$live" | tr -d '\r' | grep -Fx 'Tick: 10 | Elapsed seconds: 600 | Speed: 3600x'
 printf '%s\n' "$live" | tr -d '\r' | grep -Fx 'Shipment 1: delivered, cargo on carrier: 0'
+test "$(printf '%s\n' "$live" | tr -d '\r' | sed -n 's/^Tick: \([0-9][0-9]*\) |.*/\1/p' | tail -n 1)" = 10
 batch_events=$(printf '%s\n' "$batch" | grep '^Event tick ')
 live_events=$(printf '%s\n' "$live" | grep '^Event tick ')
 test "$batch_events" = "$live_events"
 printf '%s\n' "$live_events" | tr -d '\r' | grep -Fx 'Event tick 6 (360s): shipment 1 delivered [80]'
 output=$("$openwar" --realtime --ticks 0)
-printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Tick: 0 | Elapsed seconds: 0 | Speed: 1x'
+printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Tick: 0 | Elapsed seconds: 0 | Speed: 60x'
+output=$("$openwar" --speed 600 --ticks 0)
+printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Tick: 0 | Elapsed seconds: 0 | Speed: 600x'
 
 reject()
 {
@@ -64,15 +96,20 @@ reject --ticks -1
 reject --ticks 12abc
 reject --ticks
 reject --unknown
-reject --speed 60
-reject --realtime --speed 0
-reject --realtime --speed -1
-reject --realtime --speed 1.5
-reject --realtime --speed 4294967296
-reject --realtime --speed
-reject --realtime --ticks 18446744073709551615
+reject --speed 0
+reject --speed -1
+reject --speed 1.5
+reject --speed 4294967296
+reject --speed
+reject --speed 600 --ticks 18446744073709551615
+reject --demo
+reject --demo unknown
+reject --demo economy --demo maintenance
+reject --demo logistics --maintenance-demo
 
-service=$("$openwar" --maintenance-demo --ticks 12 --events)
+service=$("$openwar" --demo maintenance --ticks 12 --events)
+legacy=$("$openwar" --maintenance-demo --ticks 12 --events)
+test "$service" = "$legacy"
 service=$(printf '%s\n' "$service" | tr -d '\r')
 printf '%s\n' "$service" | grep -Fx 'Event tick 1 (60s): equipment 1 waiting for resources (repair)'
 printf '%s\n' "$service" | grep -Fx 'Event tick 6 (360s): stockpile 1 consumed stock for equipment 1 | spare parts -2/+0'
@@ -80,5 +117,5 @@ printf '%s\n' "$service" | grep -Fx 'Event tick 9 (540s): equipment 1 repair (re
 printf '%s\n' "$service" | grep -Fx 'Event tick 12 (720s): equipment 1 available'
 printf '%s\n' "$service" | grep -Fx 'WEST West air squadron | sector 0 | ready 1/1'
 printf '%s\n' "$service" | grep -Fx 'EAST East air squadron | sector 2 | ready 2/2'
-paced=$("$openwar" --maintenance-demo --realtime --speed 3600 --ticks 12 --events)
+paced=$("$openwar" --demo maintenance --speed 3600 --ticks 12 --events)
 test "$(printf '%s\n' "$service" | grep '^Event tick ')" = "$(printf '%s\n' "$paced" | tr -d '\r' | grep '^Event tick ')"

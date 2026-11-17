@@ -10,13 +10,58 @@
 
 namespace {
 
-constexpr std::string_view usage =
-    "Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]\n"
-    "               [--realtime [--speed N]] [--events]\n"
-    "  --maintenance-demo  Show forces, supply deliveries, and workshop service.\n"
-    "  --realtime  Advance until Ctrl+C or the optional --ticks limit.\n"
-    "  --speed N   Positive simulated seconds per real second (default: 1).\n"
-    "  --events    Display timestamped economy and logistics events.\n";
+constexpr std::string_view usage = R"(Usage: openwar [--demo NAME] [--speed N] [--ticks N] [--events] [--seed N]
+
+Without a tick limit, the dashboard runs in real time until Ctrl+C.
+
+Options
+  --demo NAME  Select economy (default), logistics, or maintenance.
+  --speed N    Pace the run at N simulated seconds per real second (default 60).
+  --ticks N    Stop after N ticks. Runs in batch mode unless speed is specified.
+  --events     Show timestamped campaign events.
+  --seed N     Set the deterministic seed (default 0).
+  --help       Show this help.
+
+Examples
+  openwar
+  openwar --speed 600
+  openwar --demo logistics --ticks 100
+  openwar --demo maintenance --speed 600 --ticks 12 --events
+)";
+
+enum class Demo { economy, logistics, maintenance };
+
+Demo parse_demo(std::string_view name)
+{
+    if (name == "economy") {
+        return Demo::economy;
+    }
+    if (name == "logistics") {
+        return Demo::logistics;
+    }
+    if (name == "maintenance") {
+        return Demo::maintenance;
+    }
+    throw std::invalid_argument("Unknown demonstration: " + std::string(name));
+}
+
+openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed)
+{
+    using namespace openwar;
+    switch (demo) {
+    case Demo::economy:
+        return CampaignState(example_scenario(), seed);
+    case Demo::maintenance:
+        return maintenance_example_campaign(seed);
+    case Demo::logistics: {
+        CampaignState campaign(logistics_example_scenario(), seed);
+        campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
+        campaign.request_supply({ShipmentId{2}, StockpileId{1}, StockpileId{3}, Resource::fuel, 40});
+        return campaign;
+    }
+    }
+    throw std::logic_error("Unknown demonstration");
+}
 
 std::uint64_t parse_number(std::string_view text, std::string_view option)
 {
@@ -88,11 +133,16 @@ int main(int argc, char* argv[])
     std::uint32_t seed = 0;
     std::optional<std::uint64_t> ticks;
     std::optional<std::uint32_t> speed;
-    bool logistics_demo = false;
-    bool maintenance_demo = false;
-    bool realtime = false;
+    std::optional<Demo> demo;
+    bool legacy_realtime = false;
     bool events = false;
     try {
+        const auto select_demo = [&](Demo selection) {
+            if (demo && demo != selection) {
+                throw std::invalid_argument("Select one demonstration scenario");
+            }
+            demo = selection;
+        };
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
             if (option == "--help") {
@@ -100,26 +150,30 @@ int main(int argc, char* argv[])
                 return 0;
             }
             if (option == "--logistics-demo") {
-                logistics_demo = true;
+                select_demo(Demo::logistics);
                 continue;
             }
             if (option == "--maintenance-demo") {
-                maintenance_demo = true;
+                select_demo(Demo::maintenance);
                 continue;
             }
             if (option == "--realtime") {
-                realtime = true;
+                legacy_realtime = true;
                 continue;
             }
             if (option == "--events") {
                 events = true;
                 continue;
             }
-            if (option != "--seed" && option != "--ticks" && option != "--speed") {
+            if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
             if (++i == argc) {
                 throw std::invalid_argument("Missing value for " + std::string(option));
+            }
+            if (option == "--demo") {
+                select_demo(parse_demo(argv[i]));
+                continue;
             }
             const auto value = parse_number(argv[i], option);
             if (option == "--seed") {
@@ -136,26 +190,13 @@ int main(int argc, char* argv[])
                 speed = static_cast<std::uint32_t>(value);
             }
         }
-        if (speed && !realtime) {
-            throw std::invalid_argument("--speed requires --realtime");
-        }
-        if (logistics_demo && maintenance_demo) {
-            throw std::invalid_argument("Select one demonstration scenario");
-        }
-
-        using namespace openwar;
-        auto campaign = maintenance_demo ? maintenance_example_campaign(seed) :
-            CampaignState(logistics_demo ? logistics_example_scenario() : example_scenario(), seed);
-        if (logistics_demo) {
-            campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
-            campaign.request_supply({ShipmentId{2}, StockpileId{1}, StockpileId{3}, Resource::fuel, 40});
-        }
-        if (realtime) {
-            cli::run_realtime(campaign, speed.value_or(1), ticks, events);
+        auto campaign = make_campaign(demo.value_or(Demo::economy), seed);
+        if (!ticks || speed || legacy_realtime) {
+            openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events);
         } else {
-            campaign.advance_ticks(ticks.value_or(1));
+            campaign.advance_ticks(*ticks);
             if (events) {
-                cli::print_events(campaign);
+                openwar::cli::print_events(campaign);
             }
             report(campaign, seed);
         }

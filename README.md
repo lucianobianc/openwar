@@ -24,9 +24,9 @@ will install the executable. Use `make clean` to remove build outputs.
 ## Campaign foundation
 
 The command-line simulator starts a predefined 3×2 scenario and reports
-elapsed simulated time, sector ownership, terrain, and neighbors. With no
-options, it uses seed 0 and advances one 60-second tick. Use `--ticks 0` to
-inspect the initial state.
+elapsed simulated time and sector ownership. Batch reports include terrain
+and neighbors. The default seed is 0 and each tick advances 60 simulated
+seconds. Use `--ticks 0` to inspect the initial state.
 
 `WorldDefinition` holds the grid and its static geography.
 `ScenarioDefinition` supplies the initial ownership, objective values, and
@@ -34,23 +34,32 @@ tick duration. `CampaignState` owns the current sector state, clock, and a
 seeded MT19937 stream. Each sector uses the ID `y * width + x` and has
 orthogonal geometric neighbors, including across non-traversable terrain.
 
-## Real-time CLI
+## Command-line usage
 
 ```sh
-./openwar --realtime --speed 60 --events --logistics-demo
+./openwar
+./openwar --speed 600
+./openwar --ticks 100
+./openwar --demo maintenance
+./openwar --demo logistics --ticks 100
+./openwar --demo maintenance --speed 600 --ticks 12 --events
 ```
 
-`--realtime` advances whole simulation ticks and refreshes the dashboard
-until Ctrl+C. The default speed is `1`, or one simulated second per real
-second. Use `--speed 60` for one simulated minute per real second or
-`--speed 3600` for one simulated hour per real second. Speed accepts a
-positive 32-bit integer and applies only in real-time mode.
+By default, the economy demonstration opens a real-time terminal dashboard
+and runs until Ctrl+C. Use `--demo economy`, `--demo logistics`, or
+`--demo maintenance` to select a scenario. `--speed N` accepts a positive
+32-bit integer in simulated seconds per real second. The default of 60
+advances one simulated minute each real second.
 
-`--ticks N` still runs a batch when used on its own. With `--realtime`, it
-stops the dashboard after exactly `N` ticks. Add `--events` in either mode to
-see timestamped economy and logistics events. ANSI terminals show the latest
-five events in the dashboard. Redirected output uses plain text and prints
-each event once.
+`--ticks N` runs as fast as possible and prints the final state. Combine it
+with `--speed N` to pace the run in real time and stop at the same tick limit.
+Add `--events` in either mode for timestamped campaign events. ANSI terminals
+show the latest five events in the dashboard. Redirected output uses plain
+text and prints each event once.
+
+Existing scripts can still use the deprecated `--logistics-demo` and
+`--maintenance-demo` aliases. The legacy `--realtime` flag still enables
+pacing with a tick limit and uses the current default speed of 60.
 
 ## Economy
 
@@ -69,8 +78,8 @@ an in-memory ledger in application order.
 
 ## Logistics
 
-Run `./openwar --logistics-demo --ticks 6` to deliver 80 liters of fuel to
-a second depot. Run `./openwar --logistics-demo --ticks 16 --events` to see
+Run `./openwar --demo logistics --ticks 6` to deliver 80 liters of fuel to
+a second depot. Run `./openwar --demo logistics --ticks 16 --events` to see
 another 40 liters delivered after the refinery replenishes the origin.
 The scenario defines directed transport links separately
 from the sector grid. Carriers take the shortest usable route, spend fuel
@@ -88,11 +97,11 @@ Produced supplies become available for dispatch on the following tick.
 
 ## Forces and maintenance
 
-Run `./openwar --maintenance-demo --ticks 12 --events` to follow a damaged
+Run `./openwar --demo maintenance --ticks 12 --events` to follow a damaged
 Apache from a parts shortage through a logistics delivery, repair, and
 scheduled maintenance. The demo also shows EAST and WEST inventories and a
 reserve Hind arriving at its designated entry. Try `--ticks 1` to inspect
-the blocked job or `--realtime --speed 3600` to watch the cycle.
+the blocked job or `--speed 3600` to watch the cycle.
 
 Scenarios define unit hierarchies, individual equipment, compatible
 workshops, service profiles, and finite reserve equipment. Jobs queue by
