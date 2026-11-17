@@ -43,13 +43,13 @@ Maintain a single authoritative world state. Separate simulation logic from pres
 
 The architecture must eventually support strategic, operational, and tactical simulation at different update frequencies, without duplicating or contradicting world state.
 
-For the current milestone, implement only the foundational systems. Do not create speculative infrastructure for future subsystems.
+Use the milestone sequence in the README to determine implementation scope. Do not create speculative infrastructure for future subsystems.
 
 Simulation time must be independent of rendering frame rates and wall-clock execution speed.
 
 Ensure reproducible behavior through configurable random seeds and deterministic update ordering.
 
-## First milestone: simulation foundation
+## M0: simulation foundation
 
 Implement the following:
 
@@ -64,7 +64,7 @@ Implement the following:
 
 Follow the specifications in `docs/TERRITORY.md`, but implement only the structures and behavior necessary for this milestone.
 
-Do not implement logistics, combat, aircraft, strategic AI, graphics, or gameplay yet.
+Logistics, combat, aircraft, strategic AI, graphics, and gameplay are outside M0.
 
 ## Development process
 
@@ -72,7 +72,7 @@ Before implementation:
 
 1. Review both design documents completely.
 2. Inspect the existing repository and its build configuration.
-3. Identify ambiguities that directly affect the first milestone.
+3. Identify ambiguities that directly affect the current milestone.
 4. Present a concise implementation plan.
 5. Resolve relevant ambiguities before proceeding.
 

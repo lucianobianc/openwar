@@ -45,6 +45,27 @@ void report(const openwar::CampaignState& campaign, std::uint32_t seed)
         }
         std::cout << '\n';
     }
+
+    for (const auto& [id, stock] : campaign.stockpiles()) {
+        std::cout << "Stockpile " << static_cast<std::uint32_t>(id)
+                  << " in sector " << static_cast<std::uint32_t>(stock.sector)
+                  << " (" << openwar::faction_name(stock.owner) << ")\n";
+        for (std::size_t i = 0; i < stock.quantity.size(); ++i) {
+            if (stock.capacity[i] != 0) {
+                std::cout << "  " << openwar::resource_name(static_cast<openwar::Resource>(i))
+                          << ": " << stock.quantity[i] << '/' << stock.capacity[i] << '\n';
+            }
+        }
+    }
+    for (const auto& state : campaign.installations()) {
+        const auto& installation = state.installation;
+        std::cout << "Installation " << static_cast<std::uint32_t>(installation.id)
+                  << " (" << installation.name << "), stockpile "
+                  << static_cast<std::uint32_t>(installation.stockpile)
+                  << ", work: " << state.work << '/'
+                  << std::uint64_t{installation.recipe.intervals_per_batch} * 100 << '\n';
+    }
+    std::cout << "Economy transactions: " << campaign.economy_ledger().size() << '\n';
 }
 
 }  // namespace

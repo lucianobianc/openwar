@@ -168,6 +168,83 @@ void test_reproducibility()
     }
 }
 
+void test_economy()
+{
+    constexpr StockpileId west{1};
+    constexpr StockpileId east{2};
+    constexpr InstallationId refinery{2};
+    constexpr auto crude = static_cast<std::size_t>(Resource::crude_oil);
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr auto reserve = static_cast<std::size_t>(Resource::oil_reserve);
+    constexpr auto materials = static_cast<std::size_t>(Resource::materials);
+
+    auto scenario = example_scenario();
+    auto reversed = scenario;
+    std::ranges::reverse(reversed.installations);
+    CampaignState first(scenario, 42);
+    CampaignState second(reversed, 42);
+    first.advance_ticks(30);
+    second.advance_ticks(4);
+    require(second.economy_ledger().empty(), "Production ran before the first interval");
+    second.advance_ticks(1);
+    require(second.installations()[1].work == 100, "Refinery did not use local output in ID order");
+    second.advance_ticks(25);
+    require(std::ranges::equal(first.economy_ledger(), second.economy_ledger()),
+            "Economy depends on tick batching or scenario input order");
+    require(first.next_random() == second.next_random(), "Economy RNG depends on tick batching");
+    const auto& stock = first.stockpiles().at(west);
+    require(stock.quantity[reserve] == 0 && stock.quantity[crude] == 1000 &&
+            stock.quantity[fuel] == 1700 && first.installations()[1].work == 0,
+            "Finite extraction or refinery output capacity failed");
+    require(first.stockpiles().at(east).quantity[materials] == 0,
+            "Factory failed to consume finite materials");
+
+    const auto before = stock.quantity;
+    const auto ledger_size = first.economy_ledger().size();
+    ResourceAmounts demand{};
+    demand[fuel] = 100;
+    demand[crude] = 1001;
+    require(!first.consume(west, demand) && stock.quantity == before &&
+            first.economy_ledger().size() == ledger_size, "Failed consumption was not atomic");
+    demand[crude] = 0;
+    require(first.consume(west, demand) && stock.quantity[fuel] == 1600 &&
+            first.economy_ledger().back() == EconomyEntry{30, west, std::nullopt, demand, {}},
+            "Consumption did not debit and journal the request");
+    first.advance_ticks(10);
+    require(stock.quantity[fuel] == 2400 && stock.quantity[crude] == 0,
+            "Refinery did not resume after space became available");
+    first.advance_ticks(1'000'000'000);
+    require(stock.quantity[fuel] == 2400, "Depleted field created more fuel");
+
+    CampaignState interrupted(scenario, 42);
+    interrupted.advance_ticks(5);
+    interrupted.set_operating_conditions(refinery, false, 1, 100);
+    interrupted.advance_ticks(10);
+    interrupted.set_operating_conditions(refinery, true, 0, 100);
+    interrupted.advance_ticks(5);
+    interrupted.set_operating_conditions(refinery, true, 1, 24);
+    interrupted.advance_ticks(5);
+    require(interrupted.installations()[1].work == 100, "Blocked installation advanced work");
+    interrupted.set_operating_conditions(refinery, true, 1, 50);
+    interrupted.advance_ticks(5);
+    require(interrupted.installations()[1].work == 150, "Integrity did not scale productivity");
+    interrupted.advance_ticks(5);
+    require(interrupted.stockpiles().at(west).quantity[fuel] == 900,
+            "Refinery lost partial progress during downtime");
+
+    scenario.stockpiles[0].quantity[fuel] = 2401;
+    require_throws<std::invalid_argument>([&] { CampaignState invalid(scenario, 42); },
+                                          "Stock capacity validation failed");
+    scenario = example_scenario();
+    scenario.installations[0].recipe.inputs = {};
+    require_throws<std::invalid_argument>([&] { CampaignState invalid(scenario, 42); },
+                                          "Recipe with free inputs accepted");
+    scenario = example_scenario();
+    scenario.installations[0].stockpile = east;
+    require_throws<std::invalid_argument>([&] { CampaignState invalid(scenario, 42); },
+                                          "Cross-faction installation stock accepted");
+}
+
 }  // namespace
 
 int main()
@@ -176,4 +253,5 @@ int main()
     test_topology();
     test_initialization();
     test_reproducibility();
+    test_economy();
 }

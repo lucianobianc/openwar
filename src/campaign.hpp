@@ -1,9 +1,14 @@
 #ifndef OPENWAR_CAMPAIGN_HPP
 #define OPENWAR_CAMPAIGN_HPP
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <random>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -59,11 +64,66 @@ struct InitialSectorState {
     SectorState state;
 };
 
+enum class Resource { oil_reserve, crude_oil, fuel, materials, spare_parts, supplies, count };
+using ResourceAmounts = std::array<std::uint64_t, static_cast<std::size_t>(Resource::count)>;
+enum class StockpileId : std::uint32_t {};
+enum class InstallationId : std::uint32_t {};
+
+std::string_view resource_name(Resource resource);
+
+struct Stockpile {
+    StockpileId id;
+    SectorId sector;
+    FactionId owner;
+    ResourceAmounts capacity{};
+    ResourceAmounts quantity{};
+};
+
+struct ProductionRecipe {
+    ResourceAmounts inputs{};
+    ResourceAmounts outputs{};
+    std::uint32_t intervals_per_batch = 1;
+    std::uint32_t workers_required = 1;
+    bool requires_power = true;
+};
+
+struct Installation {
+    InstallationId id;
+    StockpileId stockpile;
+    std::string name;
+    FactionId operator_faction;
+    ProductionRecipe recipe;
+    std::uint32_t workers = 1;
+    bool has_power = true;
+    std::uint32_t integrity = 100;
+};
+
+struct InstallationState {
+    Installation installation;
+    // Each interval contributes up to 100 work points, scaled by integrity.
+    std::uint64_t work = 0;
+};
+
+struct EconomyEntry {
+    std::uint64_t tick;
+    StockpileId stockpile;
+    // Present for production. Direct consumption has no producing installation.
+    std::optional<InstallationId> producer;
+    ResourceAmounts consumed;
+    ResourceAmounts produced;
+
+    bool operator==(const EconomyEntry&) const = default;
+};
+
 struct ScenarioDefinition {
     WorldDefinition world;
     // Unlisted sectors start neutral.
     std::vector<InitialSectorState> initial_sectors;
     std::uint32_t tick_seconds = 60;
+    std::uint32_t economy_interval_ticks = 5;
+    std::uint32_t minimum_integrity = 25;
+    std::vector<Stockpile> stockpiles{};
+    std::vector<Installation> installations{};
 };
 
 class SimulationClock {
@@ -87,12 +147,26 @@ public:
     const SectorState& sector_state(SectorId sector) const;
     void advance_ticks(std::uint64_t ticks);
     std::uint32_t next_random();
+    const std::map<StockpileId, Stockpile>& stockpiles() const { return stockpiles_; }
+    std::span<const InstallationState> installations() const { return installations_; }
+    std::span<const EconomyEntry> economy_ledger() const { return economy_ledger_; }
+    bool consume(StockpileId stockpile, const ResourceAmounts& amounts);
+    void set_operating_conditions(InstallationId id, bool has_power, std::uint32_t workers,
+                                  std::uint32_t integrity);
 
 private:
+    void initialize_economy(ScenarioDefinition& scenario);
+    bool update_economy(std::uint64_t tick);
+
     WorldDefinition world_;
     SimulationClock clock_;
     std::vector<SectorState> sector_states_;
     std::mt19937 random_;
+    std::uint32_t economy_interval_ticks_;
+    std::uint32_t minimum_integrity_;
+    std::map<StockpileId, Stockpile> stockpiles_;
+    std::vector<InstallationState> installations_;
+    std::vector<EconomyEntry> economy_ledger_;
 };
 
 ScenarioDefinition example_scenario();

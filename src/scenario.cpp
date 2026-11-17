@@ -20,7 +20,25 @@ ScenarioDefinition example_scenario()
         {world.sector_id(2, 0), {FactionId::east, 1}},
         {world.sector_id(2, 1), {FactionId::east}},
     };
-    return {std::move(world), std::move(initial_sectors)};
+    const auto west_site = world.sector_id(0, 0);
+    const auto east_site = world.sector_id(2, 0);
+    ScenarioDefinition scenario{std::move(world), std::move(initial_sectors)};
+    constexpr StockpileId west_stock{1};
+    constexpr StockpileId east_stock{2};
+    // Resource order: oil reserve, crude oil, fuel, materials, parts, supplies.
+    scenario.stockpiles = {
+        {west_stock, west_site, FactionId::west, {3000, 1000, 2400}, {3000, 0, 100}},
+        {east_stock, east_site, FactionId::east, {0, 0, 0, 60, 30, 30}, {0, 0, 0, 60}}
+    };
+    scenario.installations = {
+        {InstallationId{1}, west_stock, "Oil field", FactionId::west,
+         {{1000}, {0, 1000}, 1}},
+        {InstallationId{2}, west_stock, "Refinery", FactionId::west,
+         {{0, 1000}, {0, 0, 800}, 2}},
+        {InstallationId{3}, east_stock, "Factory", FactionId::east,
+         {{0, 0, 0, 20}, {0, 0, 0, 0, 5, 10}, 2}}
+    };
+    return scenario;
 }
 
 }  // namespace openwar

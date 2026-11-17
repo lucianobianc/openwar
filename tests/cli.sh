@@ -18,6 +18,13 @@ output=$("$openwar" --seed 4294967295 --ticks 0)
 output=$(printf '%s' "$output" | tr -d '\r')
 printf '%s\n' "$output" | grep -Fx 'Seed: 4294967295'
 printf '%s\n' "$output" | grep -Fx 'Elapsed seconds: 0'
+printf '%s\n' "$output" | grep -Fx 'Economy transactions: 0'
+
+output=$("$openwar" --ticks 10)
+output=$(printf '%s' "$output" | tr -d '\r')
+printf '%s\n' "$output" | grep -Fx '  fuel (L): 900/2400'
+printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
+printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
 printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--seed UINT32] [--ticks UINT64]'
 

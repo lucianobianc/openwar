@@ -96,7 +96,9 @@ void SimulationClock::advance(std::uint64_t ticks)
 
 CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
     : world_(std::move(scenario.world)), clock_(scenario.tick_seconds),
-      sector_states_(world_.sectors().size()), random_(seed)
+      sector_states_(world_.sectors().size()), random_(seed),
+      economy_interval_ticks_(scenario.economy_interval_ticks),
+      minimum_integrity_(scenario.minimum_integrity)
 {
     std::vector<bool> assigned(sector_states_.size());
     for (const auto& entry : scenario.initial_sectors) {
@@ -108,6 +110,7 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
         assigned[index] = true;
         sector_states_[index] = entry.state;
     }
+    initialize_economy(scenario);
 }
 
 const SectorState& CampaignState::sector_state(SectorId sector) const
@@ -117,7 +120,25 @@ const SectorState& CampaignState::sector_state(SectorId sector) const
 
 void CampaignState::advance_ticks(std::uint64_t ticks)
 {
-    clock_.advance(ticks);
+    auto target = clock_;
+    target.advance(ticks);
+
+    if (!installations_.empty()) {
+        while (clock_.tick() < target.tick()) {
+            const auto step = economy_interval_ticks_ - clock_.tick() % economy_interval_ticks_;
+            if (step > target.tick() - clock_.tick()) {
+                break;
+            }
+            const auto boundary = clock_.tick() + step;
+            const bool changed = update_economy(boundary);
+            clock_.advance(step);
+            // With constant conditions, a completely idle interval cannot unblock itself.
+            if (!changed) {
+                break;
+            }
+        }
+    }
+    clock_ = target;
 }
 
 std::uint32_t CampaignState::next_random()
