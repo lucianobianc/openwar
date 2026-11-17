@@ -87,12 +87,18 @@ void CampaignState::initialize_economy(ScenarioDefinition& scenario)
 
 bool CampaignState::consume(StockpileId id, const ResourceAmounts& amounts)
 {
+    return consume_at(id, amounts, clock_.tick());
+}
+
+bool CampaignState::consume_at(StockpileId id, const ResourceAmounts& amounts, std::uint64_t tick,
+                               std::optional<EquipmentId> equipment)
+{
     auto& stock = stockpiles_.at(id);
     if (!can_apply(stock, amounts, {})) {
         return false;
     }
     if (!empty(amounts)) {
-        economy_ledger_.push_back({clock_.tick(), id, std::nullopt, amounts, {}});
+        economy_ledger_.push_back({tick, id, std::nullopt, amounts, {}, {}, equipment});
         apply(stock, amounts, {});
     }
     return true;

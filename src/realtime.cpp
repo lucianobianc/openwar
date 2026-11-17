@@ -118,20 +118,39 @@ std::string_view logistics_event_name(LogisticsEventKind kind)
 struct EventCursor {
     std::size_t logistics = 0;
     std::size_t economy = 0;
+    std::size_t forces = 0;
 
     template<class Output>
     void drain(const CampaignState& campaign, Output output)
     {
         const auto transport = campaign.logistics_log();
         const auto transactions = campaign.economy_ledger();
-        while (logistics < transport.size() || economy < transactions.size()) {
+        const auto equipment = campaign.forces_log();
+        while (logistics < transport.size() || economy < transactions.size() || forces < equipment.size()) {
             // Shipment debits and credits already have corresponding logistics events.
             if (economy < transactions.size() && transactions[economy].shipment) {
                 ++economy;
                 continue;
             }
             std::ostringstream event;
-            if (logistics < transport.size() &&
+            if (forces < equipment.size() &&
+                (logistics == transport.size() || equipment[forces].tick < transport[logistics].tick) &&
+                (economy == transactions.size() || equipment[forces].tick < transactions[economy].tick)) {
+                const auto& entry = equipment[forces++];
+                event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
+                      << "s): equipment " << static_cast<std::uint32_t>(entry.equipment) << ' '
+                      << equipment_status_name(entry.status);
+                if (entry.service) {
+                    event << " (" << service_name(*entry.service) << ')';
+                }
+                if (entry.kind == ForcesEventKind::service_started) {
+                    event << " started";
+                } else if (entry.kind == ForcesEventKind::service_completed) {
+                    event << " completed";
+                } else if (entry.kind == ForcesEventKind::arrival_delayed) {
+                    event << " (entry unavailable)";
+                }
+            } else if (logistics < transport.size() &&
                 (economy == transactions.size() || transport[logistics].tick <= transactions[economy].tick)) {
                 const auto& entry = transport[logistics++];
                 event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
@@ -148,6 +167,9 @@ struct EventCursor {
                     event << ", installation " << static_cast<std::uint32_t>(*entry.producer) << " completed batch";
                 } else {
                     event << " consumed stock";
+                    if (entry.equipment) {
+                        event << " for equipment " << static_cast<std::uint32_t>(*entry.equipment);
+                    }
                 }
                 for (std::size_t i = 0; i < entry.consumed.size(); ++i) {
                     if (entry.consumed[i] || entry.produced[i]) {
@@ -177,6 +199,12 @@ std::string dashboard(const CampaignState& campaign, std::uint32_t speed,
     frame << "Sectors | WEST: " << sectors[1] << " | EAST: " << sectors[2]
           << " | NEUTRAL: " << sectors[0] << '\n';
 
+    report_forces(frame, campaign, true);
+    if (!campaign.units().empty()) {
+        for (const auto& event : recent_events) {
+            frame << event << '\n';
+        }
+    }
     for (const auto& [id, stock] : campaign.stockpiles()) {
         frame << "Stockpile " << static_cast<std::uint32_t>(id) << " (" << faction_name(stock.owner) << ")\n";
         for (std::size_t i = 0; i < stock.quantity.size(); ++i) {
@@ -201,13 +229,47 @@ std::string dashboard(const CampaignState& campaign, std::uint32_t speed,
         frame << "Shipment " << static_cast<std::uint32_t>(id) << ": "
               << shipment_status_name(shipment.status) << ", cargo on carrier: " << shipment.cargo << '\n';
     }
-    for (const auto& event : recent_events) {
-        frame << event << '\n';
+    if (campaign.units().empty()) {
+        for (const auto& event : recent_events) {
+            frame << event << '\n';
+        }
     }
     return frame.str();
 }
 
 }  // namespace
+
+void report_forces(std::ostream& out, const CampaignState& campaign, bool compact)
+{
+    for (const auto& [id, unit] : campaign.units()) {
+        const auto readiness = campaign.unit_readiness(id);
+        out << faction_name(unit.faction) << ' ' << unit.name << " | sector "
+            << static_cast<std::uint32_t>(unit.sector) << " | ready "
+            << readiness.ready << '/' << readiness.active << '\n';
+        for (const auto& [item_id, item] : campaign.equipment()) {
+            if (item.assignment.unit != id || (compact && item.status == EquipmentStatus::available)) {
+                continue;
+            }
+            const auto& type = campaign.equipment_types().at(item.assignment.type);
+            out << "  Equipment " << static_cast<std::uint32_t>(item_id) << ' ' << type.name << ": "
+                << equipment_status_name(item.status);
+            if (item.job) {
+                out << " | " << service_name(item.job->kind) << ' ' << item.job->work_seconds
+                    << '/' << service_seconds(type, item.job->kind) << 's';
+            }
+            if (item.damage) {
+                out << " | damage " << item.damage << '%';
+            }
+            if (item.operating_seconds) {
+                out << " | operated " << item.operating_seconds << 's';
+            }
+            if (item.reinforcement_eta) {
+                out << " | ETA tick " << *item.reinforcement_eta << " from " << item.assignment.reserve_source;
+            }
+            out << '\n';
+        }
+    }
+}
 
 void print_events(const CampaignState& campaign)
 {

@@ -71,3 +71,14 @@ reject --realtime --speed 1.5
 reject --realtime --speed 4294967296
 reject --realtime --speed
 reject --realtime --ticks 18446744073709551615
+
+service=$("$openwar" --maintenance-demo --ticks 12 --events)
+service=$(printf '%s\n' "$service" | tr -d '\r')
+printf '%s\n' "$service" | grep -Fx 'Event tick 1 (60s): equipment 1 waiting for resources (repair)'
+printf '%s\n' "$service" | grep -Fx 'Event tick 6 (360s): stockpile 1 consumed stock for equipment 1 | spare parts -2/+0'
+printf '%s\n' "$service" | grep -Fx 'Event tick 9 (540s): equipment 1 repair (repair) completed'
+printf '%s\n' "$service" | grep -Fx 'Event tick 12 (720s): equipment 1 available'
+printf '%s\n' "$service" | grep -Fx 'WEST West air squadron | sector 0 | ready 1/1'
+printf '%s\n' "$service" | grep -Fx 'EAST East air squadron | sector 2 | ready 2/2'
+paced=$("$openwar" --maintenance-demo --realtime --speed 3600 --ticks 12 --events)
+test "$(printf '%s\n' "$service" | grep '^Event tick ')" = "$(printf '%s\n' "$paced" | tr -d '\r' | grep '^Event tick ')"

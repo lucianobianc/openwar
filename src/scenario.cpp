@@ -53,4 +53,71 @@ ScenarioDefinition logistics_example_scenario()
     return scenario;
 }
 
+CampaignState maintenance_example_campaign(std::uint32_t seed)
+{
+    auto scenario = example_scenario();
+    constexpr StockpileId west_stock{1};
+    constexpr StockpileId east_stock{2};
+    constexpr StockpileId parts_depot{3};
+    constexpr FacilityId west_shop{1};
+    constexpr FacilityId east_shop{2};
+    constexpr UnitId west_command{1};
+    constexpr UnitId east_command{2};
+    constexpr UnitId west_air{3};
+    constexpr UnitId east_air{4};
+    const auto west = scenario.world.sector_id(0, 0);
+    const auto east = scenario.world.sector_id(2, 0);
+    const auto depot = scenario.world.sector_id(0, 1);
+    const auto part = static_cast<std::size_t>(Resource::spare_parts);
+
+    scenario.stockpiles.front().capacity[part] = 10;
+    Stockpile spare_stock{parts_depot, depot, FactionId::west};
+    spare_stock.capacity[part] = spare_stock.quantity[part] = 3;
+    scenario.stockpiles.push_back(spare_stock);
+    scenario.routes.push_back({RouteId{1}, depot, west, 3});
+    scenario.carriers.push_back({CarrierId{1}, FactionId::west, depot, 10, 10});
+
+    scenario.facilities = {{west_shop, west_stock, 1, 2}, {east_shop, east_stock, 1, 2}};
+    scenario.units = {
+        {west_command, "West formation", FactionId::west, west, {}, west_shop},
+        {east_command, "East formation", FactionId::east, east, {}, east_shop},
+        {west_air, "West air squadron", FactionId::west, west, west_command, west_shop},
+        {east_air, "East air squadron", FactionId::east, east, east_command, east_shop}
+    };
+
+    ServiceProfile preparation{60};
+    preparation.costs[static_cast<std::size_t>(Resource::fuel)] = 5;
+    ServiceProfile scheduled{120};
+    scheduled.costs[part] = 1;
+    ServiceProfile repair{180};
+    repair.costs[part] = 2;
+    const auto add_type = [&](std::uint32_t number, const char* name, FactionId faction,
+                              EquipmentCategory category, UnitId unit) {
+        const EquipmentTypeId type{number};
+        scenario.equipment_types.push_back({
+            type, name, faction, category, preparation, {60}, scheduled, repair, 3600
+        });
+        scenario.equipment.push_back({EquipmentId{number}, type, unit});
+    };
+    using enum EquipmentCategory;
+    add_type(1, "AH-64A Apache", FactionId::west, helicopter, west_air);
+    add_type(2, "M1A1 Abrams", FactionId::west, tank, west_command);
+    add_type(3, "M977 HEMTT", FactionId::west, transport, west_command);
+    add_type(4, "M163 Vulcan", FactionId::west, air_defense_vehicle, west_command);
+    add_type(5, "Stinger team", FactionId::west, air_defense_team, west_command);
+    add_type(6, "Mi-24V/P Hind", FactionId::east, helicopter, east_air);
+    add_type(7, "T-72B", FactionId::east, tank, east_command);
+    add_type(8, "Ural-4320", FactionId::east, transport, east_command);
+    add_type(9, "ZSU-23-4 Shilka", FactionId::east, air_defense_vehicle, east_command);
+    add_type(10, "Igla team", FactionId::east, air_defense_team, east_command);
+    scenario.equipment.front().operating_seconds = 3600;
+    scenario.equipment.push_back({EquipmentId{11}, EquipmentTypeId{6}, east_air, "External air reserve"});
+
+    CampaignState campaign(std::move(scenario), seed);
+    campaign.damage_equipment(EquipmentId{1}, 20);
+    campaign.request_supply({ShipmentId{1}, parts_depot, west_stock, Resource::spare_parts, 3});
+    campaign.authorize_reinforcement(EquipmentId{11}, 8);
+    return campaign;
+}
+
 }  // namespace openwar

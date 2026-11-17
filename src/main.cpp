@@ -13,6 +13,7 @@ namespace {
 constexpr std::string_view usage =
     "Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]\n"
     "               [--realtime [--speed N]] [--events]\n"
+    "  --maintenance-demo  Show forces, supply deliveries, and workshop service.\n"
     "  --realtime  Advance until Ctrl+C or the optional --ticks limit.\n"
     "  --speed N   Positive simulated seconds per real second (default: 1).\n"
     "  --events    Display timestamped economy and logistics events.\n";
@@ -77,6 +78,7 @@ void report(const openwar::CampaignState& campaign, std::uint32_t seed)
                   << openwar::shipment_status_name(shipment.status)
                   << ", cargo on carrier: " << shipment.cargo << '\n';
     }
+    openwar::cli::report_forces(std::cout, campaign);
 }
 
 }  // namespace
@@ -87,6 +89,7 @@ int main(int argc, char* argv[])
     std::optional<std::uint64_t> ticks;
     std::optional<std::uint32_t> speed;
     bool logistics_demo = false;
+    bool maintenance_demo = false;
     bool realtime = false;
     bool events = false;
     try {
@@ -98,6 +101,10 @@ int main(int argc, char* argv[])
             }
             if (option == "--logistics-demo") {
                 logistics_demo = true;
+                continue;
+            }
+            if (option == "--maintenance-demo") {
+                maintenance_demo = true;
                 continue;
             }
             if (option == "--realtime") {
@@ -132,9 +139,13 @@ int main(int argc, char* argv[])
         if (speed && !realtime) {
             throw std::invalid_argument("--speed requires --realtime");
         }
+        if (logistics_demo && maintenance_demo) {
+            throw std::invalid_argument("Select one demonstration scenario");
+        }
 
         using namespace openwar;
-        CampaignState campaign(logistics_demo ? logistics_example_scenario() : example_scenario(), seed);
+        auto campaign = maintenance_demo ? maintenance_example_campaign(seed) :
+            CampaignState(logistics_demo ? logistics_example_scenario() : example_scenario(), seed);
         if (logistics_demo) {
             campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
             campaign.request_supply({ShipmentId{2}, StockpileId{1}, StockpileId{3}, Resource::fuel, 40});

@@ -114,6 +114,7 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
     }
     initialize_economy(scenario);
     initialize_logistics(scenario);
+    initialize_forces(scenario);
 }
 
 const SectorState& CampaignState::sector_state(SectorId sector) const
@@ -128,19 +129,44 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
 
     bool economy_awake = !installations_.empty();
     bool logistics_awake = !shipments_.empty();
-    while (clock_.tick() < target.tick() && (economy_awake || logistics_awake)) {
+    bool forces_awake = !equipment_.empty();
+    while (clock_.tick() < target.tick()) {
         const auto boundary_step = economy_interval_ticks_ - clock_.tick() % economy_interval_ticks_;
-        const auto step = logistics_awake ? 1 : boundary_step;
-        if (step > target.tick() - clock_.tick()) {
+        auto next = target.tick();
+        bool activity_due = logistics_awake || economy_awake || forces_awake;
+        if (logistics_awake || forces_awake) {
+            next = clock_.tick() + 1;
+        } else if (economy_awake && boundary_step <= next - clock_.tick()) {
+            next = clock_.tick() + boundary_step;
+        }
+        if (!forces_awake) {
+            for (const auto& [id, item] : equipment_) {
+                if (item.reinforcement_eta && *item.reinforcement_eta > clock_.tick() &&
+                    *item.reinforcement_eta <= next) {
+                    next = *item.reinforcement_eta;
+                    activity_due = true;
+                }
+            }
+        }
+        if (!activity_due) {
             break;
         }
-        const auto tick = clock_.tick() + step;
+        const auto step = next - clock_.tick();
         // Dispatch can use newly produced supplies starting on the following tick.
-        logistics_awake = logistics_awake && update_logistics(tick);
+        logistics_awake = logistics_awake && update_logistics(next);
         economy_awake = economy_awake || (logistics_awake && !installations_.empty());
+        bool produced_or_worked = false;
         if (economy_awake && step == boundary_step) {
-            economy_awake = update_economy(tick);
+            produced_or_worked = update_economy(next);
+            economy_awake = produced_or_worked;
             logistics_awake = logistics_awake || (economy_awake && !shipments_.empty());
+        }
+        if (!equipment_.empty() && (forces_awake || logistics_awake || produced_or_worked ||
+            std::ranges::any_of(equipment_, [next](const auto& entry) {
+                return entry.second.reinforcement_eta == next;
+            }))) {
+            forces_awake = update_forces(next);
+            economy_awake = economy_awake || (forces_awake && !installations_.empty());
         }
         clock_.advance(step);
     }

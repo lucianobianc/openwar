@@ -444,6 +444,120 @@ void test_realtime_pacing()
     }
 }
 
+void test_forces_and_maintenance()
+{
+    constexpr EquipmentId apache{1};
+    constexpr EquipmentId abrams{2};
+    constexpr EquipmentId truck{3};
+    constexpr EquipmentId hind_reserve{11};
+    constexpr StockpileId west_stock{1};
+    constexpr auto parts = static_cast<std::size_t>(Resource::spare_parts);
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    auto batch = maintenance_example_campaign(42);
+    auto campaign = maintenance_example_campaign(42);
+    const auto& aircraft = campaign.equipment().at(apache);
+    const auto& reserve = campaign.equipment().at(hind_reserve);
+    require(campaign.equipment_types().size() == 10 && campaign.units().size() == 4 &&
+            campaign.equipment().size() == 11 &&
+            campaign.units().at(aircraft.assignment.unit).faction == FactionId::west &&
+            campaign.units().at(aircraft.assignment.unit).parent == UnitId{1},
+            "Scenario did not establish stable equipment ownership and hierarchy");
+    require(reserve.status == EquipmentStatus::in_transit && reserve.reinforcement_eta == 8 &&
+            !campaign.authorize_reinforcement(hind_reserve, 9),
+            "Reserved reinforcement was authorized more than once");
+    require(!campaign.reserve_equipment(apache) && !campaign.begin_operation(apache),
+            "Damaged aircraft was eligible to operate");
+    campaign.advance_ticks(5);
+    require(aircraft.status == EquipmentStatus::awaiting_parts && aircraft.job &&
+            !aircraft.job->started && aircraft.job->work_seconds == 0,
+            "Repair progressed before the parts delivery");
+    campaign.advance_ticks(1);
+    require(aircraft.status == EquipmentStatus::repair && aircraft.job->started &&
+            campaign.stockpiles().at(west_stock).quantity[parts] == 1,
+            "Delivered parts did not start and fund the repair");
+    campaign.advance_ticks(2);
+    require(aircraft.damage != 0 && aircraft.job->work_seconds == 120 &&
+            reserve.status == EquipmentStatus::available && !reserve.reinforcement_eta,
+            "Repair or reinforcement completed on the wrong tick");
+    campaign.advance_ticks(1);
+    require(aircraft.status == EquipmentStatus::maintenance && aircraft.damage == 0,
+            "Due maintenance did not follow repair");
+    campaign.advance_ticks(3);
+    require(aircraft.status == EquipmentStatus::available && !aircraft.job &&
+            aircraft.last_service_seconds == 3600 &&
+            campaign.stockpiles().at(west_stock).quantity[parts] == 0,
+            "Scheduled service did not complete at its configured duration");
+    batch.advance_ticks(12);
+    require(std::ranges::equal(batch.forces_log(), campaign.forces_log()) &&
+            std::ranges::equal(batch.economy_ledger(), campaign.economy_ledger()) &&
+            std::ranges::equal(batch.logistics_log(), campaign.logistics_log()),
+            "Service or reinforcement events depend on tick batching");
+    const auto debits = std::ranges::count(campaign.economy_ledger(), std::optional{apache},
+                                           &EconomyEntry::equipment);
+    require(debits == 2, "Service costs were charged more than once per job");
+    require(campaign.reserve_equipment(apache) && campaign.prepare_equipment(apache),
+            "Repaired aircraft could not be prepared");
+    campaign.advance_ticks(2);
+    require(campaign.begin_operation(apache), "Prepared aircraft could not operate");
+    campaign.advance_ticks(1);
+    require(campaign.finish_operation(apache) && aircraft.operating_seconds == 3660,
+            "Aircraft return did not retain operating time");
+    campaign.advance_ticks(2);
+    require(aircraft.status == EquipmentStatus::preparing && !campaign.reserve_equipment(apache),
+            "Aircraft skipped its post-operation preparation");
+    campaign.advance_ticks(2);
+    require(aircraft.status == EquipmentStatus::available,
+            "Aircraft did not complete its post-operation preparation");
+
+    auto queue = maintenance_example_campaign(42);
+    queue.lose_equipment(apache);
+    require(queue.reserve_equipment(abrams) && !queue.reserve_equipment(abrams) &&
+            queue.cancel_equipment_reservation(abrams) && queue.reserve_equipment(abrams) &&
+            queue.prepare_equipment(abrams) && !queue.prepare_equipment(abrams) &&
+            queue.reserve_equipment(truck) && queue.prepare_equipment(truck),
+            "Equipment reservation or preparation admitted incompatible assignments");
+    queue.advance_ticks(1);
+    require(queue.equipment().at(truck).status == EquipmentStatus::awaiting_crew &&
+            queue.stockpiles().at(west_stock).quantity[fuel] == 95,
+            "Both jobs used the same maintenance bay");
+    queue.set_facility_conditions(FacilityId{1}, true, 0);
+    queue.advance_ticks(2);
+    require(queue.equipment().at(abrams).job->work_seconds == 0 &&
+            queue.stockpiles().at(west_stock).quantity[fuel] == 95,
+            "A job advanced or spent resources without technicians");
+    queue.set_facility_conditions(FacilityId{1}, true, 2);
+    queue.advance_ticks(2);
+    require(queue.begin_operation(abrams) && !queue.begin_operation(abrams), "Prepared equipment could not start");
+    queue.advance_ticks(1);
+    require(queue.equipment().at(abrams).operating_seconds == 60 && queue.finish_operation(abrams),
+            "Operation did not accumulate simulated usage");
+    queue.advance_ticks(2);
+    require(queue.equipment().at(abrams).status == EquipmentStatus::preparing &&
+            !queue.reserve_equipment(abrams), "Return bypassed preparation after inspection");
+    queue.advance_ticks(2);
+    require(queue.equipment().at(abrams).status == EquipmentStatus::available,
+            "Turnaround did not restore availability");
+    require(queue.lose_equipment(abrams) && !queue.lose_equipment(abrams) &&
+            !queue.damage_equipment(abrams, 10) && !queue.reserve_equipment(abrams),
+            "Permanent loss could be repeated or reversed");
+
+    auto delayed = maintenance_example_campaign(42);
+    delayed.set_facility_conditions(FacilityId{2}, false, 2);
+    delayed.advance_ticks(1'000);
+    require(delayed.equipment().at(hind_reserve).status == EquipmentStatus::in_transit &&
+            delayed.equipment().at(hind_reserve).arrival_delayed, "Closed entry received a reinforcement");
+    delayed.set_facility_conditions(FacilityId{2}, true, 2);
+    delayed.advance_ticks(1);
+    require(delayed.equipment().at(hind_reserve).status == EquipmentStatus::available,
+            "Reopened entry did not receive the reinforcement");
+
+    auto invalid = example_scenario();
+    invalid.units = {{UnitId{1}, "West", FactionId::west, SectorId{0}, UnitId{2}},
+                     {UnitId{2}, "East", FactionId::east, SectorId{2}}};
+    require_throws<std::invalid_argument>([&] { CampaignState state(invalid, 42); },
+                                          "Cross-faction organizational ownership accepted");
+}
+
 }  // namespace
 
 int main()
@@ -455,4 +569,5 @@ int main()
     test_economy();
     test_logistics();
     test_realtime_pacing();
+    test_forces_and_maintenance();
 }

@@ -71,6 +71,7 @@ enum class InstallationId : std::uint32_t {};
 enum class RouteId : std::uint32_t {};
 enum class CarrierId : std::uint32_t {};
 enum class ShipmentId : std::uint32_t {};
+enum class EquipmentId : std::uint32_t {};
 
 std::string_view resource_name(Resource resource);
 
@@ -116,6 +117,7 @@ struct EconomyEntry {
     ResourceAmounts consumed;
     ResourceAmounts produced;
     std::optional<ShipmentId> shipment{};
+    std::optional<EquipmentId> equipment{};
 
     bool operator==(const EconomyEntry&) const = default;
 };
@@ -175,6 +177,99 @@ struct LogisticsEvent {
     bool operator==(const LogisticsEvent&) const = default;
 };
 
+enum class UnitId : std::uint32_t {};
+enum class EquipmentTypeId : std::uint32_t {};
+enum class FacilityId : std::uint32_t {};
+enum class EquipmentCategory { helicopter, tank, transport, air_defense_vehicle, air_defense_team };
+enum class ServiceKind { preparation, inspection, scheduled, repair };
+enum class EquipmentStatus {
+    available, reserved, preparing, ready, in_operation, returning, inspection, maintenance,
+    repair, awaiting_parts, awaiting_crew, grounded, reserve, in_transit, lost
+};
+
+struct ServiceProfile {
+    std::uint32_t seconds = 60;
+    ResourceAmounts costs{};
+    std::uint32_t technicians = 1;
+};
+
+struct EquipmentType {
+    EquipmentTypeId id;
+    std::string name;
+    FactionId faction;
+    EquipmentCategory category;
+    ServiceProfile preparation;
+    ServiceProfile inspection;
+    ServiceProfile scheduled;
+    ServiceProfile repair;
+    std::uint32_t service_interval_seconds;
+};
+
+struct MaintenanceFacility {
+    FacilityId id;
+    StockpileId stockpile;
+    std::uint32_t bays;
+    std::uint32_t technicians;
+    bool operational = true;
+    std::vector<EquipmentTypeId> supported_types{};  // Empty means all compatible types.
+};
+
+struct MilitaryUnit {
+    UnitId id;
+    std::string name;
+    FactionId faction;
+    SectorId sector;
+    std::optional<UnitId> parent{};
+    std::optional<FacilityId> facility{};
+};
+
+struct UnitReadiness {
+    std::size_t active = 0;
+    std::size_t ready = 0;
+};
+
+struct EquipmentAssignment {
+    EquipmentId id;
+    EquipmentTypeId type;
+    UnitId unit;
+    std::string reserve_source{};
+    std::uint64_t operating_seconds = 0;
+};
+
+struct ServiceJob {
+    ServiceKind kind;
+    std::uint64_t requested_tick;
+    std::uint32_t work_seconds = 0;
+    bool started = false;
+};
+
+struct Equipment {
+    EquipmentAssignment assignment;
+    EquipmentStatus status = EquipmentStatus::available;
+    std::uint64_t operating_seconds = 0;
+    std::uint64_t last_service_seconds = 0;
+    std::uint32_t damage = 0;
+    std::optional<ServiceJob> job{};
+    std::optional<std::uint64_t> reinforcement_eta{};
+    bool arrival_delayed = false;
+    bool needs_turnaround = false;
+};
+
+enum class ForcesEventKind { status, service_started, service_completed, arrival_delayed };
+
+struct ForcesEvent {
+    std::uint64_t tick;
+    EquipmentId equipment;
+    EquipmentStatus status;
+    std::optional<ServiceKind> service{};
+    ForcesEventKind kind = ForcesEventKind::status;
+    bool operator==(const ForcesEvent&) const = default;
+};
+
+std::string_view equipment_status_name(EquipmentStatus status);
+std::string_view service_name(ServiceKind kind);
+std::uint32_t service_seconds(const EquipmentType& type, ServiceKind kind);
+
 struct ScenarioDefinition {
     WorldDefinition world;
     // Unlisted sectors start neutral.
@@ -188,6 +283,10 @@ struct ScenarioDefinition {
     std::vector<Carrier> carriers{};
     std::uint32_t loading_ticks = 1;
     std::uint32_t unloading_ticks = 1;
+    std::vector<EquipmentType> equipment_types{};
+    std::vector<MaintenanceFacility> facilities{};
+    std::vector<MilitaryUnit> units{};
+    std::vector<EquipmentAssignment> equipment{};
 };
 
 class SimulationClock {
@@ -225,16 +324,36 @@ public:
     const auto& shipments() const { return shipments_; }
     const auto& carriers() const { return carriers_; }
     std::span<const LogisticsEvent> logistics_log() const { return logistics_log_; }
+    const auto& units() const { return units_; }
+    const auto& equipment() const { return equipment_; }
+    const auto& equipment_types() const { return equipment_types_; }
+    UnitReadiness unit_readiness(UnitId id) const;
+    std::span<const ForcesEvent> forces_log() const { return forces_log_; }
+    bool reserve_equipment(EquipmentId id);
+    bool cancel_equipment_reservation(EquipmentId id);
+    bool prepare_equipment(EquipmentId id);
+    bool begin_operation(EquipmentId id);
+    bool finish_operation(EquipmentId id);
+    bool damage_equipment(EquipmentId id, std::uint32_t damage);
+    bool lose_equipment(EquipmentId id);
+    bool authorize_reinforcement(EquipmentId id, std::uint64_t eta);
+    void set_facility_conditions(FacilityId id, bool operational, std::uint32_t technicians);
 
 private:
     void initialize_economy(ScenarioDefinition& scenario);
     bool update_economy(std::uint64_t tick);
+    bool consume_at(StockpileId id, const ResourceAmounts& amounts, std::uint64_t tick,
+                    std::optional<EquipmentId> equipment = {});
     void initialize_logistics(const ScenarioDefinition& scenario);
     bool update_logistics(std::uint64_t tick);
     bool advance_shipment(Shipment& shipment, std::uint64_t tick,
                           std::map<RouteId, std::uint32_t>& available_slots);
     bool route_usable(const TransportRoute& route, FactionId faction) const;
     std::optional<RouteId> next_route(SectorId from, SectorId to, FactionId faction) const;
+    void initialize_forces(const ScenarioDefinition& scenario);
+    bool update_forces(std::uint64_t tick);
+    void set_equipment_status(Equipment& equipment, EquipmentStatus status, std::uint64_t tick);
+    void queue_service(Equipment& equipment, ServiceKind kind, std::uint64_t tick);
 
     WorldDefinition world_;
     SimulationClock clock_;
@@ -251,10 +370,16 @@ private:
     std::vector<LogisticsEvent> logistics_log_;
     std::uint32_t loading_ticks_;
     std::uint32_t unloading_ticks_;
+    std::map<EquipmentTypeId, EquipmentType> equipment_types_;
+    std::map<FacilityId, MaintenanceFacility> facilities_;
+    std::map<UnitId, MilitaryUnit> units_;
+    std::map<EquipmentId, Equipment> equipment_;
+    std::vector<ForcesEvent> forces_log_;
 };
 
 ScenarioDefinition example_scenario();
 ScenarioDefinition logistics_example_scenario();
+CampaignState maintenance_example_campaign(std::uint32_t seed);
 
 }  // namespace openwar
 

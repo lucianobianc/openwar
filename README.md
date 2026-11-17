@@ -86,6 +86,28 @@ The campaign records reservations, cargo movements, delays, and losses in
 memory. Carrier availability, blockages, and losses use explicit inputs.
 Produced supplies become available for dispatch on the following tick.
 
+## Forces and maintenance
+
+Run `./openwar --maintenance-demo --ticks 12 --events` to follow a damaged
+Apache from a parts shortage through a logistics delivery, repair, and
+scheduled maintenance. The demo also shows EAST and WEST inventories and a
+reserve Hind arriving at its designated entry. Try `--ticks 1` to inspect
+the blocked job or `--realtime --speed 3600` to watch the cycle.
+
+Scenarios define unit hierarchies, individual equipment, compatible
+workshops, service profiles, and finite reserve equipment. Jobs queue by
+request tick and equipment ID, with started jobs served first. Workshops
+charge their local stockpile once at service start and share bays and
+technicians. Repair clears damage, scheduled service resets wear since the
+last service, and returning equipment undergoes inspection and preparation.
+Service runs after logistics and economy each tick, so a local delivery can
+unblock a job that tick. Operation inputs increment usage in simulated
+seconds. The demo uses illustrative service times and costs.
+
+Reserve equipment has an explicit source and becomes active only after its
+authorized arrival tick and a friendly, operational entry. Permanent losses
+retain their IDs in the inventory history.
+
 ## Roadmap
 
 1. M0 — Core. Clock, world, sectors, and factions.
@@ -106,5 +128,7 @@ The roadmap above is the current milestone sequence for the technical annexes.
 - [`TERRITORY.md`](docs/TERRITORY.md) specifies territorial control and campaign state.
 - [`ECONOMY.md`](docs/ECONOMY.md) describes resources, production, and stock accounting.
 - [`LOGISTICS.md`](docs/LOGISTICS.md) describes transport and supply.
+- [`MILITARY_FORCES.md`](docs/MILITARY_FORCES.md) covers equipment, organization, and reserves.
+- [`MAINTENANCE.md`](docs/MAINTENANCE.md) covers readiness and workshop service.
 - [`SCENARIOS.md`](docs/SCENARIOS.md) covers predefined, geographic, and procedural scenarios.
 - [`CAMPAIGN_SETUP.md`](docs/CAMPAIGN_SETUP.md) describes campaign creation and configuration.
