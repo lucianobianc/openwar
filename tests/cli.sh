@@ -26,7 +26,10 @@ printf '%s\n' "$output" | grep -Fx '  fuel (L): 900/2400'
 printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
-printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--seed UINT32] [--ticks UINT64]'
+printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]'
+output=$("$openwar" --logistics-demo --ticks 6)
+printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Shipment 1: delivered, cargo on carrier: 0'
+printf '%s\n' "$output" | tr -d '\r' | grep -Fx '  fuel (L): 80/120'
 
 reject()
 {

@@ -1,5 +1,6 @@
 #include "campaign.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -98,7 +99,8 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
     : world_(std::move(scenario.world)), clock_(scenario.tick_seconds),
       sector_states_(world_.sectors().size()), random_(seed),
       economy_interval_ticks_(scenario.economy_interval_ticks),
-      minimum_integrity_(scenario.minimum_integrity)
+      minimum_integrity_(scenario.minimum_integrity), loading_ticks_(scenario.loading_ticks),
+      unloading_ticks_(scenario.unloading_ticks)
 {
     std::vector<bool> assigned(sector_states_.size());
     for (const auto& entry : scenario.initial_sectors) {
@@ -111,6 +113,7 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
         sector_states_[index] = entry.state;
     }
     initialize_economy(scenario);
+    initialize_logistics(scenario);
 }
 
 const SectorState& CampaignState::sector_state(SectorId sector) const
@@ -123,20 +126,23 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
     auto target = clock_;
     target.advance(ticks);
 
-    if (!installations_.empty()) {
-        while (clock_.tick() < target.tick()) {
-            const auto step = economy_interval_ticks_ - clock_.tick() % economy_interval_ticks_;
-            if (step > target.tick() - clock_.tick()) {
-                break;
-            }
-            const auto boundary = clock_.tick() + step;
-            const bool changed = update_economy(boundary);
-            clock_.advance(step);
-            // With constant conditions, a completely idle interval cannot unblock itself.
-            if (!changed) {
-                break;
-            }
+    bool economy_awake = !installations_.empty();
+    bool logistics_awake = !shipments_.empty();
+    while (clock_.tick() < target.tick() && (economy_awake || logistics_awake)) {
+        const auto boundary_step = economy_interval_ticks_ - clock_.tick() % economy_interval_ticks_;
+        const auto step = logistics_awake ? 1 : boundary_step;
+        if (step > target.tick() - clock_.tick()) {
+            break;
         }
+        const auto tick = clock_.tick() + step;
+        // Dispatch can use newly produced supplies starting on the following tick.
+        logistics_awake = logistics_awake && update_logistics(tick);
+        economy_awake = economy_awake || (logistics_awake && !installations_.empty());
+        if (economy_awake && step == boundary_step) {
+            economy_awake = update_economy(tick);
+            logistics_awake = logistics_awake || (economy_awake && !shipments_.empty());
+        }
+        clock_.advance(step);
     }
     clock_ = target;
 }

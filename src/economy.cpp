@@ -19,7 +19,7 @@ bool can_apply(const Stockpile& stock, const ResourceAmounts& inputs,
                const ResourceAmounts& outputs)
 {
     for (std::size_t i = 0; i < inputs.size(); ++i) {
-        if (inputs[i] > stock.quantity[i] ||
+        if (inputs[i] > stock.quantity[i] - stock.reserved[i] ||
             outputs[i] > stock.capacity[i] - (stock.quantity[i] - inputs[i])) {
             return false;
         }
@@ -52,6 +52,9 @@ void CampaignState::initialize_economy(ScenarioDefinition& scenario)
     for (const auto& stock : scenario.stockpiles) {
         world_.sector(stock.sector);
         faction_name(stock.owner);
+        if (!empty(stock.reserved)) {
+            throw std::invalid_argument("Initial stock cannot have transport reservations");
+        }
         if (!std::ranges::equal(stock.quantity, stock.capacity, std::less_equal<>{})) {
             throw std::invalid_argument("Initial stock exceeds capacity");
         }

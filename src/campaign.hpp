@@ -68,6 +68,9 @@ enum class Resource { oil_reserve, crude_oil, fuel, materials, spare_parts, supp
 using ResourceAmounts = std::array<std::uint64_t, static_cast<std::size_t>(Resource::count)>;
 enum class StockpileId : std::uint32_t {};
 enum class InstallationId : std::uint32_t {};
+enum class RouteId : std::uint32_t {};
+enum class CarrierId : std::uint32_t {};
+enum class ShipmentId : std::uint32_t {};
 
 std::string_view resource_name(Resource resource);
 
@@ -77,6 +80,7 @@ struct Stockpile {
     FactionId owner;
     ResourceAmounts capacity{};
     ResourceAmounts quantity{};
+    ResourceAmounts reserved{};
 };
 
 struct ProductionRecipe {
@@ -111,8 +115,61 @@ struct EconomyEntry {
     std::optional<InstallationId> producer;
     ResourceAmounts consumed;
     ResourceAmounts produced;
+    std::optional<ShipmentId> shipment{};
 
     bool operator==(const EconomyEntry&) const = default;
+};
+
+struct TransportRoute {
+    RouteId id;
+    SectorId from;
+    SectorId to;
+    std::uint32_t travel_ticks;
+    std::uint32_t slots = 1;
+    std::uint32_t fuel_cost = 1;
+    bool passable = true;
+};
+
+struct Carrier {
+    CarrierId id;
+    FactionId faction;
+    SectorId sector;
+    std::uint64_t capacity;
+    std::uint64_t fuel;
+    std::optional<ShipmentId> shipment{};
+    bool lost = false;
+};
+
+struct SupplyRequest {
+    ShipmentId id;
+    StockpileId origin;
+    StockpileId destination;
+    Resource resource;
+    std::uint64_t quantity;
+    int priority = 0;
+    std::optional<std::uint64_t> deadline{};
+};
+
+enum class ShipmentStatus { pending, loading, en_route, delayed, unloading, delivered, cancelled, lost };
+std::string_view shipment_status_name(ShipmentStatus status);
+
+struct Shipment {
+    SupplyRequest request;
+    ShipmentStatus status = ShipmentStatus::pending;
+    std::optional<CarrierId> carrier{};
+    std::optional<RouteId> edge{};
+    std::uint32_t remaining_ticks = 0;
+    std::uint64_t cargo = 0;
+};
+
+enum class LogisticsEventKind { requested, assigned, loaded, delayed, unloaded, delivered, cancelled, lost };
+
+struct LogisticsEvent {
+    std::uint64_t tick;
+    ShipmentId shipment;
+    LogisticsEventKind kind;
+    std::uint64_t quantity = 0;
+    bool operator==(const LogisticsEvent&) const = default;
 };
 
 struct ScenarioDefinition {
@@ -124,6 +181,10 @@ struct ScenarioDefinition {
     std::uint32_t minimum_integrity = 25;
     std::vector<Stockpile> stockpiles{};
     std::vector<Installation> installations{};
+    std::vector<TransportRoute> routes{};
+    std::vector<Carrier> carriers{};
+    std::uint32_t loading_ticks = 1;
+    std::uint32_t unloading_ticks = 1;
 };
 
 class SimulationClock {
@@ -153,10 +214,23 @@ public:
     bool consume(StockpileId stockpile, const ResourceAmounts& amounts);
     void set_operating_conditions(InstallationId id, bool has_power, std::uint32_t workers,
                                   std::uint32_t integrity);
+    void request_supply(SupplyRequest request);
+    void set_route_passable(RouteId id, bool passable);
+    bool cancel_shipment(ShipmentId id);
+    bool lose_carrier(CarrierId id);
+    const auto& shipments() const { return shipments_; }
+    const auto& carriers() const { return carriers_; }
+    std::span<const LogisticsEvent> logistics_log() const { return logistics_log_; }
 
 private:
     void initialize_economy(ScenarioDefinition& scenario);
     bool update_economy(std::uint64_t tick);
+    void initialize_logistics(const ScenarioDefinition& scenario);
+    bool update_logistics(std::uint64_t tick);
+    bool advance_shipment(Shipment& shipment, std::uint64_t tick,
+                          std::map<RouteId, std::uint32_t>& available_slots);
+    bool route_usable(const TransportRoute& route, FactionId faction) const;
+    std::optional<RouteId> next_route(SectorId from, SectorId to, FactionId faction) const;
 
     WorldDefinition world_;
     SimulationClock clock_;
@@ -167,9 +241,16 @@ private:
     std::map<StockpileId, Stockpile> stockpiles_;
     std::vector<InstallationState> installations_;
     std::vector<EconomyEntry> economy_ledger_;
+    std::map<RouteId, TransportRoute> routes_;
+    std::map<CarrierId, Carrier> carriers_;
+    std::map<ShipmentId, Shipment> shipments_;
+    std::vector<LogisticsEvent> logistics_log_;
+    std::uint32_t loading_ticks_;
+    std::uint32_t unloading_ticks_;
 };
 
 ScenarioDefinition example_scenario();
+ScenarioDefinition logistics_example_scenario();
 
 }  // namespace openwar
 

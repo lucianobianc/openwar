@@ -245,6 +245,118 @@ void test_economy()
                                           "Cross-faction installation stock accepted");
 }
 
+void test_logistics()
+{
+    constexpr StockpileId origin{1};
+    constexpr StockpileId destination{3};
+    constexpr ShipmentId order{1};
+    constexpr CarrierId carrier{1};
+    constexpr RouteId route{1};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr SupplyRequest request{order, origin, destination, Resource::fuel, 80};
+    ResourceAmounts demand{};
+    demand[fuel] = 21;
+
+    auto scenario = logistics_example_scenario();
+    scenario.installations.clear();
+    CampaignState batched(scenario, 42);
+    CampaignState stepped(scenario, 42);
+    batched.request_supply(request);
+    stepped.request_supply(request);
+    batched.advance_ticks(6);
+    stepped.advance_ticks(1);
+    require(stepped.shipments().at(order).status == ShipmentStatus::loading &&
+            stepped.stockpiles().at(origin).quantity[fuel] == 100 &&
+            stepped.stockpiles().at(origin).reserved[fuel] == 80 &&
+            !stepped.consume(origin, demand), "Loading did not protect its reservation");
+    stepped.advance_ticks(1);
+    require(stepped.stockpiles().at(origin).quantity[fuel] == 20 &&
+            stepped.shipments().at(order).cargo == 80 &&
+            stepped.stockpiles().at(destination).quantity[fuel] == 0,
+            "Cargo was not moved from stock to transit");
+    for (int i = 0; i < 4; ++i) {
+        stepped.advance_ticks(1);
+    }
+    require(stepped.shipments().at(order).status == ShipmentStatus::delivered &&
+            stepped.stockpiles().at(destination).quantity[fuel] == 80 &&
+            stepped.carriers().at(carrier).fuel == 8, "Shipment did not arrive correctly");
+    require(std::ranges::equal(stepped.logistics_log(), batched.logistics_log()) &&
+            std::ranges::equal(stepped.economy_ledger(), batched.economy_ledger()),
+            "Transport results depend on tick batching");
+
+    scenario.stockpiles.back().quantity[fuel] = 100;
+    CampaignState blocked(scenario, 42);
+    blocked.request_supply(request);
+    blocked.advance_ticks(3);
+    blocked.set_route_passable(route, false);
+    blocked.advance_ticks(20);
+    require(blocked.shipments().at(order).status == ShipmentStatus::delayed &&
+            blocked.shipments().at(order).remaining_ticks == 2,
+            "Blocked carrier continued to move");
+    blocked.set_route_passable(route, true);
+    blocked.advance_ticks(3);
+    require(blocked.shipments().at(order).cargo == 60 &&
+            blocked.stockpiles().at(destination).quantity[fuel] == 120,
+            "Partial unload failed to retain its remaining cargo");
+    demand[fuel] = 60;
+    require(blocked.consume(destination, demand), "Could not free destination space");
+    blocked.advance_ticks(1);
+    require(blocked.shipments().at(order).status == ShipmentStatus::delivered &&
+            blocked.shipments().at(order).cargo == 0, "Partial unload did not resume");
+
+    CampaignState competing(scenario, 42);
+    competing.request_supply({ShipmentId{3}, origin, destination, Resource::fuel, 80, 1});
+    competing.request_supply({ShipmentId{2}, origin, destination, Resource::fuel, 80, 1});
+    competing.request_supply(request);
+    competing.advance_ticks(1);
+    require(competing.shipments().at(ShipmentId{2}).status == ShipmentStatus::loading &&
+            competing.shipments().at(order).status == ShipmentStatus::pending,
+            "Dispatch priority or ID ordering failed");
+    require(competing.cancel_shipment(ShipmentId{2}) &&
+            competing.stockpiles().at(origin).reserved[fuel] == 0,
+            "Cancellation did not release a loading reservation");
+    competing.advance_ticks(2);
+    require(competing.cancel_shipment(ShipmentId{3}) &&
+            competing.shipments().at(ShipmentId{3}).cargo == 80 &&
+            competing.stockpiles().at(origin).quantity[fuel] == 20,
+            "Loaded cancellation moved physical cargo");
+    require(competing.lose_carrier(carrier) && !competing.lose_carrier(carrier) &&
+            competing.logistics_log().back().quantity == 80 &&
+            competing.shipments().at(ShipmentId{3}).cargo == 0,
+            "Cargo loss was missing or applied twice");
+
+    CampaignState disconnected(scenario, 42);
+    disconnected.set_route_passable(route, false);
+    disconnected.request_supply(request);
+    disconnected.advance_ticks(1'000'000);
+    require(disconnected.shipments().at(order).status == ShipmentStatus::pending &&
+            disconnected.stockpiles().at(origin).quantity[fuel] == 100,
+            "Adjacency or blockage bypassed the transport graph");
+
+    const auto start = scenario.carriers.front().sector;
+    const auto end = scenario.stockpiles.back().sector;
+    const auto junction = scenario.world.sector_id(1, 0);
+    scenario.routes.push_back({RouteId{2}, start, junction, 2});
+    scenario.routes.push_back({RouteId{3}, junction, end, 2});
+    CampaignState detour(scenario, 42);
+    detour.request_supply(request);
+    detour.advance_ticks(2);
+    detour.set_route_passable(route, false);
+    detour.advance_ticks(1);
+    require(detour.shipments().at(order).edge == RouteId{2}, "Carrier did not choose a usable detour");
+
+    auto production = logistics_example_scenario();
+    production.stockpiles.front().quantity[fuel] = 0;
+    CampaignState supplied(production, 42);
+    supplied.request_supply(request);
+    supplied.advance_ticks(10);
+    require(supplied.shipments().at(order).status == ShipmentStatus::pending,
+            "Dispatch used production from the same tick");
+    supplied.advance_ticks(1);
+    require(supplied.shipments().at(order).status == ShipmentStatus::loading,
+            "New production did not wake a pending shipment");
+}
+
 }  // namespace
 
 int main()
@@ -254,4 +366,5 @@ int main()
     test_initialization();
     test_reproducibility();
     test_economy();
+    test_logistics();
 }

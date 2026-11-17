@@ -2,7 +2,8 @@ AM_CPPFLAGS = -I$(srcdir)/src
 AM_CXXFLAGS = -std=c++20
 
 noinst_LIBRARIES = libcampaign.a
-libcampaign_a_SOURCES = src/campaign.cpp src/campaign.hpp src/economy.cpp src/scenario.cpp
+libcampaign_a_SOURCES = src/campaign.cpp src/campaign.hpp src/economy.cpp \
+	src/logistics.cpp src/scenario.cpp
 
 bin_PROGRAMS = openwar
 openwar_SOURCES = src/main.cpp

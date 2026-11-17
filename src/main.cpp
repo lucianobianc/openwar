@@ -9,7 +9,8 @@
 
 namespace {
 
-constexpr std::string_view usage = "Usage: openwar [--seed UINT32] [--ticks UINT64]\n";
+constexpr std::string_view usage =
+    "Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]\n";
 
 std::uint64_t parse_number(std::string_view text, std::string_view option)
 {
@@ -66,6 +67,11 @@ void report(const openwar::CampaignState& campaign, std::uint32_t seed)
                   << std::uint64_t{installation.recipe.intervals_per_batch} * 100 << '\n';
     }
     std::cout << "Economy transactions: " << campaign.economy_ledger().size() << '\n';
+    for (const auto& [id, shipment] : campaign.shipments()) {
+        std::cout << "Shipment " << static_cast<std::uint32_t>(id) << ": "
+                  << openwar::shipment_status_name(shipment.status)
+                  << ", cargo on carrier: " << shipment.cargo << '\n';
+    }
 }
 
 }  // namespace
@@ -74,12 +80,17 @@ int main(int argc, char* argv[])
 {
     std::uint32_t seed = 0;
     std::uint64_t ticks = 1;
+    bool logistics_demo = false;
     try {
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
             if (option == "--help") {
                 std::cout << usage;
                 return 0;
+            }
+            if (option == "--logistics-demo") {
+                logistics_demo = true;
+                continue;
             }
             if (option != "--seed" && option != "--ticks") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
@@ -98,7 +109,11 @@ int main(int argc, char* argv[])
             }
         }
 
-        openwar::CampaignState campaign(openwar::example_scenario(), seed);
+        using namespace openwar;
+        CampaignState campaign(logistics_demo ? logistics_example_scenario() : example_scenario(), seed);
+        if (logistics_demo) {
+            campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
+        }
         campaign.advance_ticks(ticks);
         report(campaign, seed);
     } catch (const std::exception& error) {

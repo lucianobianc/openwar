@@ -41,4 +41,15 @@ ScenarioDefinition example_scenario()
     return scenario;
 }
 
+ScenarioDefinition logistics_example_scenario()
+{
+    auto scenario = example_scenario();
+    const auto origin = scenario.world.sector_id(0, 0);
+    const auto destination = scenario.world.sector_id(0, 1);
+    scenario.stockpiles.push_back({StockpileId{3}, destination, FactionId::west, {0, 0, 120}});
+    scenario.routes.push_back({RouteId{1}, origin, destination, 3, 1, 2});
+    scenario.carriers.push_back({CarrierId{1}, FactionId::west, origin, 100, 10});
+    return scenario;
+}
+
 }  // namespace openwar
