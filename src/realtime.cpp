@@ -214,12 +214,16 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
         const auto first = compact && view.missions.size() > 2 ? view.missions.size() - 2 : 0;
         for (std::size_t i = first; i < view.missions.size(); ++i) {
             const auto& mission = view.missions[i];
-            const auto& item = campaign.equipment().at(mission.equipment);
             out << "  Mission " << static_cast<std::uint32_t>(mission.id) << ' '
                 << mission_name(mission.kind) << " to sector " << static_cast<std::uint32_t>(mission.target)
                 << " | " << mission_status_name(mission.status)
-                << " | equipment " << static_cast<std::uint32_t>(mission.equipment) << ' '
-                << equipment_status_name(item.status);
+                << " | equipment " << static_cast<std::uint32_t>(mission.equipment);
+            if (mission.status == MissionStatus::scheduled || mission.status == MissionStatus::preparing ||
+                mission.status == MissionStatus::in_progress) {
+                out << ' ' << equipment_status_name(campaign.equipment().at(mission.equipment).status);
+            } else {
+                out << " (historical assignment)";
+            }
             if (mission.status == MissionStatus::completed && mission.kind == MissionKind::recon) {
                 out << " | " << mission.detections << " detected";
             }

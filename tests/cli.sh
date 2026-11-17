@@ -124,6 +124,10 @@ operations=$("$openwar" --demo operations --ticks 16 --events)
 printf '%s\n' "$operations" | grep -F 'WEST sector 2 mission 1 planner: refresh incomplete intelligence'
 printf '%s\n' "$operations" | grep -F 'EAST sector 0 mission 1 planner: refresh incomplete intelligence'
 printf '%s\n' "$operations" | grep -F 'ground at sector 2 | uncertain '
+printf '%s\n' "$operations" | grep -F 'Mission 1 recon to sector 2 | completed | equipment 1 (historical assignment)'
+printf '%s\n' "$operations" | grep -F 'Mission 2 recon to sector 2 | scheduled | equipment 1 reserved'
+printf '%s\n' "$operations" | grep -F 'Mission 1 recon to sector 0 | completed | equipment 6 (historical assignment)'
+printf '%s\n' "$operations" | grep -F 'Mission 2 recon to sector 0 | scheduled | equipment 6 reserved'
 manual=$("$openwar" --demo operations --faction WEST --order recon:1 --ticks 6 --events)
 printf '%s\n' "$manual" | grep -F 'observation reported: no contacts detected'
 if printf '%s\n' "$manual" | grep -E 'EAST intelligence|\): EAST sector'; then

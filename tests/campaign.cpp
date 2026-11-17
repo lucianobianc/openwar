@@ -681,6 +681,61 @@ void test_operations_and_intelligence()
             "Mission fuel depends on tick batching");
 }
 
+void test_recon_revisit()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    auto campaign = operations_example_campaign(42, west);
+    campaign.advance_ticks(11);
+    for (auto faction : {west, east}) {
+        const auto view = campaign.faction_view(faction);
+        require(view.missions.size() == 1, "Expected one reconnaissance per faction at tick 11");
+        const auto& mission = view.missions.front();
+        require(mission.status == MissionStatus::completed &&
+                campaign.equipment().at(mission.equipment).status == EquipmentStatus::returning &&
+                campaign.stockpiles().at(mission.launch_stock).reserved[fuel] == 0 &&
+                !view.contacts.empty() && view.contacts.front().observed_tick == 11 &&
+                view.contacts.front().confidence == 1000,
+                "Completed reconnaissance retained a reservation or did not publish fresh contacts");
+    }
+    campaign.advance_ticks(1);
+    const auto fresh = campaign.faction_view(west);
+    require(fresh.missions.size() == 1 && !fresh.contacts.empty() && fresh.contacts.front().confidence == 841 &&
+            campaign.equipment().at(fresh.missions.front().equipment).status == EquipmentStatus::inspection,
+            "Fresh reports were revisited or the aircraft bypassed inspection");
+    require(std::ranges::any_of(fresh.events, [](const auto& event) {
+                return event.tick == 12 && event.sector == SectorId{3};
+            }) && std::ranges::none_of(fresh.events, [](const auto& event) {
+                return event.tick == 12 && event.sector == SectorId{2};
+            }), "Planner considered a repeat reconnaissance while contacts were still confirmed");
+    campaign.advance_ticks(2);
+    require(campaign.equipment().at(fresh.missions.front().equipment).status == EquipmentStatus::preparing &&
+            !campaign.issue_order(west, MissionKind::recon, SectorId{2}).mission,
+            "Aircraft was assigned a second mission during turnaround");
+    campaign.advance_ticks(1);
+    require(campaign.equipment().at(fresh.missions.front().equipment).status == EquipmentStatus::available,
+            "Aircraft did not become available after turnaround");
+
+    campaign.advance_ticks(1);
+    for (auto faction : {west, east}) {
+        const auto view = campaign.faction_view(faction);
+        const auto target = faction == west ? SectorId{2} : SectorId{0};
+        require(view.sectors.at(target).confidence == 771 && !view.contacts.empty() &&
+                view.contacts.front().confidence == 420 &&
+                view.contacts.front().observed_tick == 11 &&
+                view.missions.size() == 2 && view.missions[0].status == MissionStatus::completed &&
+                view.missions[1].status == MissionStatus::scheduled &&
+                view.missions[1].kind == MissionKind::recon && view.missions[1].target == target &&
+                view.missions[0].equipment == view.missions[1].equipment,
+                "An uncertain contact did not trigger a new reconnaissance of its priority sector");
+        const auto& mission = view.missions[1];
+        require(campaign.equipment().at(mission.equipment).status == EquipmentStatus::reserved &&
+                campaign.stockpiles().at(mission.launch_stock).reserved[fuel] == mission.fuel,
+                "The new mission did not hold exactly one fuel reservation");
+    }
+}
+
 }  // namespace
 
 int main()
@@ -694,4 +749,5 @@ int main()
     test_realtime_pacing();
     test_forces_and_maintenance();
     test_operations_and_intelligence();
+    test_recon_revisit();
 }

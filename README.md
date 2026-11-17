@@ -139,6 +139,12 @@ equipment and fuel, prepare through a workshop, consume reserved mission
 fuel on launch, and return through inspection and turnaround. Preparation
 costs use the workshop's normal stock debit.
 
+Contact and territorial confidence decay independently. In the demo, a
+contact's four-minute half-life can prompt another reconnaissance of a
+high-priority sector while its controller report is still confirmed.
+Finished missions show their historical equipment assignment. Active
+missions show the equipment's current status.
+
 A reconnaissance pass samples its target sector and reports on return.
 Forest limits detection in the demo, and a mission can return without a
 contact. Reports preserve the last observation and decay from its timestamp
