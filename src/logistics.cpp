@@ -182,6 +182,7 @@ bool CampaignState::advance_shipment(Shipment& shipment, std::uint64_t tick,
 {
     const auto& request = shipment.request;
     auto& carrier = carriers_.at(*shipment.carrier);
+    auto& destination = stockpiles_.at(request.destination);
     const auto index = cargo_index(request.resource);
     const auto delay = [&] {
         if (shipment.status == ShipmentStatus::delayed) {
@@ -205,12 +206,16 @@ bool CampaignState::advance_shipment(Shipment& shipment, std::uint64_t tick,
         origin.quantity[index] -= request.quantity;
         origin.reserved[index] -= request.quantity;
         shipment.cargo = request.quantity;
-        shipment.status = ShipmentStatus::en_route;
-        shipment.remaining_ticks = 0;
+        if (carrier.sector == destination.sector) {
+            shipment.status = ShipmentStatus::unloading;
+            shipment.remaining_ticks = unloading_ticks_;
+        } else {
+            shipment.status = ShipmentStatus::en_route;
+            shipment.remaining_ticks = 0;
+        }
         return true;
     }
 
-    auto& destination = stockpiles_.at(request.destination);
     if (carrier.sector == destination.sector && !shipment.edge) {
         if (shipment.remaining_ticks > 1) {
             --shipment.remaining_ticks;
@@ -258,13 +263,17 @@ bool CampaignState::advance_shipment(Shipment& shipment, std::uint64_t tick,
         return delay();
     }
     shipment.status = ShipmentStatus::en_route;
-    if (--shipment.remaining_ticks == 0) {
+    if (shipment.remaining_ticks == 1) {
+        logistics_log_.push_back({tick, request.id, LogisticsEventKind::arrived, shipment.cargo, route.to});
+        shipment.remaining_ticks = 0;
         carrier.sector = route.to;
         shipment.edge.reset();
         if (carrier.sector == destination.sector) {
             shipment.status = ShipmentStatus::unloading;
             shipment.remaining_ticks = unloading_ticks_;
         }
+    } else {
+        --shipment.remaining_ticks;
     }
     return true;
 }

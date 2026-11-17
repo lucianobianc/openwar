@@ -110,6 +110,7 @@ std::string_view logistics_event_name(LogisticsEventKind kind)
     case LogisticsEventKind::delivered: return "delivered";
     case LogisticsEventKind::cancelled: return "cancelled";
     case LogisticsEventKind::lost: return "lost";
+    case LogisticsEventKind::arrived: return "arrived";
     }
     throw std::logic_error("Unknown logistics event");
 }
@@ -136,6 +137,9 @@ struct EventCursor {
                 event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
                       << "s): shipment " << static_cast<std::uint32_t>(entry.shipment)
                       << ' ' << logistics_event_name(entry.kind) << " [" << entry.quantity << ']';
+                if (entry.sector) {
+                    event << " in sector " << static_cast<std::uint32_t>(*entry.sector);
+                }
             } else {
                 const auto& entry = transactions[economy++];
                 event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()

@@ -273,17 +273,61 @@ void test_logistics()
     stepped.advance_ticks(1);
     require(stepped.stockpiles().at(origin).quantity[fuel] == 20 &&
             stepped.shipments().at(order).cargo == 80 &&
-            stepped.stockpiles().at(destination).quantity[fuel] == 0,
+            stepped.stockpiles().at(destination).quantity[fuel] == 0 &&
+            !stepped.consume(origin, demand) && !stepped.consume(destination, demand),
             "Cargo was not moved from stock to transit");
     for (int i = 0; i < 4; ++i) {
         stepped.advance_ticks(1);
     }
     require(stepped.shipments().at(order).status == ShipmentStatus::delivered &&
+            stepped.shipments().at(order).cargo == 0 &&
+            stepped.stockpiles().at(origin).quantity[fuel] == 20 &&
             stepped.stockpiles().at(destination).quantity[fuel] == 80 &&
             stepped.carriers().at(carrier).fuel == 8, "Shipment did not arrive correctly");
     require(std::ranges::equal(stepped.logistics_log(), batched.logistics_log()) &&
             std::ranges::equal(stepped.economy_ledger(), batched.economy_ledger()),
             "Transport results depend on tick batching");
+
+    auto small_carriers = scenario;
+    for (auto& vehicle : small_carriers.carriers) {
+        vehicle.capacity = 79;
+    }
+    CampaignState undersized(small_carriers, 42);
+    undersized.request_supply(request);
+    undersized.advance_ticks(10);
+    require(undersized.shipments().at(order).status == ShipmentStatus::pending &&
+            undersized.stockpiles().at(origin).reserved[fuel] == 0,
+            "An undersized carrier accepted a shipment");
+
+    constexpr ShipmentId second{2};
+    CampaignState congested(scenario, 42);
+    congested.request_supply({order, origin, destination, Resource::fuel, 40});
+    congested.request_supply({second, origin, destination, Resource::fuel, 40});
+    congested.advance_ticks(5);
+    require(congested.shipments().at(order).status == ShipmentStatus::unloading &&
+            congested.shipments().at(second).status == ShipmentStatus::delayed &&
+            congested.logistics_log().back() == LogisticsEvent{
+                5, order, LogisticsEventKind::arrived, 40, scenario.stockpiles.back().sector},
+            "Route capacity or arrival timing failed");
+    congested.advance_ticks(4);
+    require(congested.shipments().at(second).status == ShipmentStatus::delivered &&
+            congested.stockpiles().at(destination).quantity[fuel] == 80,
+            "Waiting carrier did not deliver its cargo");
+
+    auto local = scenario;
+    local.stockpiles.back().sector = local.stockpiles.front().sector;
+    local.unloading_ticks = 3;
+    CampaignState same_sector(local, 42);
+    same_sector.request_supply(request);
+    same_sector.advance_ticks(4);
+    require(same_sector.shipments().at(order).status == ShipmentStatus::unloading &&
+            same_sector.shipments().at(order).cargo == 80 &&
+            same_sector.stockpiles().at(destination).quantity[fuel] == 0,
+            "A local transfer bypassed the configured unloading time");
+    same_sector.advance_ticks(1);
+    require(same_sector.shipments().at(order).status == ShipmentStatus::delivered &&
+            same_sector.stockpiles().at(destination).quantity[fuel] == 80,
+            "Local transfer missed its delivery tick");
 
     scenario.stockpiles.back().quantity[fuel] = 100;
     CampaignState blocked(scenario, 42);
@@ -351,11 +395,17 @@ void test_logistics()
     CampaignState supplied(production, 42);
     supplied.request_supply(request);
     supplied.advance_ticks(10);
-    require(supplied.shipments().at(order).status == ShipmentStatus::pending,
-            "Dispatch used production from the same tick");
+    require(supplied.shipments().at(order).status == ShipmentStatus::pending &&
+            supplied.stockpiles().at(origin).reserved[fuel] == 0 &&
+            supplied.stockpiles().at(destination).quantity[fuel] == 0,
+            "Dispatch reserved unavailable stock or used same-tick production");
     supplied.advance_ticks(1);
     require(supplied.shipments().at(order).status == ShipmentStatus::loading,
             "New production did not wake a pending shipment");
+    supplied.advance_ticks(5);
+    require(supplied.shipments().at(order).status == ShipmentStatus::delivered &&
+            supplied.stockpiles().at(destination).quantity[fuel] == 80,
+            "Produced fuel never reached the destination");
 }
 
 void test_realtime_pacing()

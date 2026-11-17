@@ -70,7 +70,9 @@ an in-memory ledger in application order.
 ## Logistics
 
 Run `./openwar --logistics-demo --ticks 6` to deliver 80 liters of fuel to
-a second depot. The scenario defines directed transport links separately
+a second depot. Run `./openwar --logistics-demo --ticks 16 --events` to see
+another 40 liters delivered after the refinery replenishes the origin.
+The scenario defines directed transport links separately
 from the sector grid. Carriers take the shortest usable route, spend fuel
 on each leg, and wait when all slots on a link are occupied. Requests compete
 for local stock and carriers by descending

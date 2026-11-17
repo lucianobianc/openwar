@@ -31,6 +31,12 @@ printf '%s\n' "$help" | grep -F '[--realtime [--speed N]] [--events]'
 output=$("$openwar" --logistics-demo --ticks 6)
 printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Shipment 1: delivered, cargo on carrier: 0'
 printf '%s\n' "$output" | tr -d '\r' | grep -Fx '  fuel (L): 80/120'
+output=$("$openwar" --logistics-demo --ticks 16 --events)
+output=$(printf '%s\n' "$output" | tr -d '\r')
+printf '%s\n' "$output" | grep -Fx 'Event tick 11 (660s): shipment 2 assigned [40]'
+printf '%s\n' "$output" | grep -Fx 'Event tick 15 (900s): shipment 2 arrived [40] in sector 3'
+printf '%s\n' "$output" | grep -Fx 'Event tick 16 (960s): shipment 2 delivered [40]'
+printf '%s\n' "$output" | grep -Fx '  fuel (L): 120/120'
 
 batch=$("$openwar" --seed 42 --logistics-demo --ticks 10 --events)
 live=$("$openwar" --seed 42 --logistics-demo --realtime --speed 3600 --ticks 10 --events)

@@ -137,6 +137,7 @@ int main(int argc, char* argv[])
         CampaignState campaign(logistics_demo ? logistics_example_scenario() : example_scenario(), seed);
         if (logistics_demo) {
             campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
+            campaign.request_supply({ShipmentId{2}, StockpileId{1}, StockpileId{3}, Resource::fuel, 40});
         }
         if (realtime) {
             cli::run_realtime(campaign, speed.value_or(1), ticks, events);

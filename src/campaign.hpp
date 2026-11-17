@@ -162,13 +162,16 @@ struct Shipment {
     std::uint64_t cargo = 0;
 };
 
-enum class LogisticsEventKind { requested, assigned, loaded, delayed, unloaded, delivered, cancelled, lost };
+enum class LogisticsEventKind {
+    requested, assigned, loaded, delayed, unloaded, delivered, cancelled, lost, arrived
+};
 
 struct LogisticsEvent {
     std::uint64_t tick;
     ShipmentId shipment;
     LogisticsEventKind kind;
     std::uint64_t quantity = 0;
+    std::optional<SectorId> sector{};
     bool operator==(const LogisticsEvent&) const = default;
 };
 
