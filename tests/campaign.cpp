@@ -736,6 +736,209 @@ void test_recon_revisit()
     }
 }
 
+void test_combat_and_territory()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr SectorId center{1};
+    constexpr UnitId west_unit{1};
+    constexpr UnitId east_unit{2};
+    constexpr EquipmentId west_vehicle{1};
+    constexpr EquipmentId east_vehicle{2};
+    constexpr StockpileId west_stores{10};
+    constexpr StockpileId east_stores{11};
+    constexpr StockpileId industry{12};
+    constexpr auto ammo = static_cast<std::size_t>(Resource::ammunition);
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr auto supply = static_cast<std::size_t>(Resource::supplies);
+    constexpr auto parts = static_cast<std::size_t>(Resource::spare_parts);
+
+    auto scenario = combat_example_scenario(west);
+    CampaignState campaign(scenario, 42);
+    require(!campaign.issue_order(west, MissionKind::attack, SectorId{2}).mission &&
+            !campaign.issue_order(east, MissionKind::attack, center).mission &&
+            !campaign.issue_order(west, MissionKind::defend, center).mission,
+            "Attack or defense bypassed intelligence and faction authority");
+    auto manual = CampaignState(scenario, 42);
+    require(manual.issue_order(west, MissionKind::defend, SectorId{0}).mission.has_value() &&
+            manual.cancel_order(west, MissionId{1}) &&
+            manual.issue_order(west, MissionKind::attack, center).mission.has_value() &&
+            !manual.issue_order(west, MissionKind::attack, center).mission,
+            "Ground orders bypassed the mission allocation lifecycle");
+    auto public_territory = scenario;
+    public_territory.public_sectors.push_back(SectorId{2});
+    CampaignState no_contact(public_territory, 42);
+    require(!no_contact.issue_order(west, MissionKind::attack, SectorId{2}).mission,
+            "Territorial knowledge revealed a hidden target");
+    campaign.advance_ticks(5);
+    require(campaign.sector_state(center).controller == FactionId::neutral &&
+            campaign.sector_state(center).control == ControlState::contested &&
+            campaign.sector_state(center).occupier == west, "Engagement transferred control immediately");
+    require(campaign.equipment().at(west_vehicle).damage > 0 &&
+            campaign.equipment().at(east_vehicle).status == EquipmentStatus::lost &&
+            campaign.equipment().size() == 3, "Combat damage or permanent equipment loss was not retained");
+    for (const auto store : {west_stores, east_stores}) {
+        const auto& stock = campaign.stockpiles().at(store);
+        require(stock.quantity[ammo] == 19 && stock.quantity[fuel] == 19 &&
+                stock.quantity[supply] == 19 && stock.sector == center,
+                "Combat or movement did not debit the deployed depot once");
+    }
+    const auto defeated = campaign.combat_units().at(east_unit);
+    require(defeated.status == GroundStatus::withdrawing && defeated.morale < 40 &&
+            defeated.cohesion < 80 && defeated.fatigue > 0 && defeated.suppression > 0 &&
+            campaign.combat_units().at(west_unit).experience == 26,
+            "Engagement did not produce experience and loss-driven withdrawal");
+    auto interrupted = campaign;
+    interrupted.lose_equipment(west_vehicle);
+    interrupted.advance_ticks(3);
+    require(interrupted.sector_state(center).controller == FactionId::neutral &&
+            !interrupted.sector_state(center).occupier, "Destroyed occupier still captured the sector");
+
+    campaign.advance_ticks(2);
+    require(campaign.units().at(east_unit).sector == SectorId{2} &&
+            campaign.stockpiles().at(east_stores).sector == SectorId{2} &&
+            campaign.combat_units().at(east_unit).fatigue < defeated.fatigue &&
+            campaign.sector_state(center).controller == FactionId::neutral,
+            "Withdrawal or occupation progressed at the wrong time");
+    campaign.advance_ticks(1);
+    const auto& installation = campaign.installations().back().installation;
+    require(campaign.sector_state(center).controller == west &&
+            campaign.sector_state(center).control == ControlState::unstable &&
+            campaign.front_line() == std::vector{std::pair{center, SectorId{2}}} &&
+            !campaign.war_ended(), "Consolidation did not update ownership and the derived front");
+    require(installation.operator_faction == west && installation.integrity == 40 && !installation.has_power &&
+            campaign.stockpiles().at(industry).owner == west &&
+            campaign.stockpiles().at(industry).quantity[parts] == 7,
+            "Capture reset damage, power constraints, or inventory");
+    const auto other_view = campaign.faction_view(east);
+    require(other_view.sectors.at(center).estimated_controller == FactionId::neutral &&
+            other_view.sectors.at(center).observed_tick < campaign.clock().tick(),
+            "Capture exposed the new owner to an absent opposing observer");
+
+    CampaignState single(scenario, 42);
+    single.advance_ticks(90);
+    campaign.advance_ticks(82);
+    require(single.war_ended() && single.war_result().cause == "scenario objective" &&
+            single.war_result() == campaign.war_result() &&
+            std::ranges::equal(single.economy_ledger(), campaign.economy_ledger()) &&
+            std::ranges::equal(single.observer_battle_log(), campaign.observer_battle_log()),
+            "Combat or war results depend on tick batching");
+    const auto final_tick = single.clock().tick();
+    const auto final_events = single.observer_battle_log().size();
+    single.advance_ticks(10);
+    require(single.clock().tick() == final_tick && single.observer_battle_log().size() == final_events &&
+            !single.issue_order(west, MissionKind::defend, SectorId{0}).mission,
+            "A concluded campaign still advanced or accepted orders");
+
+    auto repair = scenario;
+    repair.operations.planner_interval_ticks = 0;
+    repair.units[1].sector = SectorId{0};
+    repair.units[1].facility.reset();
+    repair.stockpiles[3].sector = SectorId{0};
+    repair.stockpiles[3].quantity[ammo] = 1;
+    repair.stockpiles[2].quantity[ammo] = repair.stockpiles[2].quantity[fuel] = 0;
+    repair.stockpiles[0].capacity[parts] = repair.stockpiles[0].quantity[parts] = 1;
+    CampaignState repairs(repair, 42);
+    repairs.advance_ticks(1);
+    require(repairs.equipment().at(west_vehicle).damage > 0 &&
+            repairs.equipment().at(west_vehicle).status == EquipmentStatus::repair &&
+            repairs.equipment().at(east_vehicle).damage == 0,
+            "Damage skipped maintenance or an ammunition-starved unit inflicted damage");
+    repairs.advance_ticks(4);
+    require(repairs.equipment().at(west_vehicle).damage == 0 &&
+            repairs.stockpiles().at(StockpileId{1}).quantity[parts] == 0,
+            "Battle damage was not repaired with actual depot resources");
+    repair.combat_units[0].morale = 20;
+    repair.combat_units[0].cohesion = 20;
+    CampaignState cut_off(repair, 42);
+    cut_off.advance_ticks(1);
+    require(cut_off.combat_units().at(west_unit).status == GroundStatus::surrendered &&
+            cut_off.equipment().at(west_vehicle).status == EquipmentStatus::lost,
+            "A depleted unit without a withdrawal route did not surrender");
+
+    auto air = scenario;
+    air.operations.planner_interval_ticks = 0;
+    air.equipment_types[0].category = EquipmentCategory::helicopter;
+    air.equipment_types[0].can_occupy = false;
+    air.units[0].sector = center;
+    air.units[0].facility.reset();
+    air.stockpiles[2].sector = center;
+    air.units[1].sector = center;
+    air.units[1].facility.reset();
+    air.stockpiles[3].sector = center;
+    air.stockpiles[3].quantity[ammo] = 0;
+    CampaignState aircraft(air, 42);
+    require(!aircraft.issue_order(west, MissionKind::attack, center).mission,
+            "Air unit was accepted as an occupier");
+    aircraft.advance_ticks(10);
+    require(aircraft.sector_state(center).controller == FactionId::neutral &&
+            !aircraft.sector_state(center).occupier &&
+            aircraft.equipment().at(east_vehicle).status == EquipmentStatus::lost,
+            "Air support failed to fight or captured a sector independently");
+}
+
+void test_war_endings()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    auto scenario = combat_example_scenario();
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.victory_objectives.clear();
+    scenario.command_objectives.clear();
+    scenario.combat.time_limit_seconds.reset();
+    auto majority = scenario;
+    majority.initial_sectors[1].state.controller = west;
+    majority.initial_sectors[2].state.controller = west;
+    majority.initial_sectors[3].state.controller = west;
+    CampaignState percentage(majority, 42);
+    percentage.advance_ticks(20);
+    require(!percentage.war_ended(), "Territorial percentage alone ended the war");
+
+    auto time = scenario;
+    time.combat.time_limit_seconds = 120;
+    CampaignState timeout(time, 42);
+    timeout.advance_ticks(20);
+    require(timeout.war_result() == WarResult{WarStatus::draw, 2, "time limit"}, "Invalid time-limit outcome");
+
+    auto paired = scenario;
+    paired.victory_objectives = {{west, {SectorId{0}}, 120}, {east, {SectorId{2}}, 120}};
+    CampaignState objectives(paired, 42);
+    objectives.advance_ticks(20);
+    require(objectives.war_result() == WarResult{WarStatus::draw, 3, "simultaneous objectives"},
+            "Simultaneous objectives favored one faction");
+    auto industrial = scenario;
+    industrial.victory_objectives = {{west, {SectorId{0}}, 120, {InstallationId{2}}}};
+    CampaignState protected_site(industrial, 42);
+    protected_site.set_operating_conditions(InstallationId{2}, false, 1, 100);
+    protected_site.advance_ticks(3);
+    require(!protected_site.war_ended(), "An inoperable required installation won an objective");
+    protected_site.set_operating_conditions(InstallationId{2}, true, 1, 100);
+    protected_site.advance_ticks(2);
+    protected_site.set_operating_conditions(InstallationId{2}, false, 1, 100);
+    protected_site.advance_ticks(1);
+    protected_site.set_operating_conditions(InstallationId{2}, true, 1, 100);
+    protected_site.advance_ticks(3);
+    require(protected_site.war_result() == WarResult{WarStatus::west_victory, 9, "scenario objective"},
+            "Objective timer accumulated across an interruption");
+
+    auto command = scenario;
+    command.command_objectives = {{west, {SectorId{2}}}, {east, {SectorId{0}}}};
+    command.combat.capitulation_seconds = 120;
+    CampaignState capitulation(command, 42);
+    capitulation.advance_ticks(1);
+    require(capitulation.war_result().status == WarStatus::ceasefire_pending, "Missing confirmation period");
+    capitulation.advance_ticks(20);
+    require(capitulation.war_result() == WarResult{WarStatus::draw, 3, "simultaneous capitulation"},
+            "Simultaneous capitulation favored one faction");
+
+    CampaignState surrender(scenario, 42);
+    require(surrender.declare_surrender(east) && surrender.declare_surrender(west) &&
+            !surrender.declare_surrender(east), "Surrender was applied twice");
+    surrender.advance_ticks(5);
+    require(surrender.war_result() == WarResult{WarStatus::draw, 1, "mutual surrender"},
+            "Mutual surrender did not end in a draw");
+}
+
 }  // namespace
 
 int main()
@@ -750,4 +953,6 @@ int main()
     test_forces_and_maintenance();
     test_operations_and_intelligence();
     test_recon_revisit();
+    test_combat_and_territory();
+    test_war_endings();
 }

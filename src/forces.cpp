@@ -172,7 +172,7 @@ void CampaignState::queue_service(Equipment& item, ServiceKind kind, std::uint64
 bool CampaignState::reserve_equipment(EquipmentId id)
 {
     auto& item = equipment_.at(id);
-    if (item.status != EquipmentStatus::available) {
+    if (war_ended() || item.status != EquipmentStatus::available) {
         return false;
     }
     set_equipment_status(item, EquipmentStatus::reserved, clock_.tick());
@@ -209,7 +209,7 @@ bool CampaignState::cancel_equipment_reservation(EquipmentId id)
 bool CampaignState::prepare_equipment(EquipmentId id)
 {
     auto& item = equipment_.at(id);
-    if (item.status != EquipmentStatus::reserved) {
+    if (war_ended() || item.status != EquipmentStatus::reserved) {
         return false;
     }
     queue_service(item, ServiceKind::preparation, clock_.tick());
@@ -219,7 +219,7 @@ bool CampaignState::prepare_equipment(EquipmentId id)
 bool CampaignState::begin_operation(EquipmentId id)
 {
     auto& item = equipment_.at(id);
-    if (item.status != EquipmentStatus::ready) {
+    if (war_ended() || item.status != EquipmentStatus::ready) {
         return false;
     }
     set_equipment_status(item, EquipmentStatus::in_operation, clock_.tick());
@@ -268,7 +268,7 @@ bool CampaignState::authorize_reinforcement(EquipmentId id, std::uint64_t eta)
 {
     auto& item = equipment_.at(id);
     auto arrival = clock_;
-    if (item.status != EquipmentStatus::reserve || eta <= arrival.tick() ||
+    if (war_ended() || item.status != EquipmentStatus::reserve || eta <= arrival.tick() ||
         !units_.at(item.assignment.unit).facility) {
         return false;
     }
@@ -339,8 +339,10 @@ bool CampaignState::update_forces(std::uint64_t tick)
             continue;
         }
         const auto& facility = facilities_.at(*unit.facility);
+        const auto& stock = stockpiles_.at(facility.stockpile);
         const auto controller = sector_state(unit.sector).controller;
-        if (!facility.operational || (controller != FactionId::neutral && controller != unit.faction) ||
+        if (!facility.operational || stock.sector != unit.sector || stock.owner != unit.faction ||
+            (controller != FactionId::neutral && controller != unit.faction) ||
             (!facility.supported_types.empty() &&
              std::ranges::find(facility.supported_types, type.id) == facility.supported_types.end())) {
             set_equipment_status(*item, EquipmentStatus::grounded, tick);

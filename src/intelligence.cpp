@@ -58,6 +58,10 @@ void CampaignState::initialize_operations(const ScenarioDefinition& scenario)
                 store.sectors.emplace(sector.id, SectorReport{sector.id, faction, 0, 1000, true});
             }
         }
+        for (const auto sector : scenario.public_sectors) {
+            world_.sector(sector);
+            store.sectors.try_emplace(sector, SectorReport{sector, sector_state(sector).controller, 0, 1000});
+        }
         for (const auto& state : installations_) {
             if (state.installation.operator_faction == faction) {
                 const auto sector = stockpiles_.at(state.installation.stockpile).sector;
@@ -76,7 +80,8 @@ FactionView CampaignState::faction_view(FactionId faction, bool include_events) 
     };
     for (const auto& [sector, report] : store.sectors) {
         auto result = report;
-        if (!result.internal) {
+        // Initial friendly claims can become stale once the scenario can change ownership.
+        if (!result.internal || combat_.enabled) {
             result.confidence = decay(report.confidence, age(report.observed_tick),
                                       operations_.territory_half_life_seconds);
         }
@@ -134,15 +139,17 @@ std::uint32_t CampaignState::observe(FactionId faction, SectorId sector)
     std::uint32_t detected = 0;
     for (const auto& [id, item] : equipment_) {
         const auto& unit = units_.at(item.assignment.unit);
+        const auto category = equipment_types_.at(item.assignment.type).category;
+        const bool airborne = category == EquipmentCategory::helicopter &&
+            (item.status == EquipmentStatus::in_operation || item.status == EquipmentStatus::returning);
         if (unit.faction == faction || unit.sector != sector || item.status == EquipmentStatus::reserve ||
             item.status == EquipmentStatus::in_transit || item.status == EquipmentStatus::lost ||
-            item.status == EquipmentStatus::in_operation || item.status == EquipmentStatus::returning) {
+            airborne) {
             continue;
         }
         const auto found = store.contacts.find(id);
         const auto contact = found == store.contacts.end() ?
             ContactId{static_cast<std::uint32_t>(store.contacts.size() + 1)} : found->second.id;
-        const auto category = equipment_types_.at(item.assignment.type).category;
         const auto classification = category == EquipmentCategory::helicopter ? "aircraft" : "ground";
         store.contacts.insert_or_assign(id, ContactReport{contact, sector, classification, tick, 1000});
         ++detected;

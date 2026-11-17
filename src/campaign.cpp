@@ -110,12 +110,15 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
             throw std::invalid_argument("Duplicate initial state for sector");
         }
         assigned[index] = true;
-        sector_states_[index] = entry.state;
+        const auto control = entry.state.controller == FactionId::neutral ?
+            ControlState::neutral : ControlState::secure;
+        sector_states_[index] = {entry.state.controller, entry.state.objective_points, control};
     }
     initialize_economy(scenario);
     initialize_logistics(scenario);
     initialize_forces(scenario);
     initialize_operations(scenario);
+    initialize_combat(scenario);
 }
 
 const SectorState& CampaignState::sector_state(SectorId sector) const
@@ -125,6 +128,9 @@ const SectorState& CampaignState::sector_state(SectorId sector) const
 
 void CampaignState::advance_ticks(std::uint64_t ticks)
 {
+    if (war_ended()) {
+        return;
+    }
     auto target = clock_;
     target.advance(ticks);
 
@@ -134,8 +140,8 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
     while (clock_.tick() < target.tick()) {
         const auto boundary_step = economy_interval_ticks_ - clock_.tick() % economy_interval_ticks_;
         auto next = target.tick();
-        bool activity_due = logistics_awake || economy_awake || forces_awake || operations_.enabled;
-        if (logistics_awake || forces_awake || operations_.enabled) {
+        bool activity_due = logistics_awake || economy_awake || forces_awake || operations_.enabled || combat_.enabled;
+        if (logistics_awake || forces_awake || operations_.enabled || combat_.enabled) {
             next = clock_.tick() + 1;
         } else if (economy_awake && boundary_step <= next - clock_.tick()) {
             next = clock_.tick() + boundary_step;
@@ -157,7 +163,7 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
         logistics_awake = logistics_awake && update_logistics(next);
         economy_awake = economy_awake || (logistics_awake && !installations_.empty());
         bool produced_or_worked = false;
-        if (economy_awake && step == boundary_step) {
+        if ((economy_awake || (combat_.enabled && !installations_.empty())) && step == boundary_step) {
             produced_or_worked = update_economy(next);
             economy_awake = produced_or_worked;
             logistics_awake = logistics_awake || (economy_awake && !shipments_.empty());
@@ -170,6 +176,14 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
             economy_awake = economy_awake || (forces_awake && !installations_.empty());
         }
         clock_.advance(step);
+        if (combat_.enabled) {
+            update_combat();
+            if (war_ended()) {
+                return;
+            }
+            forces_awake = forces_awake || !equipment_.empty();
+            logistics_awake = logistics_awake || !shipments_.empty();
+        }
         if (operations_.enabled && update_operations()) {
             forces_awake = true;
             economy_awake = !installations_.empty();

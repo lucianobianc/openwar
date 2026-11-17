@@ -183,10 +183,48 @@ struct EventCursor {
     }
 };
 
+void report_war(std::ostream& out, const CampaignState& campaign)
+{
+    const auto& result = campaign.war_result();
+    out << "War: " << war_status_name(result.status);
+    if (campaign.war_ended()) {
+        out << " at tick " << result.tick << " (" << result.cause << ')';
+    }
+    out << '\n';
+}
+
 void report_operations(std::ostream& out, const CampaignState& campaign, FactionId perspective, bool compact)
 {
     if (perspective == FactionId::neutral) {
         out << "Operations observer | separate faction reports\n";
+    }
+    if (campaign.combat_enabled()) {
+        report_war(out, campaign);
+        if (perspective == FactionId::neutral) {
+            out << "Front:";
+            for (const auto& [left, right] : campaign.front_line()) {
+                out << ' ' << static_cast<std::uint32_t>(left) << '-' << static_cast<std::uint32_t>(right);
+            }
+            out << '\n';
+            for (const auto& sector : campaign.world().sectors()) {
+                const auto& state = campaign.sector_state(sector.id);
+                if (compact && state.control != ControlState::contested && state.control != ControlState::unstable) {
+                    continue;
+                }
+                out << "Sector " << static_cast<std::uint32_t>(sector.id) << ' '
+                    << faction_name(state.controller) << " | " << control_name(state.control) << '\n';
+            }
+        }
+        for (const auto& [id, state] : campaign.combat_units()) {
+            const auto& unit = campaign.units().at(id);
+            if (perspective != FactionId::neutral && perspective != unit.faction) {
+                continue;
+            }
+            out << unit.name << " | sector " << static_cast<std::uint32_t>(unit.sector)
+                << " | " << ground_status_name(state.status) << " | morale " << state.morale
+                << " | cohesion " << state.cohesion << " | fatigue " << state.fatigue
+                << " | suppression " << state.suppression << '\n';
+        }
     }
     for (const auto faction : {FactionId::west, FactionId::east}) {
         if (perspective != FactionId::neutral && perspective != faction) {
@@ -233,7 +271,8 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
 }
 
 template<class Output>
-void drain_operations(const CampaignState& campaign, FactionId perspective, std::size_t& next, Output output)
+void drain_operations(const CampaignState& campaign, FactionId perspective, std::size_t& next,
+                      std::size_t& next_battle, Output output)
 {
     FactionView view;
     auto events = campaign.observer_operations_log();
@@ -241,7 +280,24 @@ void drain_operations(const CampaignState& campaign, FactionId perspective, std:
         view = campaign.faction_view(perspective);
         events = view.events;
     }
-    while (next < events.size()) {
+    const auto battles = perspective == FactionId::neutral ?
+        campaign.observer_battle_log() : std::span<const BattleEvent>{};
+    while (next < events.size() || next_battle < battles.size()) {
+        if (next_battle < battles.size() &&
+            (next == events.size() || battles[next_battle].tick <= events[next].tick)) {
+            const auto& battle = battles[next_battle++];
+            std::ostringstream line;
+            line << "Event tick " << battle.tick << " (" << battle.tick * campaign.clock().tick_seconds()
+                 << "s): sector " << static_cast<std::uint32_t>(battle.sector) << ' ' << battle.reason;
+            if (battle.unit) {
+                line << " | unit " << static_cast<std::uint32_t>(*battle.unit);
+            }
+            if (battle.amount) {
+                line << " | value " << battle.amount;
+            }
+            output(line.str());
+            continue;
+        }
         const auto& entry = events[next++];
         std::ostringstream line;
         line << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
@@ -359,7 +415,9 @@ void print_operations(const CampaignState& campaign, FactionId perspective, bool
 {
     if (events) {
         std::size_t next = 0;
-        drain_operations(campaign, perspective, next, [](const std::string& event) { std::cout << event << '\n'; });
+        std::size_t next_battle = 0;
+        drain_operations(campaign, perspective, next, next_battle,
+                         [](const std::string& event) { std::cout << event << '\n'; });
     }
     std::cout << "Tick: " << campaign.clock().tick() << '\n'
               << "Elapsed seconds: " << campaign.clock().elapsed_seconds() << '\n';
@@ -386,6 +444,7 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
         const TerminalScreen screen(ansi);
         EventCursor cursor;
         std::size_t next_operation = 0;
+        std::size_t next_battle = 0;
         std::deque<std::string> recent_events;
         const auto draw = [&] {
             if (events) {
@@ -400,7 +459,7 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
                     recent_events.push_back(std::move(event));
                 };
                 if (perspective) {
-                    drain_operations(campaign, *perspective, next_operation, output);
+                    drain_operations(campaign, *perspective, next_operation, next_battle, output);
                 } else {
                     cursor.drain(campaign, output);
                 }
@@ -412,7 +471,7 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
         const auto start = Clock::now();
         auto next_refresh = start + 100ms;
         auto displayed_tick = initial_tick;
-        while (!interrupted && campaign.clock().tick() - initial_tick < limit) {
+        while (!interrupted && !campaign.war_ended() && campaign.clock().tick() - initial_tick < limit) {
             const auto now = Clock::now();
             const auto due = std::min(limit, ticks_due(now - start, speed, tick_seconds));
             const auto advanced = campaign.clock().tick() - initial_tick;
@@ -436,6 +495,8 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
     if (interrupted) {
         std::cout << "Stopped at tick " << campaign.clock().tick() << " ("
                   << campaign.clock().elapsed_seconds() << " simulated seconds).\n";
+    } else if (ansi && campaign.war_ended()) {
+        report_war(std::cout, campaign);
     }
 }
 

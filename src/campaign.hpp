@@ -2,6 +2,7 @@
 #define OPENWAR_CAMPAIGN_HPP
 
 #include "operations.hpp"
+#include "combat.hpp"
 
 #include <array>
 #include <cstddef>
@@ -60,6 +61,10 @@ private:
 struct SectorState {
     FactionId controller = FactionId::neutral;
     std::uint32_t objective_points = 0;
+    ControlState control = ControlState::neutral;
+    std::optional<FactionId> occupier{};
+    std::uint64_t occupation_since = 0;
+    std::uint64_t last_change_tick = 0;
 };
 
 struct InitialSectorState {
@@ -67,7 +72,7 @@ struct InitialSectorState {
     SectorState state;
 };
 
-enum class Resource { oil_reserve, crude_oil, fuel, materials, spare_parts, supplies, count };
+enum class Resource { oil_reserve, crude_oil, fuel, materials, spare_parts, supplies, ammunition, count };
 using ResourceAmounts = std::array<std::uint64_t, static_cast<std::size_t>(Resource::count)>;
 enum class StockpileId : std::uint32_t {};
 enum class InstallationId : std::uint32_t {};
@@ -110,6 +115,7 @@ struct InstallationState {
     Installation installation;
     // Each interval contributes up to 100 work points, scaled by integrity.
     std::uint64_t work = 0;
+    std::uint64_t reactivation_seconds = 0;
 };
 
 struct EconomyEntry {
@@ -207,6 +213,8 @@ struct EquipmentType {
     ServiceProfile repair;
     std::uint32_t service_interval_seconds;
     std::uint32_t operation_range = 0;
+    std::uint32_t combat_power = 0;
+    bool can_occupy = false;
 };
 
 struct MaintenanceFacility {
@@ -293,6 +301,11 @@ struct ScenarioDefinition {
     std::vector<EquipmentAssignment> equipment{};
     OperationsSettings operations{};
     std::vector<Objective> objectives{};
+    CombatSettings combat{};
+    std::vector<CombatUnit> combat_units{};
+    std::vector<SectorId> public_sectors{};
+    std::vector<VictoryObjective> victory_objectives{};
+    std::vector<CommandObjectives> command_objectives{};
 };
 
 class SimulationClock {
@@ -348,6 +361,13 @@ public:
     std::span<const OperationsEvent> observer_operations_log() const { return operations_log_; }
     OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target);
     bool cancel_order(FactionId actor, MissionId id);
+    bool combat_enabled() const { return combat_.enabled; }
+    bool war_ended() const;
+    const WarResult& war_result() const { return war_result_; }
+    bool declare_surrender(FactionId actor);
+    const auto& combat_units() const { return combat_units_; }
+    std::span<const BattleEvent> observer_battle_log() const { return battle_log_; }
+    std::vector<std::pair<SectorId, SectorId>> front_line() const;
 
 private:
     void initialize_economy(ScenarioDefinition& scenario);
@@ -368,6 +388,17 @@ private:
     bool update_operations();
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
     std::uint32_t observe(FactionId faction, SectorId sector);
+    MissionId next_mission_id(FactionId faction) const;
+    void initialize_combat(const ScenarioDefinition& scenario);
+    OrderResult schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
+    void update_combat();
+    void move_combat_unit(CombatUnit& unit, SectorId sector);
+    void release_ground_equipment(EquipmentId id);
+    void resolve_engagements();
+    void update_territory();
+    void capture_sector(SectorId sector, FactionId faction);
+    void evaluate_war();
+    void conclude_war(WarStatus status, std::string_view cause);
     struct IntelStore {
         std::map<SectorId, SectorReport> sectors;
         std::map<EquipmentId, ContactReport> contacts;  // True IDs remain internal to observation.
@@ -399,12 +430,23 @@ private:
     std::map<FactionId, IntelStore> intelligence_;
     std::map<std::pair<FactionId, MissionId>, Mission> missions_;
     std::vector<OperationsEvent> operations_log_;
+    CombatSettings combat_;
+    std::map<UnitId, CombatUnit> combat_units_;
+    std::vector<BattleEvent> battle_log_;
+    std::vector<VictoryObjective> victory_objectives_;
+    std::vector<CommandObjectives> command_objectives_;
+    std::vector<std::optional<std::uint64_t>> victory_since_;
+    std::map<FactionId, std::uint64_t> initial_strength_;
+    std::map<FactionId, std::uint64_t> capitulation_since_;
+    std::vector<FactionId> surrenders_;
+    WarResult war_result_{};
 };
 
 ScenarioDefinition example_scenario();
 ScenarioDefinition logistics_example_scenario();
 CampaignState maintenance_example_campaign(std::uint32_t seed);
 CampaignState operations_example_campaign(std::uint32_t seed, std::optional<FactionId> player = {});
+ScenarioDefinition combat_example_scenario(std::optional<FactionId> player = {});
 
 }  // namespace openwar
 

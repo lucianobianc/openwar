@@ -15,9 +15,10 @@ enum class SectorId : std::uint32_t;
 enum class EquipmentId : std::uint32_t;
 enum class StockpileId : std::uint32_t;
 enum class FacilityId : std::uint32_t;
+enum class UnitId : std::uint32_t;
 enum class MissionId : std::uint32_t {};
 enum class ContactId : std::uint32_t {};
-enum class MissionKind { recon, patrol, defend, reposition };
+enum class MissionKind { recon, patrol, defend, reposition, attack };
 enum class MissionStatus { scheduled, preparing, in_progress, completed, failed, cancelled };
 
 struct OperationsSettings {
@@ -71,6 +72,9 @@ struct Mission {
     std::uint32_t detections = 0;
     bool manual = false;
     std::optional<FacilityId> relocation{};
+    std::optional<UnitId> ground_unit{};
+    std::vector<SectorId> ground_path{};
+    std::size_t ground_leg = 0;
     bool operator==(const Mission&) const = default;
 };
 

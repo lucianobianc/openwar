@@ -32,7 +32,7 @@ struct Plan {
 };
 
 // This ranking has no access to the campaign or to true enemy positions.
-std::vector<Plan> rank_objectives(const FactionView& view, FactionId faction)
+std::vector<Plan> rank_objectives(const FactionView& view, FactionId faction, bool combat)
 {
     std::vector<Plan> plans;
     for (const auto& objective : view.objectives) {
@@ -48,6 +48,9 @@ std::vector<Plan> rank_objectives(const FactionView& view, FactionId faction)
         } else if (known_friendly(view, faction, objective.sector)) {
             const auto kind = objective.priority > 1 ? MissionKind::defend : MissionKind::patrol;
             plans.push_back({objective.sector, kind, priority, "planner: cover a friendly objective"});
+        } else if (combat) {
+            plans.push_back({objective.sector, MissionKind::attack, priority,
+                             "planner: contest a confirmed objective"});
         }
     }
     std::ranges::sort(plans, [](const auto& left, const auto& right) {
@@ -65,6 +68,7 @@ std::string_view mission_name(MissionKind kind)
     case MissionKind::patrol: return "patrol";
     case MissionKind::defend: return "defend";
     case MissionKind::reposition: return "reposition";
+    case MissionKind::attack: return "attack";
     }
     throw std::invalid_argument("Unknown mission kind");
 }
@@ -84,7 +88,7 @@ std::string_view mission_status_name(MissionStatus status)
 
 OrderResult CampaignState::issue_order(FactionId actor, MissionKind kind, SectorId target)
 {
-    if (!operations_.enabled || operations_.player != actor) {
+    if (war_ended() || !operations_.enabled || operations_.player != actor) {
         return {{}, "player has no authority for this faction"};
     }
     return schedule_mission(actor, kind, target, true);
@@ -95,6 +99,9 @@ OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind,
     mission_name(kind);
     if (static_cast<std::uint32_t>(target) >= world_.sectors().size()) {
         return {{}, "target sector is out of bounds"};
+    }
+    if (kind == MissionKind::attack || (combat_.enabled && kind == MissionKind::defend)) {
+        return schedule_ground_mission(faction, kind, target, manual);
     }
     const auto view = faction_view(faction, false);
     if (kind != MissionKind::recon && !known_friendly(view, faction, target)) {
@@ -171,6 +178,19 @@ OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind,
     if (!chosen) {
         return {{}, refusal};
     }
+    chosen->id = next_mission_id(faction);
+    chosen->manual = manual;
+    chosen->relocation = relocation;
+    missions_.emplace(std::pair{faction, chosen->id}, *chosen);
+    reserve_equipment(chosen->equipment);
+    stockpiles_.at(chosen->launch_stock).reserved[fuel_index] += chosen->fuel;
+    operations_log_.push_back({clock_.tick(), faction, target, chosen->id,
+                               manual ? "player order scheduled" : "autonomous order scheduled"});
+    return {chosen->id, "scheduled"};
+}
+
+MissionId CampaignState::next_mission_id(FactionId faction) const
+{
     const auto maximum = std::numeric_limits<std::uint32_t>::max();
     const auto next_faction = missions_.upper_bound({faction, MissionId{maximum}});
     std::uint32_t number = 1;
@@ -184,21 +204,13 @@ OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind,
             ++number;
         }
     }
-    chosen->id = MissionId{number};
-    chosen->manual = manual;
-    chosen->relocation = relocation;
-    missions_.emplace(std::pair{faction, chosen->id}, *chosen);
-    reserve_equipment(chosen->equipment);
-    stockpiles_.at(chosen->launch_stock).reserved[fuel_index] += chosen->fuel;
-    operations_log_.push_back({clock_.tick(), faction, target, chosen->id,
-                               manual ? "player order scheduled" : "autonomous order scheduled"});
-    return {chosen->id, "scheduled"};
+    return MissionId{number};
 }
 
 bool CampaignState::cancel_order(FactionId actor, MissionId id)
 {
     const auto found = missions_.find({actor, id});
-    if (operations_.player != actor || found == missions_.end() ||
+    if (war_ended() || operations_.player != actor || found == missions_.end() ||
         found->second.status != MissionStatus::scheduled) {
         return false;
     }
@@ -215,7 +227,7 @@ bool CampaignState::update_operations()
     const auto tick = clock_.tick();
     bool equipment_changed = false;
     for (auto& [key, mission] : missions_) {
-        if (!active(mission.status)) {
+        if (mission.ground_unit || !active(mission.status)) {
             continue;
         }
         auto& item = equipment_.at(mission.equipment);
@@ -285,7 +297,7 @@ bool CampaignState::update_operations()
             })) {
                 continue;
             }
-            for (const auto& plan : rank_objectives(view, faction)) {
+            for (const auto& plan : rank_objectives(view, faction, combat_.enabled)) {
                 if (std::ranges::any_of(view.missions, [&](const auto& mission) {
                     return mission.target == plan.target && active(mission.status);
                 })) {

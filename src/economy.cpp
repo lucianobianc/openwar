@@ -39,7 +39,7 @@ void apply(Stockpile& stock, const ResourceAmounts& inputs, const ResourceAmount
 std::string_view resource_name(Resource resource)
 {
     constexpr std::array<std::string_view, static_cast<std::size_t>(Resource::count)> names{
-        "oil reserve (L)", "crude oil (L)", "fuel (L)", "materials", "spare parts", "supplies"
+        "oil reserve (L)", "crude oil (L)", "fuel (L)", "materials", "spare parts", "supplies", "ammunition"
     };
     return names.at(static_cast<std::size_t>(resource));
 }
@@ -139,7 +139,8 @@ bool CampaignState::update_economy(std::uint64_t tick)
         const auto& installation = state.installation;
         const auto& recipe = installation.recipe;
         auto& stock = stockpiles_.at(installation.stockpile);
-        if (installation.operator_faction == FactionId::neutral ||
+        if (tick * clock_.tick_seconds() < state.reactivation_seconds ||
+            installation.operator_faction == FactionId::neutral ||
             installation.integrity == 0 || installation.integrity < minimum_integrity_ ||
             installation.workers < recipe.workers_required ||
             (recipe.requires_power && !installation.has_power) ||

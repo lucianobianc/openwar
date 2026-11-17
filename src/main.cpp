@@ -15,13 +15,13 @@ constexpr std::string_view usage = R"(Usage: openwar [--demo NAME] [--speed N] [
 Without a tick limit, the dashboard runs in real time until Ctrl+C.
 
 Options
-  --demo NAME  Select economy (default), logistics, maintenance, or operations.
+  --demo NAME  Select economy (default), logistics, maintenance, operations, or combat.
   --speed N    Pace the run at N simulated seconds per real second (default 60).
   --ticks N    Stop after N ticks. Runs in batch mode unless speed is specified.
   --events     Show timestamped campaign events.
   --seed N     Set the deterministic seed (default 0).
-  --faction WEST|EAST  Use one faction's view in the operations demo.
-  --order TYPE:SECTOR  Queue a recon, patrol, defend, or reposition order.
+  --faction WEST|EAST  Use one faction's view in the operations or combat demo.
+  --order TYPE:SECTOR  Queue a recon, patrol, defend, reposition, or attack order.
   --cancel ID         Cancel a scheduled order before the simulation starts.
   --help       Show this help.
 
@@ -31,9 +31,10 @@ Examples
   openwar --demo logistics --ticks 100
   openwar --demo maintenance --speed 600 --ticks 12 --events
   openwar --demo operations --faction WEST --order recon:2 --ticks 12 --events
+  openwar --demo combat --ticks 30 --events
 )";
 
-enum class Demo { economy, logistics, maintenance, operations };
+enum class Demo { economy, logistics, maintenance, operations, combat };
 
 Demo parse_demo(std::string_view name)
 {
@@ -49,6 +50,9 @@ Demo parse_demo(std::string_view name)
     if (name == "operations") {
         return Demo::operations;
     }
+    if (name == "combat") {
+        return Demo::combat;
+    }
     throw std::invalid_argument("Unknown demonstration: " + std::string(name));
 }
 
@@ -62,6 +66,8 @@ openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed, std::optiona
         return maintenance_example_campaign(seed);
     case Demo::operations:
         return operations_example_campaign(seed, faction);
+    case Demo::combat:
+        return CampaignState(combat_example_scenario(faction), seed);
     case Demo::logistics: {
         CampaignState campaign(logistics_example_scenario(), seed);
         campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
@@ -94,7 +100,8 @@ void apply_order(openwar::CampaignState& campaign, openwar::FactionId faction, s
     if (sector > UINT32_MAX) {
         throw std::out_of_range("Order sector must fit in 32 bits");
     }
-    for (const auto kind : {MissionKind::recon, MissionKind::patrol, MissionKind::defend, MissionKind::reposition}) {
+    for (const auto kind : {MissionKind::recon, MissionKind::patrol, MissionKind::defend,
+                           MissionKind::reposition, MissionKind::attack}) {
         if (order.substr(0, separator) == mission_name(kind)) {
             const auto result = campaign.issue_order(faction, kind, SectorId{static_cast<std::uint32_t>(sector)});
             if (!result.mission) {
@@ -240,8 +247,9 @@ int main(int argc, char* argv[])
                 speed = static_cast<std::uint32_t>(value);
             }
         }
-        if ((faction || !commands.empty()) && demo != Demo::operations) {
-            throw std::invalid_argument("Faction controls require --demo operations");
+        const bool operations_view = demo == Demo::operations || demo == Demo::combat;
+        if ((faction || !commands.empty()) && !operations_view) {
+            throw std::invalid_argument("Faction controls require --demo operations or --demo combat");
         }
         if (!commands.empty() && !faction) {
             throw std::invalid_argument("Orders require --faction WEST or EAST");
@@ -257,7 +265,7 @@ int main(int argc, char* argv[])
                 }
             }
         }
-        const auto perspective = demo == Demo::operations ?
+        const auto perspective = operations_view ?
             std::optional{faction.value_or(openwar::FactionId::neutral)} : std::nullopt;
         if (!ticks || speed || legacy_realtime) {
             openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events, perspective);

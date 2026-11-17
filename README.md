@@ -152,6 +152,39 @@ using an integer table sampled at sixteenths of a half-life. Contact IDs
 and mission IDs are local to each faction. The demo shortens half-lives to make
 decay visible in a short run. Report publication is immediate on return.
 
+## Abstract combat and territory
+
+```sh
+./openwar --demo combat --ticks 30 --events
+./openwar --demo combat --faction WEST --order attack:1 --ticks 16
+```
+
+The observer displays battle events and the front derived from neighboring
+sector owners. A faction view shows its own units and reports. Ground attacks
+require confirmed territorial intelligence and, for a hostile sector, a
+reported contact. Ground defense requires confirmed friendly territory.
+Movement follows orthogonal, traversable sectors through known friendly
+routes. Each step spends fuel from the unit's deployed stockpile.
+
+Co-located opponents exchange abstract effects using ready equipment,
+condition, experience, morale, cohesion, fatigue, suppression, terrain,
+and supplies.
+Ammunition and supplies are debited from the deployed stockpile. Damage and
+losses apply to existing equipment IDs. Withdrawal takes a movement step,
+and recovery uses the existing maintenance system and local resources.
+
+Capture requires an eligible ground assignment to maintain uncontested
+occupation. Defaults are 30 simulated minutes for ordinary sectors and 120
+for critical sectors. Captured installations keep their inventory and damage
+and wait through stabilization. The combat demo uses shorter intervals and
+illustrative force profiles. Either faction can win by holding the demo's
+central objective for three simulated minutes.
+
+Campaign endings use configured hold objectives, which can also require
+working installations, confirmed capitulation, formal surrender, or a time
+limit. Simultaneous outcomes produce a draw. A final result freezes the
+campaign at its terminal tick.
+
 ## Roadmap
 
 1. M0 — Core. Clock, world, sectors, and factions.
@@ -174,5 +207,6 @@ The roadmap above is the current milestone sequence for the technical annexes.
 - [`LOGISTICS.md`](docs/LOGISTICS.md) describes transport and supply.
 - [`MILITARY_FORCES.md`](docs/MILITARY_FORCES.md) covers equipment, organization, and reserves.
 - [`MAINTENANCE.md`](docs/MAINTENANCE.md) covers readiness and workshop service.
+- [`COMBAT.md`](docs/COMBAT.md) covers abstract engagements, losses, and withdrawal.
 - [`SCENARIOS.md`](docs/SCENARIOS.md) covers predefined, geographic, and procedural scenarios.
 - [`CAMPAIGN_SETUP.md`](docs/CAMPAIGN_SETUP.md) describes campaign creation and configuration.

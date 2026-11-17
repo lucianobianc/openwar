@@ -51,7 +51,7 @@ printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
 printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--demo NAME] [--speed N] [--ticks N] [--events] [--seed N]'
-printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, or operations.'
+printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, operations, or combat.'
 if printf '%s\n' "$help" | grep -E -- '--(logistics-demo|maintenance-demo|realtime)'; then
     exit 1
 fi
@@ -138,3 +138,19 @@ printf '%s\n' "$cancelled" | grep -F 'Mission 1 recon to sector 2 | cancelled'
 reject --demo operations --order recon:2 --ticks 1
 reject --demo operations --faction WEST --order defend:2 --ticks 1
 reject --demo operations --faction NEUTRAL --ticks 1
+
+combat=$("$openwar" --demo combat --seed 42 --ticks 30 --events)
+printf '%s\n' "$combat" | grep -F 'WEST sector 1 mission 1 autonomous ground order scheduled'
+printf '%s\n' "$combat" | grep -F 'EAST sector 1 mission 1 autonomous ground order scheduled'
+printf '%s\n' "$combat" | grep -F 'sector 1 equipment lost'
+printf '%s\n' "$combat" | grep -F 'sector 2 withdrawal completed'
+printf '%s\n' "$combat" | grep -F 'sector 1 sector captured'
+printf '%s\n' "$combat" | grep -E 'War: (WEST|EAST) victory at tick [0-9]+ \(scenario objective\)'
+paced=$("$openwar" --demo combat --seed 42 --ticks 30 --speed 3600 --events)
+test "$(printf '%s\n' "$combat" | grep '^Event tick ')" = "$(printf '%s\n' "$paced" | grep '^Event tick ')"
+friendly=$("$openwar" --demo combat --faction WEST --order attack:1 --ticks 1 --events)
+printf '%s\n' "$friendly" | grep -F 'Mission 1 attack to sector 1 | in progress'
+if printf '%s\n' "$friendly" | grep -E 'East field group|EAST intelligence|^Front:'; then
+    exit 1
+fi
+reject --demo combat --faction WEST --order attack:2 --ticks 1

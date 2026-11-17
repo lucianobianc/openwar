@@ -129,6 +129,48 @@ CampaignState maintenance_example_campaign(std::uint32_t seed)
     return campaign;
 }
 
+ScenarioDefinition combat_example_scenario(std::optional<FactionId> player)
+{
+    auto scenario = example_scenario();
+    scenario.world = WorldDefinition(3, 2, 2000, std::vector<SectorProperties>(6));
+    scenario.initial_sectors.push_back({SectorId{1}, {FactionId::neutral, 1}});
+    scenario.operations = {true, 4, 12 * 60, 4 * 60, 24 * 60, player};
+    scenario.combat = {true, 1, 2 * 60, 3 * 60, 2 * 60, 6 * 3600, 24 * 3600, 90 * 60};
+    scenario.public_sectors = {SectorId{1}};
+    scenario.objectives = {{FactionId::west, SectorId{1}, 3}, {FactionId::east, SectorId{1}, 3}};
+    scenario.victory_objectives = {{FactionId::west, {SectorId{1}}, 3 * 60},
+                                   {FactionId::east, {SectorId{1}}, 3 * 60}};
+    scenario.command_objectives = {{FactionId::west, {SectorId{0}}}, {FactionId::east, {SectorId{2}}}};
+    const auto stock = [&](StockpileId id, SectorId sector, FactionId owner) {
+        const ResourceAmounts load{0, 0, 20, 0, 0, 20, 20};
+        scenario.stockpiles.push_back({id, sector, owner, load, load});
+    };
+    stock(StockpileId{10}, SectorId{0}, FactionId::west);
+    stock(StockpileId{11}, SectorId{2}, FactionId::east);
+    scenario.stockpiles.push_back({
+        StockpileId{12}, SectorId{1}, FactionId::east, {0, 0, 0, 10, 10}, {0, 0, 0, 0, 7}
+    });
+    scenario.installations.push_back({
+        InstallationId{4}, StockpileId{12}, "Central workshop", FactionId::east,
+        {{0, 0, 0, 1}, {0, 0, 0, 0, 1}}, 1, false, 40
+    });
+    scenario.units = {{UnitId{1}, "West field group", FactionId::west, SectorId{0}, {}, FacilityId{1}},
+                      {UnitId{2}, "East field group", FactionId::east, SectorId{2}, {}, FacilityId{2}}};
+    scenario.facilities = {{FacilityId{1}, StockpileId{1}, 1, 1}, {FacilityId{2}, StockpileId{2}, 1, 1}};
+    ServiceProfile repair{180, {0, 0, 0, 0, 1}};
+    scenario.equipment_types = {
+        {EquipmentTypeId{1}, "Heavy game vehicle", FactionId::west, EquipmentCategory::tank,
+         {}, {}, {}, repair, 3600, 0, 110, true},
+        {EquipmentTypeId{2}, "Light game vehicle", FactionId::east, EquipmentCategory::tank,
+         {}, {}, {}, repair, 3600, 0, 14, true}
+    };
+    scenario.equipment = {{EquipmentId{1}, EquipmentTypeId{1}, UnitId{1}},
+                          {EquipmentId{2}, EquipmentTypeId{2}, UnitId{2}},
+                          {EquipmentId{3}, EquipmentTypeId{2}, UnitId{2}}};
+    scenario.combat_units = {{UnitId{1}, StockpileId{10}}, {UnitId{2}, StockpileId{11}, 40}};
+    return scenario;
+}
+
 CampaignState operations_example_campaign(std::uint32_t seed, std::optional<FactionId> player)
 {
     auto scenario = force_example_scenario();
