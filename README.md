@@ -185,6 +185,33 @@ working installations, confirmed capitulation, formal surrender, or a time
 limit. Simultaneous outcomes produce a draw. A final result freezes the
 campaign at its terminal tick.
 
+## Optional campaign viewer
+
+Build the temporary 2D debugging viewer with raylib available through
+`pkg-config`:
+
+```sh
+autoreconf -fi
+./configure --enable-viewer
+make
+./openwar-viewer --demo combat --seed 42
+```
+
+For a raylib installation outside `pkg-config`, pass its include and link
+flags through `RAYLIB_CFLAGS` and `RAYLIB_LIBS` when running `configure`.
+The default build produces the headless CLI without raylib.
+
+The viewer starts paused for inspection. Click a sector for details, use
+Space to pause or resume, and use `[` and `]` to change speed. Scroll over the
+map to zoom or over a panel to see more sector markers or events. Pan with
+the middle or right mouse button or the arrow keys. Press R to fit the map.
+
+Use the perspective buttons or keys 1–3 to switch between Observer, WEST,
+and EAST. Observer shows authoritative ownership, contested sectors, and
+events. Faction views show their own units and the territory, contacts,
+installations, and orders in their reports. The viewer runs the same
+campaign engine in its own process and advances it in whole simulated ticks.
+
 ## Roadmap
 
 1. M0 — Core. Clock, world, sectors, and factions.

@@ -21,8 +21,12 @@
 /build/
 /openwar
 /openwar.exe
+/openwar-viewer
+/openwar-viewer.exe
 /campaign-tests
 /campaign-tests.exe
+/viewer-model-tests
+/viewer-model-tests.exe
 *.a
 *.o
 *.obj
