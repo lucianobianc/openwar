@@ -1,4 +1,5 @@
 #include "campaign.hpp"
+#include "realtime.hpp"
 
 #include <charconv>
 #include <exception>
@@ -10,7 +11,11 @@
 namespace {
 
 constexpr std::string_view usage =
-    "Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]\n";
+    "Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]\n"
+    "               [--realtime [--speed N]] [--events]\n"
+    "  --realtime  Advance until Ctrl+C or the optional --ticks limit.\n"
+    "  --speed N   Positive simulated seconds per real second (default: 1).\n"
+    "  --events    Display timestamped economy and logistics events.\n";
 
 std::uint64_t parse_number(std::string_view text, std::string_view option)
 {
@@ -79,8 +84,11 @@ void report(const openwar::CampaignState& campaign, std::uint32_t seed)
 int main(int argc, char* argv[])
 {
     std::uint32_t seed = 0;
-    std::uint64_t ticks = 1;
+    std::optional<std::uint64_t> ticks;
+    std::optional<std::uint32_t> speed;
     bool logistics_demo = false;
+    bool realtime = false;
+    bool events = false;
     try {
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
@@ -92,7 +100,15 @@ int main(int argc, char* argv[])
                 logistics_demo = true;
                 continue;
             }
-            if (option != "--seed" && option != "--ticks") {
+            if (option == "--realtime") {
+                realtime = true;
+                continue;
+            }
+            if (option == "--events") {
+                events = true;
+                continue;
+            }
+            if (option != "--seed" && option != "--ticks" && option != "--speed") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
             if (++i == argc) {
@@ -104,9 +120,17 @@ int main(int argc, char* argv[])
                     throw std::out_of_range("Seed must fit in 32 bits");
                 }
                 seed = static_cast<std::uint32_t>(value);
-            } else {
+            } else if (option == "--ticks") {
                 ticks = value;
+            } else {
+                if (value == 0 || value > UINT32_MAX) {
+                    throw std::out_of_range("Speed must be a positive 32-bit integer");
+                }
+                speed = static_cast<std::uint32_t>(value);
             }
+        }
+        if (speed && !realtime) {
+            throw std::invalid_argument("--speed requires --realtime");
         }
 
         using namespace openwar;
@@ -114,8 +138,15 @@ int main(int argc, char* argv[])
         if (logistics_demo) {
             campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
         }
-        campaign.advance_ticks(ticks);
-        report(campaign, seed);
+        if (realtime) {
+            cli::run_realtime(campaign, speed.value_or(1), ticks, events);
+        } else {
+            campaign.advance_ticks(ticks.value_or(1));
+            if (events) {
+                cli::print_events(campaign);
+            }
+            report(campaign, seed);
+        }
     } catch (const std::exception& error) {
         std::cerr << "openwar: " << error.what() << '\n' << usage;
         return 1;

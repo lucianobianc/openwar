@@ -1,4 +1,5 @@
 #include "campaign.hpp"
+#include "realtime.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -357,6 +358,42 @@ void test_logistics()
             "New production did not wake a pending shipment");
 }
 
+void test_realtime_pacing()
+{
+    using namespace std::chrono_literals;
+    using openwar::cli::ticks_due;
+    require(ticks_due(59s, 1, 60) == 0 && ticks_due(60s, 1, 60) == 1,
+            "Normal speed did not honor the simulation tick duration");
+    require(ticks_due(1500ms, 60, 60) == 1 && ticks_due(2s, 60, 60) == 2,
+            "Minute-per-second speed did not round down to full ticks");
+    require(ticks_due(1s, 3600, 60) == 60 && ticks_due(1s, 60, 30) == 2,
+            "Pacing did not use the configured speed and tick duration");
+
+    const SupplyRequest request{ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80};
+    CampaignState batch(logistics_example_scenario(), 42);
+    batch.request_supply(request);
+    batch.advance_ticks(60);
+    for (const auto speed : {1u, 60u, 3600u}) {
+        CampaignState paced(logistics_example_scenario(), 42);
+        paced.request_supply(request);
+        const auto duration = 3'600'000ms / speed;
+        for (int frame = 1; frame <= 10; ++frame) {
+            const auto elapsed = duration * frame / 10;
+            const auto target = ticks_due(elapsed, speed, paced.clock().tick_seconds());
+            paced.advance_ticks(target - paced.clock().tick());
+        }
+        require(paced.clock().tick() == batch.clock().tick() &&
+                paced.clock().elapsed_seconds() == batch.clock().elapsed_seconds() &&
+                std::ranges::equal(paced.logistics_log(), batch.logistics_log()) &&
+                std::ranges::equal(paced.economy_ledger(), batch.economy_ledger()),
+                "Campaign time or events depend on execution speed");
+        for (const auto& [id, stock] : batch.stockpiles()) {
+            require(paced.stockpiles().at(id).quantity == stock.quantity,
+                    "Stockpile quantities depend on execution speed");
+        }
+    }
+}
+
 }  // namespace
 
 int main()
@@ -367,4 +404,5 @@ int main()
     test_reproducibility();
     test_economy();
     test_logistics();
+    test_realtime_pacing();
 }

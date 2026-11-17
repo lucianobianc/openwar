@@ -34,6 +34,24 @@ tick duration. `CampaignState` owns the current sector state, clock, and a
 seeded MT19937 stream. Each sector uses the ID `y * width + x` and has
 orthogonal geometric neighbors, including across non-traversable terrain.
 
+## Real-time CLI
+
+```sh
+./openwar --realtime --speed 60 --events --logistics-demo
+```
+
+`--realtime` advances whole simulation ticks and refreshes the dashboard
+until Ctrl+C. The default speed is `1`, or one simulated second per real
+second. Use `--speed 60` for one simulated minute per real second or
+`--speed 3600` for one simulated hour per real second. Speed accepts a
+positive 32-bit integer and applies only in real-time mode.
+
+`--ticks N` still runs a batch when used on its own. With `--realtime`, it
+stops the dashboard after exactly `N` ticks. Add `--events` in either mode to
+see timestamped economy and logistics events. ANSI terminals show the latest
+five events in the dashboard. Redirected output uses plain text and prints
+each event once.
+
 ## Economy
 
 Run `./openwar --ticks 10` to see the first refinery and factory batches.

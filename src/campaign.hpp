@@ -192,6 +192,7 @@ public:
     explicit SimulationClock(std::uint32_t tick_seconds);
     void advance(std::uint64_t ticks);
     std::uint64_t tick() const { return tick_; }
+    std::uint32_t tick_seconds() const { return tick_seconds_; }
     std::uint64_t elapsed_seconds() const { return tick_ * tick_seconds_; }
 
 private:

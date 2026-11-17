@@ -1,0 +1,29 @@
+#ifndef OPENWAR_REALTIME_HPP
+#define OPENWAR_REALTIME_HPP
+
+#include "campaign.hpp"
+
+#include <chrono>
+#include <limits>
+
+namespace openwar::cli {
+
+// Convert absolute elapsed time so refresh intervals cannot accumulate drift.
+inline std::uint64_t ticks_due(std::chrono::duration<long double> elapsed,
+                               std::uint32_t speed, std::uint32_t tick_seconds)
+{
+    const auto ticks = elapsed.count() * speed / tick_seconds;
+    const auto maximum = std::numeric_limits<std::uint64_t>::max() / tick_seconds;
+    if (ticks >= static_cast<long double>(maximum)) {
+        return maximum;
+    }
+    return static_cast<std::uint64_t>(ticks);
+}
+
+void print_events(const CampaignState& campaign);
+void run_realtime(CampaignState& campaign, std::uint32_t speed,
+                  std::optional<std::uint64_t> tick_limit, bool events);
+
+}  // namespace openwar::cli
+
+#endif

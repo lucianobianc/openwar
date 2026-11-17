@@ -27,9 +27,21 @@ printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
 printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--seed UINT32] [--ticks UINT64] [--logistics-demo]'
+printf '%s\n' "$help" | grep -F '[--realtime [--speed N]] [--events]'
 output=$("$openwar" --logistics-demo --ticks 6)
 printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Shipment 1: delivered, cargo on carrier: 0'
 printf '%s\n' "$output" | tr -d '\r' | grep -Fx '  fuel (L): 80/120'
+
+batch=$("$openwar" --seed 42 --logistics-demo --ticks 10 --events)
+live=$("$openwar" --seed 42 --logistics-demo --realtime --speed 3600 --ticks 10 --events)
+printf '%s\n' "$live" | tr -d '\r' | grep -Fx 'Tick: 10 | Elapsed seconds: 600 | Speed: 3600x'
+printf '%s\n' "$live" | tr -d '\r' | grep -Fx 'Shipment 1: delivered, cargo on carrier: 0'
+batch_events=$(printf '%s\n' "$batch" | grep '^Event tick ')
+live_events=$(printf '%s\n' "$live" | grep '^Event tick ')
+test "$batch_events" = "$live_events"
+printf '%s\n' "$live_events" | tr -d '\r' | grep -Fx 'Event tick 6 (360s): shipment 1 delivered [80]'
+output=$("$openwar" --realtime --ticks 0)
+printf '%s\n' "$output" | tr -d '\r' | grep -Fx 'Tick: 0 | Elapsed seconds: 0 | Speed: 1x'
 
 reject()
 {
@@ -46,3 +58,10 @@ reject --ticks -1
 reject --ticks 12abc
 reject --ticks
 reject --unknown
+reject --speed 60
+reject --realtime --speed 0
+reject --realtime --speed -1
+reject --realtime --speed 1.5
+reject --realtime --speed 4294967296
+reject --realtime --speed
+reject --realtime --ticks 18446744073709551615
