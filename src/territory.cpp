@@ -153,6 +153,7 @@ void CampaignState::update_territory()
 void CampaignState::capture_sector(SectorId sector, FactionId faction)
 {
     auto& state = sector_states_.at(static_cast<std::uint32_t>(sector));
+    const auto previous = state.controller;
     state.controller = faction;
     state.control = ControlState::unstable;
     state.last_change_tick = clock_.tick();
@@ -198,7 +199,8 @@ void CampaignState::capture_sector(SectorId sector, FactionId faction)
     if (operations_.enabled) {
         observe(faction, sector);
     }
-    record_event(battle_log_, {clock_.tick(), sector, "sector captured", {}, static_cast<std::uint32_t>(faction)});
+    record_event(battle_log_, {clock_.tick(), sector, "sector captured", {},
+                                static_cast<std::uint32_t>(faction), 0, previous});
 }
 
 bool CampaignState::declare_surrender(FactionId actor)

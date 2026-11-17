@@ -15,7 +15,7 @@ constexpr std::string_view usage = R"(Usage: openwar [--demo NAME] [--speed N] [
 Without a tick limit, the dashboard runs in real time until Ctrl+C.
 
 Options
-  --demo NAME  Select economy (default), logistics, maintenance, operations, or combat.
+  --demo NAME  Select economy (default), logistics, maintenance, operations, combat, or campaign.
   --speed N    Pace the run at N simulated seconds per real second (default 60).
   --ticks N    Stop after N ticks. Runs in batch mode unless speed is specified.
   --events     Show timestamped campaign events.
@@ -32,9 +32,10 @@ Examples
   openwar --demo maintenance --speed 600 --ticks 12 --events
   openwar --demo operations --faction WEST --order recon:2 --ticks 12 --events
   openwar --demo combat --ticks 30 --events
+  openwar --demo campaign --seed 42 --ticks 3000
 )";
 
-enum class Demo { economy, logistics, maintenance, operations, combat };
+enum class Demo { economy, logistics, maintenance, operations, combat, campaign };
 
 Demo parse_demo(std::string_view name)
 {
@@ -53,6 +54,9 @@ Demo parse_demo(std::string_view name)
     if (name == "combat") {
         return Demo::combat;
     }
+    if (name == "campaign") {
+        return Demo::campaign;
+    }
     throw std::invalid_argument("Unknown demonstration: " + std::string(name));
 }
 
@@ -68,6 +72,8 @@ openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed, std::optiona
         return operations_example_campaign(seed, faction);
     case Demo::combat:
         return CampaignState(combat_example_scenario(faction), seed);
+    case Demo::campaign:
+        return long_example_campaign(seed);
     case Demo::logistics: {
         CampaignState campaign(logistics_example_scenario(), seed);
         campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
@@ -265,13 +271,17 @@ int main(int argc, char* argv[])
                 }
             }
         }
-        const auto perspective = operations_view ?
+        const auto perspective = operations_view || demo == Demo::campaign ?
             std::optional{faction.value_or(openwar::FactionId::neutral)} : std::nullopt;
         if (!ticks || speed || legacy_realtime) {
             openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events, perspective);
         } else {
             campaign.advance_ticks(*ticks);
-            if (perspective) {
+            if (demo == Demo::campaign) {
+                if (events) {
+                    openwar::cli::print_operations_events(campaign, openwar::FactionId::neutral);
+                }
+            } else if (perspective) {
                 openwar::cli::print_operations(campaign, *perspective, events);
             } else {
                 if (events) {
@@ -279,6 +289,9 @@ int main(int argc, char* argv[])
                 }
                 report(campaign, seed);
             }
+        }
+        if (demo == Demo::campaign) {
+            openwar::cli::print_campaign_summary(std::cout, campaign, seed);
         }
     } catch (const std::exception& error) {
         std::cerr << "openwar: " << error.what() << '\n' << usage;

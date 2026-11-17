@@ -60,6 +60,7 @@ struct BattleEvent {
     std::optional<UnitId> unit{};
     std::uint32_t amount = 0;
     std::uint64_t sequence = 0;
+    std::optional<FactionId> previous_controller{};
     bool operator==(const BattleEvent&) const = default;
 };
 

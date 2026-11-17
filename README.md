@@ -165,8 +165,9 @@ decay visible in a short run. Report publication is immediate on return.
 
 The observer displays battle events and the front derived from neighboring
 sector owners. A faction view shows its own units and reports. Ground attacks
-require confirmed territorial intelligence and, for a hostile sector, a
-reported contact. Ground defense requires confirmed friendly territory.
+require confirmed territorial intelligence. Hostile sectors also require a
+reported contact or a recent complete survey. Ground defense requires
+confirmed friendly territory.
 Movement follows orthogonal, traversable sectors through known friendly
 routes. Each step spends fuel from the unit's deployed stockpile.
 
@@ -188,6 +189,27 @@ Campaign endings use configured hold objectives, which can also require
 working installations, confirmed capitulation, formal surrender, or a time
 limit. Simultaneous outcomes produce a draw. A final result freezes the
 campaign at its terminal tick.
+
+## Long campaign demonstration
+
+```sh
+./openwar --demo campaign --seed 42 --ticks 3000
+./openwar --demo campaign --seed 42 --ticks 1000 --events
+./openwar-gui --demo campaign --seed 42
+```
+
+The 9×7 scenario has three river crossings, rear industrial sites, forward
+workshops, and opposing armor and reconnaissance formations. Opening supply
+orders let the logistics system move factory output, ammunition, and fuel
+to the formations. The campaign holds additional vehicles in reserve.
+
+Victory by objective requires holding all three crossings and an operational
+enemy relay for two simulated hours. The normal capitulation rules also
+apply. If neither side wins within 48 simulated hours, the time limit
+produces a draw. Headless execution prints a summary at the end of the run.
+It counts combat resolution intervals, ownership transfers, equipment and
+mission outcomes, and stockpile consumption. Shipments are reported separately
+because moving stock does not consume the cargo.
 
 ## Campaign viewer
 

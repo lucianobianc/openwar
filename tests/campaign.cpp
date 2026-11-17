@@ -940,6 +940,81 @@ void test_war_endings()
             "Mutual surrender did not end in a draw");
 }
 
+void test_long_campaign()
+{
+    auto campaign = long_example_campaign(42);
+    require(campaign.world().width() == 9 && campaign.world().height() == 7 &&
+            !campaign.world().sector(SectorId{13}).properties.traversable &&
+            !campaign.shipments().empty(), "Missing campaign geography or supply orders");
+    const ContactReport old_contact{ContactId{1}, SectorId{31}, "ground", 40, 300};
+    SectorReport report{SectorId{31}, FactionId::neutral, 47, 1000};
+    require(current_contact(old_contact, report), "A partial report superseded an earlier observation");
+    report.surveyed = true;
+    require(!current_contact(old_contact, report) &&
+            current_contact(ContactReport{ContactId{1}, SectorId{31}, "ground", 47, 1000}, report),
+            "The planner did not distinguish obsolete from current contacts");
+
+    campaign.advance_ticks(10);
+    for (const auto faction : {FactionId::west, FactionId::east}) {
+        const auto view = campaign.faction_view(faction, false);
+        require(std::ranges::count(view.missions, MissionKind::attack, &Mission::kind) >= 2 &&
+                std::ranges::all_of(view.missions, [](const auto& mission) {
+                    return mission.kind != MissionKind::attack || mission.ground_path.size() == 2;
+                }), "The planner serialized parallel fronts or bypassed the nearest formation");
+    }
+    while (!campaign.war_ended()) {
+        campaign.advance_ticks(17);
+        require(campaign.clock().tick() <= 2880, "The long scenario missed its terminal deadline");
+    }
+    auto repeated = long_example_campaign(42);
+    repeated.advance_ticks(3000);
+    require(campaign.clock().tick() >= 1000 && campaign.war_result() == repeated.war_result() &&
+            std::ranges::equal(campaign.observer_battle_log(), repeated.observer_battle_log()) &&
+            std::ranges::equal(campaign.observer_operations_log(), repeated.observer_operations_log()) &&
+            std::ranges::equal(campaign.economy_ledger(), repeated.economy_ledger()) &&
+            std::ranges::equal(campaign.logistics_log(), repeated.logistics_log()) &&
+            std::ranges::equal(campaign.forces_log(), repeated.forces_log()) &&
+            campaign.next_random() == repeated.next_random(), "Long campaign changed with tick batching");
+    require(std::ranges::any_of(campaign.logistics_log(), [&](const auto& event) {
+                const auto& order = campaign.shipments().at(event.shipment).request;
+                return event.kind == LogisticsEventKind::delivered && order.resource == Resource::fuel &&
+                       std::ranges::any_of(campaign.combat_units(), [&](const auto& entry) {
+                           return entry.second.stores == order.destination;
+                       });
+            }) && std::ranges::any_of(campaign.forces_log(), [](const auto& event) {
+                return event.kind == ForcesEventKind::service_completed && event.service == ServiceKind::repair;
+            }), "Campaign failed to deliver fuel or service damaged equipment");
+    for (const auto faction : {FactionId::west, FactionId::east}) {
+        const auto view = campaign.faction_view(faction, false);
+        require(std::ranges::count_if(view.missions, [](const auto& mission) {
+                    return mission.kind == MissionKind::attack && mission.status == MissionStatus::completed;
+                }) >= 2 && std::ranges::any_of(campaign.observer_battle_log(), [faction](const auto& event) {
+                    return event.previous_controller && event.amount == static_cast<std::uint32_t>(faction);
+                }), "A faction failed to complete repeated territorial attacks");
+    }
+}
+
+void test_depleted_withdrawal()
+{
+    auto scenario = combat_example_scenario();
+    scenario.operations.planner_interval_ticks = 0;
+    for (std::size_t i = 0; i < scenario.units.size(); ++i) {
+        scenario.units[i].sector = SectorId{1};
+        scenario.units[i].facility.reset();
+        const auto stores = scenario.combat_units[i].stores;
+        auto stock = std::ranges::find(scenario.stockpiles, stores, &Stockpile::id);
+        stock->sector = SectorId{1};
+        stock->quantity[static_cast<std::size_t>(Resource::ammunition)] = 0;
+    }
+    CampaignState campaign(scenario, 42);
+    campaign.advance_ticks(2);
+    require(campaign.units().at(UnitId{1}).sector == SectorId{0} &&
+            campaign.units().at(UnitId{2}).sector == SectorId{2} &&
+            std::ranges::none_of(campaign.observer_battle_log(), [](const auto& event) {
+                return event.reason == "ammunition expended";
+            }), "Out-of-ammunition units remained pinned despite open withdrawal routes");
+}
+
 }  // namespace
 
 int main()
@@ -956,4 +1031,6 @@ int main()
     test_recon_revisit();
     test_combat_and_territory();
     test_war_endings();
+    test_long_campaign();
+    test_depleted_withdrawal();
 }

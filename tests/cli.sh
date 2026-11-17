@@ -51,7 +51,7 @@ printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
 printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--demo NAME] [--speed N] [--ticks N] [--events] [--seed N]'
-printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, operations, or combat.'
+printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, operations, combat, or campaign.'
 if printf '%s\n' "$help" | grep -E -- '--(logistics-demo|maintenance-demo|realtime)'; then
     exit 1
 fi
@@ -154,3 +154,10 @@ if printf '%s\n' "$friendly" | grep -E 'East field group|EAST intelligence|^Fron
     exit 1
 fi
 reject --demo combat --faction WEST --order attack:2 --ticks 1
+
+campaign=$("$openwar" --demo campaign --seed 42 --ticks 3000)
+printf '%s\n' "$campaign" | grep -Fx 'Campaign summary | seed 42'
+printf '%s\n' "$campaign" | grep -Fx 'Elapsed seconds: 172800'
+printf '%s\n' "$campaign" | grep -Fx 'War: draw at tick 2880 (time limit)'
+printf '%s\n' "$campaign" | grep -E '^Engagement intervals: [1-9][0-9]*'
+printf '%s\n' "$campaign" | grep -F 'Shipments delivered: 28/28'

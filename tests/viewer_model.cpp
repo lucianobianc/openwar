@@ -100,4 +100,22 @@ int main()
     require(moved != captured.events.end() && lost != captured.events.end() &&
             started < moved && moved < engaged && engaged < lost,
             "Same-tick events were grouped by subsystem instead of emission order");
+
+    auto displayed = long_example_campaign(42);
+    auto headless = long_example_campaign(42);
+    for (int tick = 0; tick < 600; ++tick) {
+        const auto frame = read_snapshot(displayed, {});
+        require(frame.width == 9 && frame.height == 7 && frame.tick == displayed.clock().tick(),
+                "Long campaign viewer used different geometry or time");
+        read_snapshot(displayed, tick % 2 == 0 ? FactionId::west : FactionId::east);
+        displayed.advance_ticks(1);
+    }
+    headless.advance_ticks(600);
+    require(displayed.war_result() == headless.war_result() && displayed.front_line() == headless.front_line() &&
+            std::ranges::equal(displayed.observer_battle_log(), headless.observer_battle_log()) &&
+            std::ranges::equal(displayed.observer_operations_log(), headless.observer_operations_log()) &&
+            std::ranges::equal(displayed.logistics_log(), headless.logistics_log()) &&
+            std::ranges::equal(displayed.forces_log(), headless.forces_log()) &&
+            std::ranges::equal(displayed.economy_ledger(), headless.economy_ledger()),
+            "Viewer snapshots changed the long campaign");
 }

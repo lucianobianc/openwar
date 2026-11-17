@@ -422,15 +422,15 @@ int main(int argc, char* argv[])
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
             if (option == "--help") {
-                std::cout << "Usage: openwar-gui [--demo combat|operations] [--seed UINT32]\n";
+                std::cout << "Usage: openwar-gui [--demo combat|operations|campaign] [--seed UINT32]\n";
                 return 0;
             }
             if ((option != "--seed" && option != "--demo") || i + 1 == argc) {
-                throw std::invalid_argument("Expected --demo combat|operations or --seed UINT32");
+                throw std::invalid_argument("Expected --demo combat|operations|campaign or --seed UINT32");
             }
             const std::string_view value = argv[++i];
             if (option == "--demo") {
-                if (value != "combat" && value != "operations") {
+                if (value != "combat" && value != "operations" && value != "campaign") {
                     throw std::invalid_argument("Unknown viewer demonstration");
                 }
                 scenario = value;
@@ -442,7 +442,8 @@ int main(int argc, char* argv[])
                 }
             }
         }
-        auto campaign = scenario == "combat" ? CampaignState(combat_example_scenario(), seed) :
+        auto campaign = scenario == "campaign" ? long_example_campaign(seed) :
+                        scenario == "combat" ? CampaignState(combat_example_scenario(), seed) :
                                                operations_example_campaign(seed);
         run(campaign);
     } catch (const std::exception& error) {

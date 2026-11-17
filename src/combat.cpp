@@ -158,12 +158,14 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
         return {{}, "target lacks suitable confirmed territorial intelligence"};
     }
     if (kind == MissionKind::attack && report->second.estimated_controller != FactionId::neutral &&
+        !report->second.surveyed &&
         std::ranges::none_of(view.contacts, [target](const auto& contact) {
             return contact.estimated_sector == target && contact.confidence >= 350;
         })) {
         return {{}, "attack requires a reported contact in the estimated sector"};
     }
 
+    std::optional<Mission> chosen;
     for (const auto& [id, combat] : combat_units_) {
         const auto& unit = units_.at(id);
         if (unit.faction != faction || combat.status != GroundStatus::holding ||
@@ -175,7 +177,8 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
         }
         const auto path = find_ground_path(world_, view, faction, unit.sector, target);
         const auto& stores = stockpiles_.at(combat.stores);
-        if (path.empty() || free_stock(stores, fuel) < path.size() - 1 ||
+        if (path.empty() || (chosen && path.size() >= chosen->ground_path.size()) ||
+            free_stock(stores, fuel) < path.size() - 1 ||
             !free_stock(stores, supply) || (kind == MissionKind::attack && !free_stock(stores, ammo))) {
             continue;
         }
@@ -184,19 +187,24 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
                 !equipment_types_.at(item.assignment.type).can_occupy) {
                 continue;
             }
-            const auto mission_id = next_mission_id(faction);
-            Mission mission{mission_id, faction, kind, target, item_id, combat.stores, 0, 0};
-            mission.ground_path = path;
-            mission.ground_unit = id;
-            mission.manual = manual;
-            missions_.emplace(std::pair{faction, mission_id}, std::move(mission));
-            reserve_equipment(item_id);
-            record_event(operations_log_, {clock_.tick(), faction, target, mission_id,
-                                       manual ? "player ground order scheduled" : "autonomous ground order scheduled"});
-            return {mission_id, "scheduled"};
+            chosen = Mission{MissionId{}, faction, kind, target, item_id, combat.stores, 0, 0};
+            chosen->ground_path = path;
+            chosen->ground_unit = id;
+            break;
         }
     }
-    return {{}, "no eligible supplied ground unit with a known route"};
+    if (!chosen) {
+        return {{}, "no eligible supplied ground unit with a known route"};
+    }
+    const auto mission_id = next_mission_id(faction);
+    chosen->id = mission_id;
+    chosen->manual = manual;
+    const auto equipment = chosen->equipment;
+    missions_.emplace(std::pair{faction, mission_id}, std::move(*chosen));
+    reserve_equipment(equipment);
+    record_event(operations_log_, {clock_.tick(), faction, target, mission_id,
+        manual ? "player ground order scheduled" : "autonomous ground order scheduled"});
+    return {mission_id, "scheduled"};
 }
 
 void CampaignState::move_combat_unit(CombatUnit& combat, SectorId sector)
@@ -441,7 +449,7 @@ void CampaignState::resolve_engagements()
             }
             const auto& stores = stockpiles_.at(state.stores);
             const bool depleted = !free_stock(stores, ammo) || !free_stock(stores, supply);
-            if (!hits[id] || (state.morale >= 45 && state.cohesion >= 45 && !depleted)) {
+            if (!depleted && (!hits[id] || (state.morale >= 45 && state.cohesion >= 45))) {
                 continue;
             }
             for (const auto neighbor : world_.sector(sector).neighbors) {

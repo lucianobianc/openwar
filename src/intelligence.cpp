@@ -40,6 +40,7 @@ void CampaignState::initialize_operations(const ScenarioDefinition& scenario)
     }
     if (operations_.territory_half_life_seconds == 0 || operations_.contact_half_life_seconds == 0 ||
         operations_.installation_half_life_seconds == 0 ||
+        operations_.max_autonomous_missions == 0 ||
         (operations_.player && *operations_.player != FactionId::west && *operations_.player != FactionId::east)) {
         throw std::invalid_argument("Invalid operations settings");
     }
@@ -126,10 +127,9 @@ std::uint32_t CampaignState::observe(FactionId faction, SectorId sector)
     auto& store = intelligence_.at(faction);
     const auto tick = clock_.tick();
     const auto& state = sector_state(sector);
-    store.sectors.insert_or_assign(sector, SectorReport{sector, state.controller, tick, 1000,
-        state.controller == faction, state.control == ControlState::contested});
     const bool open = world_.sector(sector).properties.terrain != Terrain::forest;
-    // A sector survey observes stationary contacts in open terrain. No match preserves old reports.
+    store.sectors.insert_or_assign(sector, SectorReport{sector, state.controller, tick, 1000,
+        state.controller == faction, state.control == ControlState::contested, open});
     if (!open) {
         return 0;
     }

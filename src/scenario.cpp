@@ -194,4 +194,151 @@ CampaignState operations_example_campaign(std::uint32_t seed, std::optional<Fact
     return CampaignState(std::move(scenario), seed);
 }
 
+CampaignState long_example_campaign(std::uint32_t seed)
+{
+    const SectorProperties plains{};
+    const SectorProperties forest{Terrain::forest, true};
+    const SectorProperties water{Terrain::water, false};
+    ScenarioDefinition scenario{WorldDefinition(9, 7, 2000, {
+        plains, plains, forest, plains, plains, plains, forest, plains, plains,
+        forest, plains, plains, forest, water,  forest, plains, plains, forest,
+        plains, forest, plains, plains, water,  plains, plains, forest, plains,
+        plains, plains, plains, plains, plains, plains, plains, plains, plains,
+        plains, forest, plains, plains, water,  plains, plains, forest, plains,
+        forest, plains, plains, forest, water,  forest, plains, plains, forest,
+        plains, plains, forest, plains, plains, plains, forest, plains, plains,
+    }), {}};
+    scenario.operations = {true, 10};
+    scenario.operations.max_autonomous_missions = 4;
+    scenario.combat.enabled = true;
+    scenario.combat.interval_ticks = 5;
+    scenario.combat.time_limit_seconds = 48 * 3600;
+    const std::array crossings{
+        scenario.world.sector_id(4, 0), scenario.world.sector_id(4, 3), scenario.world.sector_id(4, 6)
+    };
+    scenario.public_sectors.assign(crossings.begin(), crossings.end());
+    for (const auto& sector : scenario.world.sectors()) {
+        const auto owner = sector.x < 4 ? FactionId::west :
+                           sector.x > 4 ? FactionId::east : FactionId::neutral;
+        const auto points = sector.y == 3 && (sector.x == 0 || sector.x == 4 || sector.x == 8) ? 2u : 0u;
+        scenario.initial_sectors.push_back({sector.id, {owner, points}});
+    }
+
+    const auto road = [&](SectorId from, SectorId to) {
+        const auto id = static_cast<std::uint32_t>(scenario.routes.size()) + 1;
+        scenario.routes.push_back({RouteId{id}, from, to, 4, 2});
+        scenario.routes.push_back({RouteId{id + 1}, to, from, 4, 2});
+    };
+    std::vector<SupplyRequest> orders;
+    for (const auto faction : {FactionId::west, FactionId::east}) {
+        const bool west = faction == FactionId::west;
+        const std::uint32_t base = west ? 0 : 100;
+        const auto at = [&](std::uint32_t x, std::uint32_t y) {
+            return scenario.world.sector_id(west ? x : 8 - x, y);
+        };
+        const auto industry = at(0, 3);
+        const StockpileId industry_stock{base + 1};
+        const StockpileId air_stock{base + 2};
+        const InstallationId relay{base + 4};
+        const SectorId enemy_relay = scenario.world.sector_id(west ? 5 : 3, 3);
+        const InstallationId enemy_relay_id{west ? 104u : 4u};
+        const auto airfield = at(2, 3);
+        constexpr ResourceAmounts industrial_capacity{600, 100, 250, 240, 80, 100, 120};
+        scenario.stockpiles.push_back({
+            industry_stock, industry, faction, industrial_capacity, {600, 0, 0, 240, 0, 0, 90}
+        });
+        scenario.installations.insert(scenario.installations.end(), {
+            {InstallationId{base + 1}, industry_stock, "Oil field", faction, {{20}, {0, 20}, 2}},
+            {InstallationId{base + 2}, industry_stock, "Refinery", faction, {{0, 20}, {0, 0, 16}, 3}},
+            {InstallationId{base + 3}, industry_stock, "Supply works", faction,
+             {{0, 0, 0, 8}, {0, 0, 0, 0, 3, 10}, 3}},
+        });
+        scenario.stockpiles.push_back({air_stock, airfield, faction, {0, 0, 180, 0, 24}, {0, 0, 40, 0, 2}});
+        scenario.facilities.push_back({FacilityId{base + 1}, air_stock, 2, 2});
+
+        for (std::uint32_t x = 0; x < 3; ++x) {
+            road(at(x, 3), at(x + 1, 3));
+        }
+        for (std::uint32_t y = 0; y < 6; ++y) {
+            road(at(2, y), at(2, y + 1));
+        }
+
+        const auto shipment = [&](StockpileId target, Resource resource, std::uint64_t amount) {
+            const auto id = static_cast<std::uint32_t>(orders.size()) + 1;
+            orders.push_back({ShipmentId{id}, industry_stock, target, resource, amount});
+            scenario.carriers.push_back({CarrierId{id}, faction, industry, 80, 16});
+        };
+        shipment(air_stock, Resource::fuel, 80);
+        shipment(air_stock, Resource::spare_parts, 18);
+
+        const EquipmentTypeId armor{base + 1};
+        const EquipmentTypeId scout{base + 2};
+        ServiceProfile repair{300};
+        repair.costs[static_cast<std::size_t>(Resource::spare_parts)] = 2;
+        scenario.equipment_types.push_back({
+            armor, "Armored vehicle", faction, EquipmentCategory::tank, {}, {}, {300}, repair, 180 * 60, 0, 10, true
+        });
+        scenario.equipment_types.push_back({
+            scout, "Reconnaissance helicopter", faction, EquipmentCategory::helicopter,
+            {60}, {120}, {300, repair.costs}, repair, 60 * 60, 6
+        });
+
+        for (std::uint32_t lane = 0; lane < 3; ++lane) {
+            const auto y = 3 * lane;
+            const auto forward = at(3, y);
+            const StockpileId shop_stock{base + 10 + lane};
+            const FacilityId shop{base + 10 + lane};
+            const UnitId formation{base + 10 + lane};
+            const StockpileId stores{base + 20 + lane};
+            if (y != 3) {
+                road(at(2, y), forward);
+            }
+            scenario.stockpiles.push_back({shop_stock, forward, faction,
+                {0, 0, 0, 8, 16}, {0, 0, 0, 8, 4}});
+            scenario.facilities.push_back({shop, shop_stock, 2, 2});
+            scenario.stockpiles.push_back({stores, forward, faction,
+                {0, 0, 48, 0, 0, 48, 48}, {0, 0, 16, 0, 0, 16, 16}});
+            constexpr std::array names{"Northern armor", "Central armor", "Southern armor"};
+            scenario.units.push_back({formation, names[lane], faction, forward, {}, shop});
+            scenario.combat_units.push_back({formation, stores});
+            // Both sides have equal inventories, concentrated on opposite flanks.
+            const std::uint32_t vehicles = lane == 1 ? 3 : (lane == (west ? 0u : 2u) ? 4 : 2);
+            for (std::uint32_t item = 0; item <= vehicles; ++item) {
+                scenario.equipment.push_back({EquipmentId{base + 10 + lane * 5 + item}, armor, formation,
+                    item == vehicles ? "Home reserve" : ""});
+            }
+            shipment(shop_stock, Resource::spare_parts, 5);
+            shipment(stores, Resource::supplies, 8);
+            shipment(stores, Resource::ammunition, 8);
+            shipment(stores, Resource::fuel, 18);
+            scenario.objectives.push_back({faction, crossings[lane], y == 3 ? 5u : 4u});
+            scenario.objectives.push_back({faction, forward, 2});
+        }
+        scenario.installations.push_back({
+            relay, StockpileId{base + 11}, "Central relay workshop", faction,
+            {{0, 0, 0, 2}, {0, 0, 0, 0, 1}}
+        });
+        for (std::uint32_t wing = 0; wing < 2; ++wing) {
+            const UnitId unit{base + 30 + wing};
+            scenario.units.push_back({unit, "Reconnaissance flight", faction, airfield, {}, FacilityId{base + 1}});
+            scenario.equipment.push_back({EquipmentId{base + 30 + wing}, scout, unit});
+        }
+        scenario.objectives.push_back({faction, enemy_relay, 3});
+        scenario.command_objectives.push_back({faction, {industry, at(3, 3)}});
+        scenario.victory_objectives.push_back({
+            faction, {crossings[0], crossings[1], crossings[2], enemy_relay}, 120 * 60, {enemy_relay_id}
+        });
+    }
+    for (const auto crossing : crossings) {
+        const auto y = scenario.world.sector(crossing).y;
+        road(scenario.world.sector_id(3, y), crossing);
+        road(crossing, scenario.world.sector_id(5, y));
+    }
+    CampaignState campaign(std::move(scenario), seed);
+    for (const auto& order : orders) {
+        campaign.request_supply(order);
+    }
+    return campaign;
+}
+
 }  // namespace openwar

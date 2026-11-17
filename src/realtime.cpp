@@ -411,17 +411,105 @@ void print_events(const CampaignState& campaign)
     EventCursor{}.drain(campaign, [](const std::string& event) { std::cout << event << '\n'; });
 }
 
+void print_operations_events(const CampaignState& campaign, FactionId perspective)
+{
+    std::size_t next = 0;
+    std::size_t next_battle = 0;
+    drain_operations(campaign, perspective, next, next_battle,
+                     [](const std::string& event) { std::cout << event << '\n'; });
+}
+
 void print_operations(const CampaignState& campaign, FactionId perspective, bool events)
 {
     if (events) {
-        std::size_t next = 0;
-        std::size_t next_battle = 0;
-        drain_operations(campaign, perspective, next, next_battle,
-                         [](const std::string& event) { std::cout << event << '\n'; });
+        print_operations_events(campaign, perspective);
     }
     std::cout << "Tick: " << campaign.clock().tick() << '\n'
               << "Elapsed seconds: " << campaign.clock().elapsed_seconds() << '\n';
     report_operations(std::cout, campaign, perspective, false);
+}
+
+void print_campaign_summary(std::ostream& out, const CampaignState& campaign, std::uint32_t seed)
+{
+    out << "Campaign summary | seed " << seed << '\n'
+        << "Tick: " << campaign.clock().tick() << '\n'
+        << "Elapsed seconds: " << campaign.clock().elapsed_seconds() << '\n';
+    report_war(out, campaign);
+    const auto battles = campaign.observer_battle_log();
+    std::array<std::size_t, 3> gains{};
+    std::array<std::size_t, 3> losses{};
+    std::size_t intervals = 0;
+    std::size_t exchanges = 0;
+    bool fired = false;
+    for (const auto& event : battles) {
+        if (event.reason == "engagement") {
+            ++intervals;
+            fired = false;
+        } else if (event.reason == "ammunition expended" && !fired) {
+            ++exchanges;
+            fired = true;
+        }
+        if (event.previous_controller) {
+            ++gains.at(event.amount);
+            ++losses.at(static_cast<std::size_t>(*event.previous_controller));
+        }
+    }
+    out << "Engagement intervals: " << intervals << " | with ammunition expended " << exchanges << '\n';
+    std::array<std::size_t, 3> territory{};
+    for (const auto& sector : campaign.world().sectors()) {
+        if (sector.properties.traversable) {
+            ++territory.at(static_cast<std::size_t>(campaign.sector_state(sector.id).controller));
+        }
+    }
+    for (auto faction : {FactionId::west, FactionId::east}) {
+        const auto index = static_cast<std::size_t>(faction);
+        UnitReadiness total;
+        std::size_t reserve = 0;
+        for (const auto& [id, item] : campaign.equipment()) {
+            if (campaign.units().at(item.assignment.unit).faction != faction) {
+                continue;
+            }
+            switch (item.status) {
+            case EquipmentStatus::lost: ++total.lost; break;
+            case EquipmentStatus::reserve:
+            case EquipmentStatus::in_transit: ++reserve; break;
+            case EquipmentStatus::available:
+            case EquipmentStatus::ready: ++total.ready; [[fallthrough]];
+            default: ++total.active; break;
+            }
+        }
+        const auto view = campaign.faction_view(faction, false);
+        const auto count = [&](MissionStatus status) {
+            return std::ranges::count(view.missions, status, &Mission::status);
+        };
+        out << faction_name(faction) << " | controlled " << territory[index]
+            << " | gained " << gains[index] << " | lost " << losses[index]
+            << " | equipment " << total.ready << '/' << total.active << " ready"
+            << " | reserve/in transit " << reserve << " | equipment lost " << total.lost
+            << " | missions completed " << count(MissionStatus::completed)
+            << " | failed " << count(MissionStatus::failed)
+            << " | cancelled " << count(MissionStatus::cancelled) << '\n';
+    }
+    ResourceAmounts used{};
+    for (const auto& entry : campaign.economy_ledger()) {
+        if (!entry.shipment) {
+            for (std::size_t resource = 0; resource < used.size(); ++resource) {
+                used[resource] += entry.consumed[resource];
+            }
+        }
+    }
+    out << "Stockpile consumption";
+    for (std::size_t resource = 0; resource < used.size(); ++resource) {
+        if (used[resource]) {
+            out << " | " << resource_name(static_cast<Resource>(resource)) << ' ' << used[resource];
+        }
+    }
+    if (used == ResourceAmounts{}) {
+        out << " | none";
+    }
+    out << '\n' << "Shipments delivered: " << std::ranges::count_if(campaign.shipments(), [](const auto& entry) {
+        return entry.second.status == ShipmentStatus::delivered;
+    }) << '/' << campaign.shipments().size() << '\n';
 }
 
 void run_realtime(CampaignState& campaign, std::uint32_t speed,

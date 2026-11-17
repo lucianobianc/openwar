@@ -461,6 +461,7 @@ ScenarioDefinition logistics_example_scenario();
 CampaignState maintenance_example_campaign(std::uint32_t seed);
 CampaignState operations_example_campaign(std::uint32_t seed, std::optional<FactionId> player = {});
 ScenarioDefinition combat_example_scenario(std::optional<FactionId> player = {});
+CampaignState long_example_campaign(std::uint32_t seed);
 
 }  // namespace openwar
 

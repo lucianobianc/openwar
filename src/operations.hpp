@@ -28,6 +28,7 @@ struct OperationsSettings {
     std::uint32_t contact_half_life_seconds = 30 * 60;
     std::uint32_t installation_half_life_seconds = 1440 * 60;
     std::optional<FactionId> player{};
+    std::size_t max_autonomous_missions = 1;
 };
 
 struct Objective {
@@ -43,6 +44,7 @@ struct SectorReport {
     std::uint16_t confidence;
     bool internal = false;
     bool contested = false;
+    bool surveyed = false;
 };
 
 struct ContactReport {
@@ -97,6 +99,13 @@ struct FactionView {
     std::vector<Mission> missions;
     std::vector<OperationsEvent> events;
 };
+
+// A complete sector survey supersedes contacts that it did not observe again.
+inline bool current_contact(const ContactReport& contact, const SectorReport& report)
+{
+    return contact.estimated_sector == report.sector &&
+           (!report.surveyed || contact.observed_tick >= report.observed_tick);
+}
 
 struct OrderResult {
     std::optional<MissionId> mission;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iterator>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -39,10 +40,14 @@ std::vector<Plan> rank_objectives(const FactionView& view, FactionId faction, bo
         const auto sector = view.sectors.find(objective.sector);
         const auto confidence = sector == view.sectors.end() ? 0 : sector->second.confidence;
         const bool stale_contact = std::ranges::any_of(view.contacts, [&](const auto& contact) {
-            return contact.estimated_sector == objective.sector && contact.confidence < 750;
+            return sector != view.sectors.end() && current_contact(contact, sector->second) &&
+                   contact.confidence < 750;
         });
+        const bool need_hostile_survey = combat && sector != view.sectors.end() &&
+            !sector->second.surveyed && sector->second.estimated_controller != faction &&
+            sector->second.estimated_controller != FactionId::neutral;
         const auto priority = std::uint64_t{objective.priority} * 1000;
-        if (confidence < 750 || stale_contact) {
+        if (confidence < 750 || stale_contact || need_hostile_survey) {
             plans.push_back({objective.sector, MissionKind::recon, priority + 1000 - confidence,
                              "planner: refresh incomplete intelligence"});
         } else if (known_friendly(view, faction, objective.sector)) {
@@ -292,15 +297,28 @@ bool CampaignState::update_operations()
     if (operations_.planner_interval_ticks != 0 && tick % operations_.planner_interval_ticks == 0) {
         for (const auto faction : {FactionId::west, FactionId::east}) {
             const auto view = faction_view(faction, false);
-            if (std::ranges::any_of(view.missions, [](const auto& mission) {
+            auto assigned = static_cast<std::size_t>(std::ranges::count_if(view.missions, [](const auto& mission) {
                 return !mission.manual && active(mission.status);
-            })) {
+            }));
+            if (assigned >= operations_.max_autonomous_missions) {
                 continue;
             }
+            std::set<SectorId> busy_targets;
+            for (const auto& mission : view.missions) {
+                if (active(mission.status)) {
+                    busy_targets.insert(mission.target);
+                }
+            }
             for (const auto& plan : rank_objectives(view, faction, combat_.enabled)) {
-                if (std::ranges::any_of(view.missions, [&](const auto& mission) {
-                    return mission.target == plan.target && active(mission.status);
-                })) {
+                if (busy_targets.contains(plan.target)) {
+                    continue;
+                }
+                if (combat_.enabled && plan.kind == MissionKind::defend &&
+                    std::ranges::any_of(combat_units_, [&](const auto& entry) {
+                        const auto& unit = units_.at(entry.first);
+                        return unit.faction == faction && unit.sector == plan.target &&
+                               entry.second.status == GroundStatus::holding && unit_readiness(unit.id).ready > 0;
+                    })) {
                     continue;
                 }
                 const auto result = schedule_mission(faction, plan.kind, plan.target, false);
@@ -308,7 +326,10 @@ bool CampaignState::update_operations()
                                            result.mission ? plan.reason : result.reason});
                 if (result.mission) {
                     equipment_changed = true;
-                    break;
+                    busy_targets.insert(plan.target);
+                    if (++assigned == operations_.max_autonomous_missions) {
+                        break;
+                    }
                 }
             }
         }
