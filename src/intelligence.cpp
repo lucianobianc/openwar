@@ -114,6 +114,7 @@ FactionView CampaignState::faction_view(FactionId faction, bool include_events) 
         for (const auto& entry : operations_log_) {
             if (entry.faction == faction) {
                 view.events.push_back(entry);
+                view.events.back().sequence = view.events.size() - 1;
             }
         }
     }
@@ -124,8 +125,9 @@ std::uint32_t CampaignState::observe(FactionId faction, SectorId sector)
 {
     auto& store = intelligence_.at(faction);
     const auto tick = clock_.tick();
-    const auto controller = sector_state(sector).controller;
-    store.sectors.insert_or_assign(sector, SectorReport{sector, controller, tick, 1000, controller == faction});
+    const auto& state = sector_state(sector);
+    store.sectors.insert_or_assign(sector, SectorReport{sector, state.controller, tick, 1000,
+        state.controller == faction, state.control == ControlState::contested});
     const bool open = world_.sector(sector).properties.terrain != Terrain::forest;
     // A sector survey observes stationary contacts in open terrain. No match preserves old reports.
     if (!open) {

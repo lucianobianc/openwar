@@ -191,7 +191,7 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
             mission.manual = manual;
             missions_.emplace(std::pair{faction, mission_id}, std::move(mission));
             reserve_equipment(item_id);
-            operations_log_.push_back({clock_.tick(), faction, target, mission_id,
+            record_event(operations_log_, {clock_.tick(), faction, target, mission_id,
                                        manual ? "player ground order scheduled" : "autonomous ground order scheduled"});
             return {mission_id, "scheduled"};
         }
@@ -234,7 +234,7 @@ void CampaignState::update_combat()
             if (sector_state(*combat.withdrawal).controller == units_.at(id).faction &&
                 consume(combat.stores, movement)) {
                 move_combat_unit(combat, *combat.withdrawal);
-                battle_log_.push_back({tick, *combat.withdrawal, "withdrawal completed", id});
+                record_event(battle_log_, {tick, *combat.withdrawal, "withdrawal completed", id});
             }
             combat.withdrawal.reset();
             combat.status = GroundStatus::broken;
@@ -250,14 +250,14 @@ void CampaignState::update_combat()
             (mission.status == MissionStatus::scheduled && item.status != EquipmentStatus::reserved)) {
             release_ground_equipment(mission.equipment);
             mission.status = MissionStatus::failed;
-            operations_log_.push_back({tick, mission.faction, mission.target, mission.id, "ground unit unavailable"});
+            record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, "ground unit unavailable"});
             continue;
         }
         if (mission.status == MissionStatus::scheduled) {
             mission.status = MissionStatus::in_progress;
             mission.launch_tick = tick;
             set_equipment_status(item, EquipmentStatus::in_operation, tick);
-            operations_log_.push_back({tick, mission.faction, mission.target, mission.id, "ground operation started"});
+            record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, "ground operation started"});
         }
         const auto sector = units_.at(combat.unit).sector;
         const bool opposed = std::ranges::any_of(combat_units_, [&](const auto& entry) {
@@ -269,13 +269,13 @@ void CampaignState::update_combat()
             if (!consume(combat.stores, movement)) {
                 release_ground_equipment(mission.equipment);
                 mission.status = MissionStatus::failed;
-                operations_log_.push_back({tick, mission.faction, mission.target, mission.id, "movement stopped: no fuel"});
+                record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, "movement stopped: no fuel"});
                 continue;
             }
             const auto destination = mission.ground_path[++mission.ground_leg];
             move_combat_unit(combat, destination);
             combat.fatigue = std::min(100u, combat.fatigue + 3);
-            battle_log_.push_back({tick, destination, "unit moved", combat.unit});
+            record_event(battle_log_, {tick, destination, "unit moved", combat.unit});
             if (operations_.enabled) {
                 observe(mission.faction, destination);
             }
@@ -299,7 +299,7 @@ void CampaignState::update_combat()
         }
         release_ground_equipment(mission.equipment);
         mission.status = combat.status == GroundStatus::holding ? MissionStatus::completed : MissionStatus::failed;
-        operations_log_.push_back({tick, mission.faction, mission.target, mission.id,
+        record_event(operations_log_, {tick, mission.faction, mission.target, mission.id,
             mission.status == MissionStatus::completed ? "ground objective secured" : "ground unit withdrew or broke"});
     }
     evaluate_war();
@@ -333,7 +333,7 @@ void CampaignState::resolve_engagements()
         if (!live[id] && state.status != GroundStatus::destroyed &&
             state.status != GroundStatus::surrendered) {
             state.status = GroundStatus::destroyed;
-            battle_log_.push_back({tick, units_.at(id).sector, "unit destroyed", id});
+            record_event(battle_log_, {tick, units_.at(id).sector, "unit destroyed", id});
         }
         if (!inventory[id].empty() && (state.status == GroundStatus::holding || state.status == GroundStatus::broken)) {
             by_sector[units_.at(id).sector].push_back(id);
@@ -366,7 +366,7 @@ void CampaignState::resolve_engagements()
                     if (state.status == GroundStatus::broken && power[id] && state.cohesion >= 45 &&
                         sector_state(sector).controller == faction_of(id)) {
                         state.status = GroundStatus::holding;
-                        battle_log_.push_back({tick, sector, "unit reorganized", id});
+                        record_event(battle_log_, {tick, sector, "unit reorganized", id});
                     }
                 } else {
                     decrease(state.morale, 1);
@@ -375,7 +375,7 @@ void CampaignState::resolve_engagements()
             continue;
         }
 
-        battle_log_.push_back({tick, sector, "engagement"});
+        record_event(battle_log_, {tick, sector, "engagement"});
         std::map<UnitId, std::uint64_t> hits;
         for (const auto id : participants) {
             auto& state = combat_units_.at(id);
@@ -402,7 +402,7 @@ void CampaignState::resolve_engagements()
             const auto damage = std::clamp<std::uint64_t>(strength + next_random() % 4, 1, 100);
             hits[*opponent] += damage;
             state.experience = std::min(100u, state.experience + 1);
-            battle_log_.push_back({tick, sector, "ammunition expended", id, 1});
+            record_event(battle_log_, {tick, sector, "ammunition expended", id, 1});
         }
 
         for (const auto id : participants) {
@@ -417,19 +417,19 @@ void CampaignState::resolve_engagements()
                 remaining -= damage;
                 if (damage >= 100 - equipment_.at(target).damage) {
                     lose_equipment(target);
-                    battle_log_.push_back({tick, sector, "equipment lost", id, static_cast<std::uint32_t>(target)});
+                    record_event(battle_log_, {tick, sector, "equipment lost", id, static_cast<std::uint32_t>(target)});
                     decrease(state.morale, 18);
                     decrease(state.cohesion, 14);
                 } else {
                     damage_equipment(target, static_cast<std::uint32_t>(damage));
-                    battle_log_.push_back({tick, sector, "equipment damaged", id, static_cast<std::uint32_t>(damage)});
+                    record_event(battle_log_, {tick, sector, "equipment damaged", id, static_cast<std::uint32_t>(damage)});
                 }
             }
             if (live[id] == static_cast<std::size_t>(std::ranges::count_if(inventory[id], [&](EquipmentId item) {
                     return equipment_.at(item).status == EquipmentStatus::lost;
                 }))) {
                 state.status = GroundStatus::destroyed;
-                battle_log_.push_back({tick, sector, "unit destroyed", id});
+                record_event(battle_log_, {tick, sector, "unit destroyed", id});
                 continue;
             }
             if (hits[id]) {
@@ -454,7 +454,7 @@ void CampaignState::resolve_engagements()
                     })) {
                     state.withdrawal = neighbor;
                     state.status = GroundStatus::withdrawing;
-                    battle_log_.push_back({tick, sector, "unit withdrawing", id});
+                    record_event(battle_log_, {tick, sector, "unit withdrawing", id});
                     break;
                 }
             }
@@ -463,10 +463,10 @@ void CampaignState::resolve_engagements()
                 for (const auto item : inventory[id]) {
                     lose_equipment(item);
                 }
-                battle_log_.push_back({tick, sector, "unit surrendered: depleted and cut off", id});
+                record_event(battle_log_, {tick, sector, "unit surrendered: depleted and cut off", id});
             } else if (!state.withdrawal && state.cohesion < 35) {
                 state.status = GroundStatus::broken;
-                battle_log_.push_back({tick, sector, "unit broken", id});
+                record_event(battle_log_, {tick, sector, "unit broken", id});
             }
         }
         if (operations_.enabled) {

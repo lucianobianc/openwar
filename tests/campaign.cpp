@@ -209,7 +209,7 @@ void test_economy()
             first.economy_ledger().size() == ledger_size, "Failed consumption was not atomic");
     demand[crude] = 0;
     require(first.consume(west, demand) && stock.quantity[fuel] == 1600 &&
-            first.economy_ledger().back() == EconomyEntry{30, west, std::nullopt, demand, {}},
+            first.economy_ledger().back() == EconomyEntry{30, west, std::nullopt, demand, {}, {}, {}, ledger_size},
             "Consumption did not debit and journal the request");
     first.advance_ticks(10);
     require(stock.quantity[fuel] == 2400 && stock.quantity[crude] == 0,
@@ -307,7 +307,8 @@ void test_logistics()
     require(congested.shipments().at(order).status == ShipmentStatus::unloading &&
             congested.shipments().at(second).status == ShipmentStatus::delayed &&
             congested.logistics_log().back() == LogisticsEvent{
-                5, order, LogisticsEventKind::arrived, 40, scenario.stockpiles.back().sector},
+                5, order, LogisticsEventKind::arrived, 40, scenario.stockpiles.back().sector,
+                congested.economy_ledger().size() + congested.logistics_log().size() - 1},
             "Route capacity or arrival timing failed");
     congested.advance_ticks(4);
     require(congested.shipments().at(second).status == ShipmentStatus::delivered &&

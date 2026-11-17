@@ -42,6 +42,7 @@ struct SectorReport {
     std::uint64_t observed_tick;
     std::uint16_t confidence;
     bool internal = false;
+    bool contested = false;
 };
 
 struct ContactReport {
@@ -84,6 +85,7 @@ struct OperationsEvent {
     SectorId sector;
     std::optional<MissionId> mission;
     std::string_view reason;
+    std::uint64_t sequence = 0;
     bool operator==(const OperationsEvent&) const = default;
 };
 

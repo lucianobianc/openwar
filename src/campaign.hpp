@@ -128,6 +128,7 @@ struct EconomyEntry {
     std::optional<ShipmentId> shipment{};
     std::optional<EquipmentId> equipment{};
 
+    std::uint64_t sequence = 0;
     bool operator==(const EconomyEntry&) const = default;
 };
 
@@ -183,6 +184,7 @@ struct LogisticsEvent {
     LogisticsEventKind kind;
     std::uint64_t quantity = 0;
     std::optional<SectorId> sector{};
+    std::uint64_t sequence = 0;
     bool operator==(const LogisticsEvent&) const = default;
 };
 
@@ -238,6 +240,7 @@ struct MilitaryUnit {
 struct UnitReadiness {
     std::size_t active = 0;
     std::size_t ready = 0;
+    std::size_t lost = 0;
 };
 
 struct EquipmentAssignment {
@@ -275,6 +278,7 @@ struct ForcesEvent {
     EquipmentStatus status;
     std::optional<ServiceKind> service{};
     ForcesEventKind kind = ForcesEventKind::status;
+    std::uint64_t sequence = 0;
     bool operator==(const ForcesEvent&) const = default;
 };
 
@@ -370,6 +374,15 @@ public:
     std::vector<std::pair<SectorId, SectorId>> front_line() const;
 
 private:
+    // Preserve emission order when a presentation merges subsystem journals.
+    template<class Event>
+    void record_event(std::vector<Event>& log, Event event)
+    {
+        event.sequence = next_event_sequence_;
+        log.push_back(event);
+        ++next_event_sequence_;
+    }
+
     void initialize_economy(ScenarioDefinition& scenario);
     bool update_economy(std::uint64_t tick);
     bool consume_at(StockpileId id, const ResourceAmounts& amounts, std::uint64_t tick,
@@ -409,6 +422,7 @@ private:
     SimulationClock clock_;
     std::vector<SectorState> sector_states_;
     std::mt19937 random_;
+    std::uint64_t next_event_sequence_ = 0;
     std::uint32_t economy_interval_ticks_;
     std::uint32_t minimum_integrity_;
     std::map<StockpileId, Stockpile> stockpiles_;

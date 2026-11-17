@@ -134,8 +134,8 @@ struct EventCursor {
             }
             std::ostringstream event;
             if (forces < equipment.size() &&
-                (logistics == transport.size() || equipment[forces].tick < transport[logistics].tick) &&
-                (economy == transactions.size() || equipment[forces].tick < transactions[economy].tick)) {
+                (logistics == transport.size() || equipment[forces].sequence < transport[logistics].sequence) &&
+                (economy == transactions.size() || equipment[forces].sequence < transactions[economy].sequence)) {
                 const auto& entry = equipment[forces++];
                 event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
                       << "s): equipment " << static_cast<std::uint32_t>(entry.equipment) << ' '
@@ -151,7 +151,7 @@ struct EventCursor {
                     event << " (entry unavailable)";
                 }
             } else if (logistics < transport.size() &&
-                (economy == transactions.size() || transport[logistics].tick <= transactions[economy].tick)) {
+                (economy == transactions.size() || transport[logistics].sequence < transactions[economy].sequence)) {
                 const auto& entry = transport[logistics++];
                 event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
                       << "s): shipment " << static_cast<std::uint32_t>(entry.shipment)
@@ -284,7 +284,7 @@ void drain_operations(const CampaignState& campaign, FactionId perspective, std:
         campaign.observer_battle_log() : std::span<const BattleEvent>{};
     while (next < events.size() || next_battle < battles.size()) {
         if (next_battle < battles.size() &&
-            (next == events.size() || battles[next_battle].tick <= events[next].tick)) {
+            (next == events.size() || battles[next_battle].sequence < events[next].sequence)) {
             const auto& battle = battles[next_battle++];
             std::ostringstream line;
             line << "Event tick " << battle.tick << " (" << battle.tick * campaign.clock().tick_seconds()

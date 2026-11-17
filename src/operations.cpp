@@ -184,7 +184,7 @@ OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind,
     missions_.emplace(std::pair{faction, chosen->id}, *chosen);
     reserve_equipment(chosen->equipment);
     stockpiles_.at(chosen->launch_stock).reserved[fuel_index] += chosen->fuel;
-    operations_log_.push_back({clock_.tick(), faction, target, chosen->id,
+    record_event(operations_log_, {clock_.tick(), faction, target, chosen->id,
                                manual ? "player order scheduled" : "autonomous order scheduled"});
     return {chosen->id, "scheduled"};
 }
@@ -218,7 +218,7 @@ bool CampaignState::cancel_order(FactionId actor, MissionId id)
     cancel_equipment_reservation(mission.equipment);
     stockpiles_.at(mission.launch_stock).reserved[fuel_index] -= mission.fuel;
     mission.status = MissionStatus::cancelled;
-    operations_log_.push_back({clock_.tick(), actor, mission.target, id, "player order cancelled"});
+    record_event(operations_log_, {clock_.tick(), actor, mission.target, id, "player order cancelled"});
     return true;
 }
 
@@ -232,7 +232,7 @@ bool CampaignState::update_operations()
         }
         auto& item = equipment_.at(mission.equipment);
         const auto log = [&](std::string_view reason) {
-            operations_log_.push_back({tick, mission.faction, mission.target, mission.id, reason});
+            record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, reason});
         };
         auto& stock = stockpiles_.at(mission.launch_stock);
         const bool invalid_preparation = mission.status == MissionStatus::preparing &&
@@ -304,7 +304,7 @@ bool CampaignState::update_operations()
                     continue;
                 }
                 const auto result = schedule_mission(faction, plan.kind, plan.target, false);
-                operations_log_.push_back({tick, faction, plan.target, result.mission,
+                record_event(operations_log_, {tick, faction, plan.target, result.mission,
                                            result.mission ? plan.reason : result.reason});
                 if (result.mission) {
                     equipment_changed = true;

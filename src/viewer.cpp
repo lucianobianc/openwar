@@ -195,8 +195,8 @@ void draw_map(const Snapshot& snapshot, const ViewControls& controls, Rectangle 
             const auto id = y * snapshot.width + x;
             const auto& tile = snapshot.tiles[id];
             const Rectangle rect{x * tile_size + 1, y * tile_size + 1, tile_size - 2, tile_size - 2};
-            const auto fill = tile.contested ? contested :
-                tile.confidence < 350 ? unknown : faction_color(tile.controller);
+            const auto fill = tile.confidence < 350 ? unknown :
+                tile.contested ? contested : faction_color(tile.controller);
             DrawRectangleRec(rect, tile.confidence >= 350 && tile.confidence < 750 ? Fade(fill, 0.58f) : fill);
             if (controls.camera.zoom > 0.35f) {
                 DrawText(TextFormat("%u", id), static_cast<int>(rect.x + 8), static_cast<int>(rect.y + 7), 13, ink);

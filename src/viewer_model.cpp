@@ -1,6 +1,8 @@
 #include "viewer_model.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <tuple>
 #include <utility>
 
 namespace openwar::viewer {
@@ -36,7 +38,7 @@ Event operation_event(const OperationsEvent& event)
     if (event.mission) {
         label += " / Mission " + std::to_string(static_cast<std::uint32_t>(*event.mission));
     }
-    return {event.tick, std::string(event.reason) + " / " + label};
+    return {event.tick, std::string(event.reason) + " / " + label, event.sequence};
 }
 
 std::string_view shipment_event_name(LogisticsEventKind kind)
@@ -74,6 +76,7 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
                 tile.controller = report->second.estimated_controller;
                 tile.confidence = report->second.confidence;
                 tile.observed_tick = report->second.observed_tick;
+                tile.contested = report->second.contested;
             }
         } else {
             const auto& state = campaign.sector_state(sector.id);
@@ -89,6 +92,9 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
         }
         const auto readiness = campaign.unit_readiness(id);
         auto detail = std::to_string(readiness.ready) + "/" + std::to_string(readiness.active) + " ready";
+        if (readiness.lost) {
+            detail += " / " + std::to_string(readiness.lost) + " lost";
+        }
         const auto combat = campaign.combat_units().find(id);
         if (combat != campaign.combat_units().end()) {
             detail += " / ";
@@ -124,7 +130,8 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
         const auto& stock = campaign.stockpiles().at(installation.stockpile);
         snapshot.markers.push_back({
             stock.sector, MarkerKind::installation, installation.operator_faction, installation.name,
-            std::to_string(installation.integrity) + "% integrity / " +
+            std::string(faction_name(installation.operator_faction)) + " / " +
+                std::to_string(installation.integrity) + "% integrity / " +
                 (installation.has_power ? "power on" : "power off")
         });
     }
@@ -134,25 +141,25 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
     for (const auto& event : recent(campaign.logistics_log())) {
         snapshot.events.push_back({
             event.tick, "Shipment " + std::to_string(static_cast<std::uint32_t>(event.shipment)) +
-                " / " + std::string(shipment_event_name(event.kind))
+                " / " + std::string(shipment_event_name(event.kind)), event.sequence
         });
     }
     for (const auto& event : recent(campaign.economy_ledger())) {
         snapshot.events.push_back({
             event.tick, "Stockpile " + std::to_string(static_cast<std::uint32_t>(event.stockpile)) +
-                (event.producer ? " / Production batch" : " / Stock transaction")
+                (event.producer ? " / Production batch" : " / Stock transaction"), event.sequence
         });
     }
     for (const auto& event : recent(campaign.forces_log())) {
         snapshot.events.push_back({
             event.tick, "Equipment " + std::to_string(static_cast<std::uint32_t>(event.equipment)) +
-                " / " + std::string(equipment_status_name(event.status))
+                " / " + std::string(equipment_status_name(event.status)), event.sequence
         });
     }
     for (const auto& event : recent(campaign.observer_battle_log())) {
         snapshot.events.push_back({
             event.tick, "Sector " + std::to_string(static_cast<std::uint32_t>(event.sector)) +
-                " / " + std::string(event.reason)
+                " / " + std::string(event.reason), event.sequence
         });
     }
     for (const auto& event : recent(campaign.observer_operations_log())) {
@@ -160,9 +167,11 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
     }
     if (campaign.war_ended()) {
         snapshot.events.push_back({snapshot.war.tick, std::string(war_status_name(snapshot.war.status)) +
-                                                       " / " + std::string(snapshot.war.cause)});
+            " / " + std::string(snapshot.war.cause), std::numeric_limits<std::uint64_t>::max()});
     }
-    std::ranges::stable_sort(snapshot.events, {}, &Event::tick);
+    std::ranges::sort(snapshot.events, {}, [](const Event& event) {
+        return std::tie(event.tick, event.sequence);
+    });
     if (snapshot.events.size() > event_limit) {
         snapshot.events.erase(snapshot.events.begin(), snapshot.events.end() - event_limit);
     }

@@ -79,7 +79,7 @@ void CampaignState::request_supply(SupplyRequest request)
         throw std::invalid_argument("Duplicate shipment ID");
     }
     try {
-        logistics_log_.push_back({clock_.tick(), request.id, LogisticsEventKind::requested, request.quantity});
+        record_event(logistics_log_, {clock_.tick(), request.id, LogisticsEventKind::requested, request.quantity});
     } catch (...) {
         shipments_.erase(position);
         throw;
@@ -97,7 +97,7 @@ bool CampaignState::cancel_shipment(ShipmentId id)
     if (terminal(shipment.status)) {
         return false;
     }
-    logistics_log_.push_back({clock_.tick(), id, LogisticsEventKind::cancelled, shipment.cargo});
+    record_event(logistics_log_, {clock_.tick(), id, LogisticsEventKind::cancelled, shipment.cargo});
     if (shipment.status == ShipmentStatus::loading) {
         auto& stock = stockpiles_.at(shipment.request.origin);
         stock.reserved[cargo_index(shipment.request.resource)] -= shipment.request.quantity;
@@ -117,7 +117,7 @@ bool CampaignState::lose_carrier(CarrierId id)
     }
     if (carrier.shipment) {
         auto& shipment = shipments_.at(*carrier.shipment);
-        logistics_log_.push_back({clock_.tick(), shipment.request.id, LogisticsEventKind::lost, shipment.cargo});
+        record_event(logistics_log_, {clock_.tick(), shipment.request.id, LogisticsEventKind::lost, shipment.cargo});
         if (shipment.status == ShipmentStatus::loading) {
             auto& stock = stockpiles_.at(shipment.request.origin);
             stock.reserved[cargo_index(shipment.request.resource)] -= shipment.request.quantity;
@@ -188,7 +188,7 @@ bool CampaignState::advance_shipment(Shipment& shipment, std::uint64_t tick,
         if (shipment.status == ShipmentStatus::delayed) {
             return false;
         }
-        logistics_log_.push_back({tick, request.id, LogisticsEventKind::delayed, shipment.cargo});
+        record_event(logistics_log_, {tick, request.id, LogisticsEventKind::delayed, shipment.cargo});
         shipment.status = ShipmentStatus::delayed;
         return true;
     };
@@ -201,8 +201,8 @@ bool CampaignState::advance_shipment(Shipment& shipment, std::uint64_t tick,
         auto& origin = stockpiles_.at(request.origin);
         EconomyEntry debit{tick, origin.id, std::nullopt, {}, {}, request.id};
         debit.consumed[index] = request.quantity;
-        economy_ledger_.push_back(debit);
-        logistics_log_.push_back({tick, request.id, LogisticsEventKind::loaded, request.quantity});
+        record_event(economy_ledger_, debit);
+        record_event(logistics_log_, {tick, request.id, LogisticsEventKind::loaded, request.quantity});
         origin.quantity[index] -= request.quantity;
         origin.reserved[index] -= request.quantity;
         shipment.cargo = request.quantity;
@@ -228,13 +228,13 @@ bool CampaignState::advance_shipment(Shipment& shipment, std::uint64_t tick,
         }
         EconomyEntry credit{tick, destination.id, std::nullopt, {}, {}, request.id};
         credit.produced[index] = amount;
-        economy_ledger_.push_back(credit);
-        logistics_log_.push_back({tick, request.id, LogisticsEventKind::unloaded, amount});
+        record_event(economy_ledger_, credit);
+        record_event(logistics_log_, {tick, request.id, LogisticsEventKind::unloaded, amount});
         destination.quantity[index] += amount;
         shipment.cargo -= amount;
         shipment.remaining_ticks = 0;
         if (shipment.cargo == 0) {
-            logistics_log_.push_back({tick, request.id, LogisticsEventKind::delivered, request.quantity});
+            record_event(logistics_log_, {tick, request.id, LogisticsEventKind::delivered, request.quantity});
             shipment.status = ShipmentStatus::delivered;
             carrier.shipment.reset();
         } else {
@@ -264,7 +264,7 @@ bool CampaignState::advance_shipment(Shipment& shipment, std::uint64_t tick,
     }
     shipment.status = ShipmentStatus::en_route;
     if (shipment.remaining_ticks == 1) {
-        logistics_log_.push_back({tick, request.id, LogisticsEventKind::arrived, shipment.cargo, route.to});
+        record_event(logistics_log_, {tick, request.id, LogisticsEventKind::arrived, shipment.cargo, route.to});
         shipment.remaining_ticks = 0;
         carrier.sector = route.to;
         shipment.edge.reset();
@@ -322,7 +322,7 @@ bool CampaignState::update_logistics(std::uint64_t tick)
                 carrier.sector != origin.sector || carrier.capacity < request.quantity) {
                 continue;
             }
-            logistics_log_.push_back({tick, request.id, LogisticsEventKind::assigned, request.quantity});
+            record_event(logistics_log_, {tick, request.id, LogisticsEventKind::assigned, request.quantity});
             origin.reserved[index] += request.quantity;
             carrier.shipment = request.id;
             shipment->carrier = id;

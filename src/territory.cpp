@@ -109,17 +109,17 @@ void CampaignState::update_territory()
         }
         if (state.occupier != occupying) {
             if (state.occupier) {
-                battle_log_.push_back({tick, sector.id, "occupation interrupted"});
+                record_event(battle_log_, {tick, sector.id, "occupation interrupted"});
             }
             state.occupier = occupying;
             state.occupation_since = now;
             if (occupying) {
-                battle_log_.push_back({tick, sector.id, "occupation started"});
+                record_event(battle_log_, {tick, sector.id, "occupation started"});
             }
         }
         if (opposed || occupying) {
             if (state.control != ControlState::contested) {
-                battle_log_.push_back({tick, sector.id, "sector contested"});
+                record_event(battle_log_, {tick, sector.id, "sector contested"});
             }
             state.control = ControlState::contested;
             const auto hold = state.objective_points ? combat_.critical_occupation_seconds :
@@ -135,9 +135,16 @@ void CampaignState::update_territory()
                 state.control = ControlState::unstable;
             } else {
                 if (state.control == ControlState::unstable) {
-                    battle_log_.push_back({tick, sector.id, "sector stabilized"});
+                    record_event(battle_log_, {tick, sector.id, "sector stabilized"});
                 }
                 state.control = ControlState::secure;
+            }
+        }
+        // Movement and combat reports made this tick can include the resolved dispute.
+        for (auto& [faction, store] : intelligence_) {
+            const auto report = store.sectors.find(sector.id);
+            if (report != store.sectors.end() && report->second.observed_tick == tick) {
+                report->second.contested = state.control == ControlState::contested;
             }
         }
     }
@@ -170,7 +177,7 @@ void CampaignState::capture_sector(SectorId sector, FactionId faction)
             cancel_equipment_reservation(mission.equipment);
             finish_operation(mission.equipment);
             mission.status = MissionStatus::failed;
-            operations_log_.push_back({clock_.tick(), mission.faction, mission.target, mission.id,
+            record_event(operations_log_, {clock_.tick(), mission.faction, mission.target, mission.id,
                                        "launch stockpile captured"});
         }
         stock.owner = faction;
@@ -191,7 +198,7 @@ void CampaignState::capture_sector(SectorId sector, FactionId faction)
     if (operations_.enabled) {
         observe(faction, sector);
     }
-    battle_log_.push_back({clock_.tick(), sector, "sector captured", {}, static_cast<std::uint32_t>(faction)});
+    record_event(battle_log_, {clock_.tick(), sector, "sector captured", {}, static_cast<std::uint32_t>(faction)});
 }
 
 bool CampaignState::declare_surrender(FactionId actor)
@@ -337,7 +344,7 @@ void CampaignState::conclude_war(WarStatus status, std::string_view cause)
             finish_operation(mission.equipment);
         }
         mission.status = MissionStatus::cancelled;
-        operations_log_.push_back({clock_.tick(), mission.faction, mission.target, mission.id, "war ended"});
+        record_event(operations_log_, {clock_.tick(), mission.faction, mission.target, mission.id, "war ended"});
     }
 }
 

@@ -26,6 +26,7 @@ struct Marker {
 struct Event {
     std::uint64_t tick;
     std::string description;
+    std::uint64_t sequence;
 };
 
 struct Snapshot {

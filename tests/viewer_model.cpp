@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <tuple>
 
 namespace {
 
@@ -53,9 +54,17 @@ int main()
     campaign.advance_ticks(5);
     const auto contested = read_snapshot(campaign, {});
     const auto west_battle = read_snapshot(campaign, FactionId::west);
+    const auto east_battle = read_snapshot(campaign, FactionId::east);
     require(contested.tiles[1].contested && contested.tick == 5 &&
             contested.elapsed_seconds == campaign.clock().elapsed_seconds() &&
-            !west_battle.tiles[1].contested, "Observer leaked authoritative contest state into faction reports");
+            west_battle.tiles[1].contested && east_battle.tiles[1].contested,
+            "Participants did not report the contested sector");
+    for (const auto* snapshot : {&contested, &east_battle}) {
+        require(std::ranges::any_of(snapshot->markers, [](const Marker& marker) {
+                    return marker.kind == MarkerKind::unit && marker.label == "East field group" &&
+                           marker.sector == SectorId{1} && marker.detail.find("1 lost") != std::string::npos;
+                }), "A recorded equipment loss was missing from the unit details");
+    }
     require(has_marker(contested, MarkerKind::mission, "attack #1") &&
             std::ranges::any_of(west_battle.markers, [](const Marker& marker) {
                 return marker.kind == MarkerKind::contact && marker.sector == SectorId{1};
@@ -67,11 +76,28 @@ int main()
 
     campaign.advance_ticks(3);
     const auto captured = read_snapshot(campaign, {});
+    const auto west_after_capture = read_snapshot(campaign, FactionId::west);
     const auto east_after_capture = read_snapshot(campaign, FactionId::east);
     require(captured.tiles[1].controller == FactionId::west &&
+            !captured.tiles[1].contested && !west_after_capture.tiles[1].contested &&
             east_after_capture.tiles[1].controller == FactionId::neutral &&
-            east_after_capture.tiles[1].observed_tick == 5 && campaign.clock().tick() == 8,
+            east_after_capture.tiles[1].contested && east_after_capture.tiles[1].observed_tick == 5 &&
+            campaign.clock().tick() == 8,
             "Perspective refresh revealed a capture or advanced the campaign");
-    require(std::ranges::is_sorted(captured.events, {}, &Event::tick),
-            "Recent events were not sorted by simulation tick");
+    require(std::ranges::any_of(captured.markers, [](const Marker& marker) {
+                return marker.kind == MarkerKind::installation && marker.label == "Central workshop" &&
+                       marker.faction == FactionId::west && marker.detail == "WEST / 40% integrity / power off";
+            }), "Viewer did not reflect the captured installation and its condition");
+    require(std::ranges::is_sorted(captured.events, {}, [](const Event& event) {
+                return std::tie(event.tick, event.sequence);
+            }), "Recent events were not sorted by simulation tick and sequence");
+    const auto started = std::ranges::find_if(captured.events, [](const Event& event) {
+        return event.description.starts_with("ground operation started / WEST");
+    });
+    const auto moved = std::ranges::find(captured.events, "Sector 1 / unit moved", &Event::description);
+    const auto lost = std::ranges::find(captured.events, "Equipment 2 / permanently lost", &Event::description);
+    const auto engaged = std::ranges::find(captured.events, "Sector 1 / engagement", &Event::description);
+    require(moved != captured.events.end() && lost != captured.events.end() &&
+            started < moved && moved < engaged && engaged < lost,
+            "Same-tick events were grouped by subsystem instead of emission order");
 }

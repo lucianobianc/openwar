@@ -59,6 +59,7 @@ struct BattleEvent {
     std::string_view reason;
     std::optional<UnitId> unit{};
     std::uint32_t amount = 0;
+    std::uint64_t sequence = 0;
     bool operator==(const BattleEvent&) const = default;
 };
 

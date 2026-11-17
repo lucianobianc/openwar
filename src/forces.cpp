@@ -157,7 +157,7 @@ void CampaignState::initialize_forces(const ScenarioDefinition& scenario)
 void CampaignState::set_equipment_status(Equipment& item, EquipmentStatus status, std::uint64_t tick)
 {
     if (item.status != status) {
-        forces_log_.push_back({tick, item.assignment.id, status,
+        record_event(forces_log_, {tick, item.assignment.id, status,
                               item.job ? std::optional{item.job->kind} : std::nullopt});
         item.status = status;
     }
@@ -185,7 +185,11 @@ UnitReadiness CampaignState::unit_readiness(UnitId id) const
     UnitReadiness readiness;
     for (const auto& [equipment_id, item] : equipment_) {
         if (item.assignment.unit != id || item.status == EquipmentStatus::reserve ||
-            item.status == EquipmentStatus::in_transit || item.status == EquipmentStatus::lost) {
+            item.status == EquipmentStatus::in_transit) {
+            continue;
+        }
+        if (item.status == EquipmentStatus::lost) {
+            ++readiness.lost;
             continue;
         }
         ++readiness.active;
@@ -307,7 +311,7 @@ bool CampaignState::update_forces(std::uint64_t tick)
                     queue_service(item, ServiceKind::scheduled, tick);
                 }
             } else if (!item.arrival_delayed) {
-                forces_log_.push_back({
+                record_event(forces_log_, {
                     tick, id, EquipmentStatus::in_transit, {}, ForcesEventKind::arrival_delayed
                 });
                 item.arrival_delayed = true;
@@ -360,14 +364,14 @@ bool CampaignState::update_forces(std::uint64_t tick)
             }
             job.started = true;
             set_equipment_status(*item, active_status(job.kind), tick);
-            forces_log_.push_back({
+            record_event(forces_log_, {
                 tick, item->assignment.id, item->status, job.kind, ForcesEventKind::service_started
             });
         } else {
             job.work_seconds += std::min(clock_.tick_seconds(), service.seconds - job.work_seconds);
             if (job.work_seconds == service.seconds) {
                 const auto kind = job.kind;
-                forces_log_.push_back({
+                record_event(forces_log_, {
                     tick, item->assignment.id, active_status(kind), kind, ForcesEventKind::service_completed
                 });
                 item->job.reset();

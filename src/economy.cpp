@@ -98,7 +98,7 @@ bool CampaignState::consume_at(StockpileId id, const ResourceAmounts& amounts, s
         return false;
     }
     if (!empty(amounts)) {
-        economy_ledger_.push_back({tick, id, std::nullopt, amounts, {}, {}, equipment});
+        record_event(economy_ledger_, {tick, id, std::nullopt, amounts, {}, {}, equipment});
         apply(stock, amounts, {});
     }
     return true;
@@ -152,7 +152,7 @@ bool CampaignState::update_economy(std::uint64_t tick)
         state.work += installation.integrity;
         const auto batch_work = std::uint64_t{recipe.intervals_per_batch} * full_integrity;
         if (state.work >= batch_work) {
-            economy_ledger_.push_back({tick, stock.id, installation.id, recipe.inputs, recipe.outputs});
+            record_event(economy_ledger_, {tick, stock.id, installation.id, recipe.inputs, recipe.outputs});
             apply(stock, recipe.inputs, recipe.outputs);
             state.work -= batch_work;
         }
