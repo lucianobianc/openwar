@@ -6,9 +6,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <queue>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -1683,6 +1686,103 @@ void test_ground_movement()
             "Multi-leg arrival time or fuel use was rounded independently for each sector");
 }
 
+struct CheckpointFiles {
+    std::filesystem::path directory;
+
+    CheckpointFiles()
+    {
+        const auto temporary = std::filesystem::temp_directory_path();
+        for (unsigned suffix = 0;; ++suffix) {
+            directory = temporary / ("openwar-checkpoint-tests-" + std::to_string(suffix));
+            if (std::filesystem::create_directory(directory)) {
+                break;
+            }
+        }
+    }
+
+    ~CheckpointFiles()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(directory, ignored);
+    }
+};
+
+void test_checkpoints()
+{
+    const CheckpointFiles files;
+    const auto checkpoint = files.directory / "campaign.ows";
+    const auto comparison = files.directory / "comparison.ows";
+    const auto bytes = [](const auto& path) {
+        std::ifstream input(path, std::ios::binary);
+        require(static_cast<bool>(input), "Expected a saved checkpoint");
+        return std::string(std::istreambuf_iterator<char>(input), {});
+    };
+    const auto equal_saves = [&](const CampaignState& left, const CampaignState& right) {
+        left.save(checkpoint);
+        right.save(comparison);
+        require(bytes(checkpoint) == bytes(comparison), "Checkpoint state or journal changed after resuming");
+    };
+    const auto round_trip = [&](const CampaignState& state) {
+        state.save(checkpoint);
+        auto restored = CampaignState::load(checkpoint);
+        equal_saves(state, restored);
+        return restored;
+    };
+
+    auto battle = CampaignState(combat_example_scenario(), 42);
+    battle.advance_ticks(5);
+    require(battle.sector_state(SectorId{1}).occupier == FactionId::west &&
+            !battle.observer_battle_log().empty(), "Checkpoint fixture did not reach occupation after combat");
+    auto restored_battle = round_trip(battle);
+    auto uninterrupted = CampaignState(combat_example_scenario(), 42);
+    uninterrupted.advance_ticks(30);
+    restored_battle.advance_ticks(25);
+    require(restored_battle.war_ended(), "Restored occupation did not finish the campaign");
+    equal_saves(uninterrupted, restored_battle);
+    auto ended = round_trip(restored_battle);
+    ended.advance_ticks(100);
+    equal_saves(ended, restored_battle);
+
+    auto service = maintenance_example_campaign(42);
+    service.advance_ticks(7);
+    require(service.equipment().at(EquipmentId{1}).job->work_seconds == 60 &&
+            service.equipment().at(EquipmentId{11}).reinforcement_eta == 8,
+            "Checkpoint fixture did not reach active repairs and inbound reinforcements");
+    auto restored_service = round_trip(service);
+    auto continuous_service = maintenance_example_campaign(42);
+    continuous_service.advance_ticks(20);
+    restored_service.advance_ticks(13);
+    equal_saves(continuous_service, restored_service);
+
+    auto reconnaissance = operations_example_campaign(42, FactionId::west);
+    require(reconnaissance.issue_order(FactionId::west, MissionKind::recon, SectorId{2}).mission.has_value(),
+            "Checkpoint fixture did not reserve a mission");
+    auto restored_recon = round_trip(reconnaissance);
+    reconnaissance.advance_ticks(25);
+    restored_recon.advance_ticks(25);
+    equal_saves(reconnaissance, restored_recon);
+    require(restored_recon.player_faction() == FactionId::west &&
+            !restored_recon.faction_view(FactionId::west).contacts.empty(),
+            "Checkpoint lost player authority or reconnaissance reports");
+
+    auto random = CampaignState(example_scenario(), 5489u);
+    std::mt19937 reference(5489u);
+    for (int i = 0; i < 701; ++i) {
+        require(random.next_random() == reference(), "Simulation RNG diverged from MT19937");
+    }
+    auto restored_random = round_trip(random);
+    for (int i = 0; i < 2500; ++i) {
+        require(restored_random.next_random() == reference(), "Restored RNG diverged from MT19937");
+    }
+
+    const auto blocked = files.directory / "existing-directory";
+    std::filesystem::create_directory(blocked);
+    require_throws<std::filesystem::filesystem_error>([&] { random.save(blocked); },
+                                                     "Save replaced an existing directory");
+    require(std::filesystem::is_directory(blocked) && !std::filesystem::exists(blocked.string() + ".tmp.0"),
+            "Failed save damaged the destination or left staging files");
+}
+
 void test_depleted_withdrawal()
 {
     auto scenario = combat_example_scenario();
@@ -1740,4 +1840,5 @@ int main()
     test_large_procedural_campaigns();
     test_ground_movement();
     test_depleted_withdrawal();
+    test_checkpoints();
 }

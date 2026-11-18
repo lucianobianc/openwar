@@ -95,13 +95,21 @@ void SimulationClock::advance(std::uint64_t ticks)
     tick_ += ticks;
 }
 
-CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
-    : world_(std::move(scenario.world)), clock_(scenario.tick_seconds),
-      sector_states_(world_.sectors().size()), random_(seed),
+CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed,
+                             std::optional<std::uint64_t> procedural_seed, std::uint32_t generator_version)
+    : seed_(procedural_seed.value_or(seed)), generator_version_(generator_version),
+      scenario_fingerprint_(scenario_fingerprint(scenario)),
+      world_(std::move(scenario.world)), clock_(scenario.tick_seconds),
+      sector_states_(world_.sectors().size()),
       economy_interval_ticks_(scenario.economy_interval_ticks),
       minimum_integrity_(scenario.minimum_integrity), loading_ticks_(scenario.loading_ticks),
       unloading_ticks_(scenario.unloading_ticks)
 {
+    random_words_.front() = seed;
+    for (std::uint32_t i = 1; i < random_words_.size(); ++i) {
+        const auto previous = random_words_[i - 1];
+        random_words_[i] = 1812433253u * (previous ^ (previous >> 30)) + i;
+    }
     std::vector<bool> assigned(sector_states_.size());
     for (const auto& entry : scenario.initial_sectors) {
         faction_name(entry.state.controller);
@@ -122,6 +130,11 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
     for (const auto& request : scenario.initial_supply_requests) {
         request_supply(request);
     }
+}
+
+CampaignState::CampaignState(WorldDefinition world, SimulationClock clock)
+    : world_(std::move(world)), clock_(clock)
+{
 }
 
 const SectorState& CampaignState::sector_state(SectorId sector) const
@@ -198,7 +211,23 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
 
 std::uint32_t CampaignState::next_random()
 {
-    return static_cast<std::uint32_t>(random_());
+    // The standard MT19937 recurrence replaces one word per draw.
+    constexpr std::uint32_t last_bit = 0x80000000u;
+    const auto next = (random_index_ + 1) % random_words_.size();
+    const auto middle = (random_index_ + 397) % random_words_.size();
+    const auto joined = (random_words_[random_index_] & last_bit) | (random_words_[next] & ~last_bit);
+    auto word = random_words_[middle] ^ (joined >> 1);
+    if (joined & 1u) {
+        word ^= 0x9908b0dfu;
+    }
+    random_words_[random_index_] = word;
+    random_index_ = static_cast<std::uint32_t>(next);
+
+    // Temper the output without modifying the saved recurrence word.
+    word ^= word >> 11;
+    word ^= (word << 7) & 0x9d2c5680u;
+    word ^= (word << 15) & 0xefc60000u;
+    return word ^ (word >> 18);
 }
 
 }  // namespace openwar

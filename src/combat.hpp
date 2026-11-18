@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -64,7 +65,7 @@ struct CombatSettings {
 struct BattleEvent {
     std::uint64_t tick;
     SectorId sector;
-    std::string_view reason;
+    std::string reason;
     std::optional<UnitId> unit{};
     std::uint32_t amount = 0;
     std::uint64_t sequence = 0;
@@ -75,7 +76,7 @@ struct BattleEvent {
 struct WarResult {
     WarStatus status = WarStatus::ongoing;
     std::uint64_t tick = 0;
-    std::string_view cause{};
+    std::string cause{};
     bool operator==(const WarResult&) const = default;
 };
 

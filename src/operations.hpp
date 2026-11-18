@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -61,7 +62,7 @@ struct SectorReport {
 struct ContactReport {
     ContactId id;
     SectorId estimated_sector;
-    std::string_view classification;
+    std::string classification;
     std::uint64_t observed_tick;
     std::uint16_t confidence;
 };
@@ -100,7 +101,7 @@ struct OperationsEvent {
     FactionId faction;
     SectorId sector;
     std::optional<MissionId> mission;
-    std::string_view reason;
+    std::string reason;
     std::uint64_t sequence = 0;
     bool operator==(const OperationsEvent&) const = default;
 };

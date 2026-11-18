@@ -326,7 +326,7 @@ void CampaignState::evaluate_war()
 
 void CampaignState::conclude_war(WarStatus status, std::string_view cause)
 {
-    war_result_ = {status, clock_.tick(), cause};
+    war_result_ = {status, clock_.tick(), std::string(cause)};
     for (auto& [key, mission] : missions_) {
         if (!military_order_active(mission.status)) {
             continue;

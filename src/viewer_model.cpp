@@ -50,7 +50,8 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
     Snapshot snapshot{world.width(), world.height(), world.sector_size_m(), clock.tick(),
                       clock.elapsed_seconds(), campaign.war_result(), {}, {}, {}};
     snapshot.tiles.reserve(world.sectors().size());
-    const auto view = perspective ? campaign.faction_view(*perspective) : FactionView{};
+    const auto view = perspective && campaign.has_operational_view() ?
+        campaign.faction_view(*perspective) : FactionView{};
     for (const auto& sector : world.sectors()) {
         Tile tile{sector.properties.terrain};
         if (perspective) {
@@ -127,8 +128,10 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
                 (installation.has_power ? "power on" : "power off")
         });
     }
-    for (auto faction : {FactionId::west, FactionId::east}) {
-        add_missions(snapshot, campaign.faction_view(faction, false));
+    if (campaign.has_operational_view()) {
+        for (auto faction : {FactionId::west, FactionId::east}) {
+            add_missions(snapshot, campaign.faction_view(faction, false));
+        }
     }
     for (const auto& event : recent(campaign.logistics_log())) {
         snapshot.events.push_back({

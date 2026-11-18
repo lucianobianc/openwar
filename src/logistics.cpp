@@ -76,9 +76,7 @@ void CampaignState::initialize_logistics(const ScenarioDefinition& scenario)
             throw std::invalid_argument("Invalid or duplicate transport route");
         }
     }
-    for (const auto& [id, route] : routes_) {
-        incoming_routes_[route.to].push_back(id);
-    }
+    index_routes();
     for (auto carrier : scenario.carriers) {
         world_.sector(carrier.sector);
         faction_name(carrier.faction);
@@ -105,6 +103,13 @@ void CampaignState::initialize_logistics(const ScenarioDefinition& scenario)
         }
     }
     resupply_ = scenario.resupply;
+}
+
+void CampaignState::index_routes()
+{
+    for (const auto& [id, route] : routes_) {
+        incoming_routes_[route.to].push_back(id);
+    }
 }
 
 void CampaignState::request_supply(SupplyRequest request)

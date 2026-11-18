@@ -7,9 +7,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
-#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -343,7 +343,17 @@ private:
 
 class CampaignState {
 public:
-    CampaignState(ScenarioDefinition scenario, std::uint32_t seed);
+    CampaignState(ScenarioDefinition scenario, std::uint32_t seed,
+                  std::optional<std::uint64_t> procedural_seed = {}, std::uint32_t generator_version = 0);
+
+    // A checkpoint owns the resolved world and resumes at the saved tick.
+    void save(const std::filesystem::path& path) const;
+    static CampaignState load(const std::filesystem::path& path);
+    std::uint64_t seed() const { return seed_; }
+    std::uint32_t generator_version() const { return generator_version_; }
+    bool has_operational_view() const { return operations_.enabled; }
+    bool strategic_command_enabled() const { return operations_.strategy_review_ticks != 0; }
+    std::optional<FactionId> player_faction() const { return operations_.player; }
 
     const WorldDefinition& world() const { return world_; }
     const SimulationClock& clock() const { return clock_; }
@@ -391,12 +401,17 @@ public:
     std::vector<std::pair<SectorId, SectorId>> front_line() const;
 
 private:
+    friend struct CampaignArchive;
+    CampaignState(WorldDefinition world, SimulationClock clock);
+    static std::uint64_t scenario_fingerprint(const ScenarioDefinition& scenario);
+    void index_routes();
+
     // Preserve emission order when a presentation merges subsystem journals.
     template<class Event>
     void record_event(std::vector<Event>& log, Event event)
     {
         event.sequence = next_event_sequence_;
-        log.push_back(event);
+        log.push_back(std::move(event));
         ++next_event_sequence_;
     }
 
@@ -465,13 +480,18 @@ private:
         std::map<SectorId, InstallationReport> installations;
     };
 
+    std::uint64_t seed_ = 0;
+    std::uint32_t generator_version_ = 0;
+    std::uint64_t scenario_fingerprint_ = 0;
     WorldDefinition world_;
     SimulationClock clock_;
     std::vector<SectorState> sector_states_;
-    std::mt19937 random_;
+    // MT19937 recurrence state, stored explicitly for portable checkpoints.
+    std::array<std::uint32_t, 624> random_words_{};
+    std::uint32_t random_index_ = 0;
     std::uint64_t next_event_sequence_ = 0;
-    std::uint32_t economy_interval_ticks_;
-    std::uint32_t minimum_integrity_;
+    std::uint32_t economy_interval_ticks_ = 1;
+    std::uint32_t minimum_integrity_ = 0;
     std::map<StockpileId, Stockpile> stockpiles_;
     std::vector<InstallationState> installations_;
     std::vector<EconomyEntry> economy_ledger_;
@@ -481,8 +501,8 @@ private:
     std::map<ShipmentId, Shipment> shipments_;
     std::vector<LogisticsEvent> logistics_log_;
     std::vector<ResupplyPolicy> resupply_;
-    std::uint32_t loading_ticks_;
-    std::uint32_t unloading_ticks_;
+    std::uint32_t loading_ticks_ = 1;
+    std::uint32_t unloading_ticks_ = 1;
     std::map<EquipmentTypeId, EquipmentType> equipment_types_;
     std::map<FacilityId, MaintenanceFacility> facilities_;
     std::map<UnitId, MilitaryUnit> units_;

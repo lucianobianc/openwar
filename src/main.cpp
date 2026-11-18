@@ -10,20 +10,22 @@
 
 namespace {
 
-constexpr std::string_view usage = R"(Usage: openwar [--demo NAME | --scenario FILE] [--speed N] [--ticks N] [--events] [--seed N]
+constexpr std::string_view usage = R"(Usage: openwar [--demo NAME | --scenario FILE | --load FILE] [--speed N] [--ticks N] [--events] [--seed N] [--save FILE]
 
 Without a tick limit, the dashboard runs in real time until Ctrl+C.
 
 Options
   --demo NAME  Select economy (default), logistics, maintenance, operations, combat, campaign, or procedural.
   --scenario FILE  Load a procedural scenario configuration.
+  --load FILE      Resume a saved campaign.
+  --save FILE      Write a checkpoint at the end of the run.
   --speed N    Pace the run at N simulated seconds per real second (default 60).
-  --ticks N    Stop after N ticks. Runs in batch mode unless speed is specified.
+  --ticks N    Advance up to N additional ticks. Runs in batch mode unless speed is specified.
   --events     Show timestamped campaign events.
   --seed N     Override the seed (32-bit for fixed demos, 64-bit for procedural).
-  --faction WEST|EAST  Use one faction's view in the operations or combat demo.
+  --faction WEST|EAST  Use one faction's view in an operational checkpoint or demo.
   --order TYPE:SECTOR  Queue a recon, patrol, defend, reposition, or attack order.
-  --cancel ID         Cancel a scheduled order before the simulation starts.
+  --cancel ID         Cancel an eligible order before advancing time.
   --help       Show this help.
 
 Examples
@@ -35,6 +37,8 @@ Examples
   openwar --demo combat --ticks 30 --events
   openwar --demo campaign --seed 42 --ticks 3000
   openwar --scenario examples/procedural.toml --ticks 0
+  openwar --demo campaign --seed 42 --ticks 600 --save campaign.ows
+  openwar --load campaign.ows --ticks 600 --save campaign.ows
 )";
 
 enum class Demo { economy, logistics, maintenance, operations, combat, campaign, procedural };
@@ -129,7 +133,7 @@ void apply_order(openwar::CampaignState& campaign, openwar::FactionId faction, s
     throw std::invalid_argument("Unknown order type");
 }
 
-void report(const openwar::CampaignState& campaign, std::uint32_t seed)
+void report(const openwar::CampaignState& campaign, std::uint64_t seed)
 {
     const auto& world = campaign.world();
     std::cout << "Seed: " << seed << '\n'
@@ -184,7 +188,7 @@ void report(const openwar::CampaignState& campaign, std::uint32_t seed)
 void report_procedural_world(const openwar::CampaignState& campaign, bool preview)
 {
     const auto& world = campaign.world();
-    std::cout << "Procedural generator: " << openwar::procedural_generator_version << '\n'
+    std::cout << "Procedural generator: " << campaign.generator_version() << '\n'
               << "World: " << world.width() << 'x' << world.height()
               << ", sector size " << world.sector_size_m() << " m\n";
     if (preview) {
@@ -206,6 +210,8 @@ int main(int argc, char* argv[])
 {
     std::optional<std::uint64_t> seed_override;
     std::optional<std::filesystem::path> scenario_path;
+    std::optional<std::filesystem::path> load_path;
+    std::optional<std::filesystem::path> save_path;
     std::optional<std::uint64_t> ticks;
     std::optional<std::uint32_t> speed;
     std::optional<Demo> demo;
@@ -243,7 +249,8 @@ int main(int argc, char* argv[])
                 continue;
             }
             if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed" &&
-                option != "--faction" && option != "--order" && option != "--cancel" && option != "--scenario") {
+                option != "--faction" && option != "--order" && option != "--cancel" && option != "--scenario" &&
+                option != "--load" && option != "--save") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
             if (++i == argc) {
@@ -259,6 +266,14 @@ int main(int argc, char* argv[])
                     throw std::invalid_argument("Select one scenario file");
                 }
                 scenario_path = argv[i];
+                continue;
+            }
+            if (option == "--load" || option == "--save") {
+                auto& path = option == "--load" ? load_path : save_path;
+                if (path) {
+                    throw std::invalid_argument("Specify " + std::string(option) + " only once");
+                }
+                path = argv[i];
                 continue;
             }
             if (option == "--faction") {
@@ -288,22 +303,31 @@ int main(int argc, char* argv[])
                 speed = static_cast<std::uint32_t>(value);
             }
         }
-        const bool operations_view = demo == Demo::operations || demo == Demo::combat;
-        const bool generated = demo == Demo::procedural;
-        const bool campaign_view = demo == Demo::campaign || generated;
-        if ((faction || !commands.empty()) && !operations_view) {
-            throw std::invalid_argument("Faction controls require --demo operations or --demo combat");
+        if (load_path && (demo || seed_override)) {
+            throw std::invalid_argument("--load cannot be combined with --demo, --scenario or --seed");
+        }
+        const auto initialize = [&] {
+            if (load_path) {
+                return openwar::CampaignState::load(*load_path);
+            }
+            auto settings = scenario_path ? openwar::read_procedural_settings(*scenario_path) : openwar::ProceduralSettings{};
+            settings.seed = seed_override.value_or(settings.seed);
+            if (demo != Demo::procedural && settings.seed > UINT32_MAX) {
+                throw std::out_of_range("Seed must fit in 32 bits");
+            }
+            return make_campaign(demo.value_or(Demo::economy), settings.seed, faction, settings);
+        };
+        auto campaign = initialize();
+        const bool generated = campaign.generator_version() != 0;
+        const bool campaign_view = (generated || campaign.strategic_command_enabled()) && !faction;
+        const bool operations_view = campaign.has_operational_view();
+        if ((faction || !commands.empty()) &&
+            (!operations_view || (!load_path && demo != Demo::operations && demo != Demo::combat))) {
+            throw std::invalid_argument("Faction controls require an operational checkpoint or --demo operations or combat");
         }
         if (!commands.empty() && !faction) {
             throw std::invalid_argument("Orders require --faction WEST or EAST");
         }
-        auto settings = scenario_path ? openwar::read_procedural_settings(*scenario_path) : openwar::ProceduralSettings{};
-        const auto seed = seed_override.value_or(settings.seed);
-        if (!generated && seed > UINT32_MAX) {
-            throw std::out_of_range("Seed must fit in 32 bits");
-        }
-        settings.seed = seed;
-        auto campaign = make_campaign(demo.value_or(Demo::economy), seed, faction, settings);
         if (generated) {
             report_procedural_world(campaign, ticks == 0);
         }
@@ -318,7 +342,8 @@ int main(int argc, char* argv[])
             }
         }
         const auto perspective = operations_view || campaign_view ?
-            std::optional{faction.value_or(openwar::FactionId::neutral)} : std::nullopt;
+            std::optional{faction.value_or(campaign.player_faction().value_or(openwar::FactionId::neutral))} :
+            std::nullopt;
         if (!ticks || speed || legacy_realtime) {
             openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events, perspective,
                                        campaign_view);
@@ -334,11 +359,14 @@ int main(int argc, char* argv[])
                 if (events) {
                     openwar::cli::print_events(campaign);
                 }
-                report(campaign, static_cast<std::uint32_t>(seed));
+                report(campaign, campaign.seed());
             }
         }
         if (campaign_view) {
-            openwar::cli::print_campaign_summary(std::cout, campaign, seed);
+            openwar::cli::print_campaign_summary(std::cout, campaign, campaign.seed());
+        }
+        if (save_path) {
+            campaign.save(*save_path);
         }
     } catch (const std::exception& error) {
         std::cerr << "openwar: " << error.what() << '\n' << usage;

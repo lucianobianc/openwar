@@ -50,7 +50,8 @@ printf '%s\n' "$output" | grep -Fx '  fuel (L): 900/2400'
 printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
-printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--demo NAME | --scenario FILE] [--speed N] [--ticks N] [--events] [--seed N]'
+printf '%s\n' "$help" | grep -F 'Usage: openwar [--demo NAME | --scenario FILE | --load FILE]'
+printf '%s\n' "$help" | grep -F -- '--save FILE'
 printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, operations, combat, campaign, or procedural.'
 if printf '%s\n' "$help" | grep -E -- '--(logistics-demo|maintenance-demo|realtime)'; then
     exit 1
@@ -195,4 +196,47 @@ EOF
     done
     printf 'seed = 42\n' >"$scratch/invalid.toml"
     reject --scenario "$scratch/invalid.toml" --ticks 0
+)
+
+(
+    scratch=$(mktemp -d)
+    trap 'rm -f "$scratch"/*; rmdir "$scratch"' 0
+    "$openwar" --demo logistics --seed 42 --ticks 3 --save "$scratch/mid.ows" --events >"$scratch/mid.txt"
+    grep -F 'Shipment 1: en route, cargo on carrier: 80' "$scratch/mid.txt"
+    "$openwar" --load "$scratch/mid.ows" --ticks 13 --save "$scratch/resumed.ows" --events >"$scratch/resumed.txt"
+    "$openwar" --demo logistics --seed 42 --ticks 16 --save "$scratch/full.ows" --events >"$scratch/full.txt"
+    cmp "$scratch/resumed.ows" "$scratch/full.ows"
+    cmp "$scratch/resumed.txt" "$scratch/full.txt"
+
+    "$openwar" --load "$scratch/mid.ows" --ticks 3 --speed 3600 --save "$scratch/mid.ows"
+    "$openwar" --demo logistics --seed 42 --ticks 6 --save "$scratch/full.ows"
+    cmp "$scratch/mid.ows" "$scratch/full.ows"
+
+    cat >"$scratch/world.toml" <<'EOF'
+schema_version = 1
+seed = 18446744073709551615
+width = 32
+height = 16
+EOF
+    "$openwar" --scenario "$scratch/world.toml" --ticks 150 --save "$scratch/full.ows"
+    "$openwar" --scenario "$scratch/world.toml" --ticks 47 --save "$scratch/mid.ows"
+    rm "$scratch/world.toml"
+    "$openwar" --load "$scratch/mid.ows" --ticks 103 --save "$scratch/resumed.ows" >"$scratch/resumed.txt"
+    grep -F 'Campaign summary | seed 18446744073709551615' "$scratch/resumed.txt"
+    cmp "$scratch/resumed.ows" "$scratch/full.ows"
+
+    reject --load "$scratch/absent.ows" --ticks 0
+    reject --load "$scratch/full.ows" --demo campaign
+    reject --load "$scratch/full.ows" --scenario "$scratch/world.toml"
+    reject --load "$scratch/full.ows" --seed 1
+    reject --load "$scratch/full.ows" --load "$scratch/full.ows"
+    reject --ticks 0 --save
+    dd if="$scratch/full.ows" of="$scratch/short.ows" bs=1 count=160 2>/dev/null
+    reject --load "$scratch/short.ows" --ticks 0
+    cp "$scratch/full.ows" "$scratch/corrupt.ows"
+    printf 'X' | dd of="$scratch/corrupt.ows" bs=1 seek=50 conv=notrunc 2>/dev/null
+    reject --load "$scratch/corrupt.ows" --ticks 0
+    cp "$scratch/full.ows" "$scratch/version.ows"
+    printf '\002' | dd of="$scratch/version.ows" bs=1 seek=19 conv=notrunc 2>/dev/null
+    reject --load "$scratch/version.ows" --ticks 0
 )

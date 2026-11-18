@@ -316,6 +316,36 @@ The same 128×128 configuration ran 2,880 ticks in 20.7 seconds with
 8.0 MiB peak RSS. These measurements describe the tested workload on this
 machine. Campaigns with more equipment or more active fronts can cost more.
 
+## Saving and resuming campaigns
+
+```sh
+./openwar --demo campaign --seed 42 --ticks 600 --save campaign.ows
+./openwar --load campaign.ows --ticks 400 --events --save campaign.ows
+./openwar-gui --load campaign.ows --save updated.ows
+```
+
+`--ticks` advances the requested number of additional ticks or stops at the
+campaign's conclusion. Use `--ticks 0` to inspect a checkpoint at its saved
+tick. The CLI writes a checkpoint on normal completion, including a graceful
+Ctrl+C in real-time mode. The viewer opens paused at the saved tick and
+writes its checkpoint when the window closes. Use the same path for
+`--load` and `--save` to update a checkpoint in place.
+
+A checkpoint contains the resolved world and full simulation state,
+including stocks and reservations, cargo in transit, service work,
+reinforcement arrivals, orders and movement progress, faction intelligence,
+the war result, the random generator state, and ordered event history.
+Loading does not need the original scenario file or the procedural
+generator. The save records the initial definition's fingerprint, the
+scenario seed, and the generator version for procedural campaigns.
+
+The binary format has independent schema and rules versions. The loader
+rejects unsupported versions and checks file integrity before restoring
+state. The writer stages the complete file beside the destination before
+replacing it. Checkpoints describe simulation state at a tick boundary.
+Viewer settings such as camera position, playback speed, and perspective
+are local to each session.
+
 ## Campaign viewer
 
 With raylib available through `pkg-config`, the build commands above

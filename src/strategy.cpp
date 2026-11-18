@@ -211,7 +211,7 @@ bool CampaignState::update_strategy(FactionId faction)
         const auto target = mission.target;
         const auto id = commit_ground_mission(std::move(mission));
         view.missions.push_back(missions_.at({faction, id}));
-        record_event(operations_log_, {tick, faction, target, id, reason});
+        record_event(operations_log_, {tick, faction, target, id, std::string(reason)});
         ++assigned;
         changed = true;
         busy.insert(target);

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -389,14 +390,18 @@ void run(CampaignState& campaign)
     auto snapshot = read_snapshot(campaign, controls.perspective);
     fit_map(controls, snapshot, layout().map);
     auto previous = Clock::now();
+    const auto initial_tick = campaign.clock().tick();
+    const auto tick_seconds = campaign.clock().tick_seconds();
+    const auto remaining_ticks = std::numeric_limits<std::uint64_t>::max() / tick_seconds - initial_tick;
     std::chrono::duration<long double> simulated{};
     while (!WindowShouldClose()) {
         const auto now = Clock::now();
         if (!controls.paused && !campaign.war_ended()) {
             simulated += std::chrono::duration<long double>(now - previous) * controls.speed;
-            const auto due = cli::ticks_due(simulated, 1, campaign.clock().tick_seconds());
-            if (due > campaign.clock().tick()) {
-                campaign.advance_ticks(std::min<std::uint64_t>(due - campaign.clock().tick(), 256));
+            const auto due = std::min(remaining_ticks, cli::ticks_due(simulated, 1, tick_seconds));
+            const auto advanced = campaign.clock().tick() - initial_tick;
+            if (due > advanced) {
+                campaign.advance_ticks(std::min<std::uint64_t>(due - advanced, 256));
             }
         }
         previous = now;
@@ -424,6 +429,8 @@ int main(int argc, char* argv[])
     try {
         std::optional<std::uint64_t> seed_override;
         std::optional<std::filesystem::path> scenario_path;
+        std::optional<std::filesystem::path> load_path;
+        std::optional<std::filesystem::path> save_path;
         std::optional<std::string_view> demo;
         const auto select = [&](std::string_view selection) {
             if (demo && demo != selection) {
@@ -434,12 +441,15 @@ int main(int argc, char* argv[])
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
             if (option == "--help") {
-                std::cout << "Usage: openwar-gui [--demo combat|operations|campaign|procedural] "
-                             "[--scenario FILE] [--seed N]\n";
+                std::cout << "Usage: openwar-gui [--demo NAME | --scenario FILE | --load FILE] "
+                             "[--seed N] [--save FILE]\n"
+                             "Demos: combat, operations, campaign, procedural.\n"
+                             "Use --load to resume and --save to write a checkpoint when the window closes.\n";
                 return 0;
             }
-            if ((option != "--seed" && option != "--demo" && option != "--scenario") || i + 1 == argc) {
-                throw std::invalid_argument("Expected --demo, --scenario or --seed with a value");
+            if ((option != "--seed" && option != "--demo" && option != "--scenario" &&
+                option != "--load" && option != "--save") || i + 1 == argc) {
+                throw std::invalid_argument("Expected --demo, --scenario, --seed, --load or --save with a value");
             }
             const std::string_view value = argv[++i];
             if (option == "--demo") {
@@ -453,6 +463,12 @@ int main(int argc, char* argv[])
                     throw std::invalid_argument("Select one scenario file");
                 }
                 scenario_path = value;
+            } else if (option == "--load" || option == "--save") {
+                auto& path = option == "--load" ? load_path : save_path;
+                if (path) {
+                    throw std::invalid_argument("Specify " + std::string(option) + " only once");
+                }
+                path = value;
             } else {
                 std::uint64_t seed = 0;
                 const auto end = value.data() + value.size();
@@ -463,18 +479,35 @@ int main(int argc, char* argv[])
                 seed_override = seed;
             }
         }
-        auto settings = scenario_path ? read_procedural_settings(*scenario_path) : ProceduralSettings{};
-        settings.seed = seed_override.value_or(settings.seed);
-        const auto scenario = demo.value_or("combat");
-        if (scenario != "procedural" && settings.seed > UINT32_MAX) {
-            throw std::invalid_argument("Seed must fit in 32 bits");
+        if (load_path && (demo || seed_override)) {
+            throw std::invalid_argument("--load cannot be combined with --demo, --scenario or --seed");
         }
-        const auto seed = static_cast<std::uint32_t>(settings.seed);
-        auto campaign = scenario == "procedural" ? procedural_campaign(settings) :
-                        scenario == "campaign" ? long_example_campaign(seed) :
-                        scenario == "combat" ? CampaignState(combat_example_scenario(), seed) :
-                                               operations_example_campaign(seed);
+        auto campaign = [&] {
+            if (load_path) {
+                return CampaignState::load(*load_path);
+            }
+            auto settings = scenario_path ? read_procedural_settings(*scenario_path) : ProceduralSettings{};
+            settings.seed = seed_override.value_or(settings.seed);
+            const auto scenario = demo.value_or("combat");
+            if (scenario != "procedural" && settings.seed > UINT32_MAX) {
+                throw std::invalid_argument("Seed must fit in 32 bits");
+            }
+            const auto seed = static_cast<std::uint32_t>(settings.seed);
+            if (scenario == "procedural") {
+                return procedural_campaign(settings);
+            }
+            if (scenario == "campaign") {
+                return long_example_campaign(seed);
+            }
+            if (scenario == "combat") {
+                return CampaignState(combat_example_scenario(), seed);
+            }
+            return operations_example_campaign(seed);
+        }();
         run(campaign);
+        if (save_path) {
+            campaign.save(*save_path);
+        }
     } catch (const std::exception& error) {
         std::cerr << "openwar-gui: " << error.what() << '\n';
         return 1;

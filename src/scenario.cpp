@@ -538,7 +538,8 @@ ScenarioDefinition resolve_procedural_scenario(const ProceduralSettings& setting
 CampaignState procedural_campaign(const ProceduralSettings& settings)
 {
     auto simulation_seed = generator(settings.seed, 2);
-    return CampaignState(resolve_procedural_scenario(settings), static_cast<std::uint32_t>(simulation_seed()));
+    return CampaignState(resolve_procedural_scenario(settings), static_cast<std::uint32_t>(simulation_seed()),
+                         settings.seed, procedural_generator_version);
 }
 
 }  // namespace openwar

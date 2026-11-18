@@ -30,6 +30,15 @@ bool has_marker(const Snapshot& snapshot, MarkerKind kind, std::string_view name
 
 int main()
 {
+    CampaignState economy(example_scenario(), 42);
+    economy.advance_ticks(5);
+    const auto economy_observer = read_snapshot(economy, {});
+    const auto economy_west = read_snapshot(economy, FactionId::west);
+    require(economy_observer.tick == 5 && has_marker(economy_observer, MarkerKind::installation, "Refinery") &&
+            economy_observer.tiles[0].controller == FactionId::west &&
+            !economy_west.tiles[0].controller && economy_west.events.empty(),
+            "Economy-only campaign should render without an intelligence store");
+
     CampaignState campaign(combat_example_scenario(), 42);
     const auto observer = read_snapshot(campaign, {});
     const auto west = read_snapshot(campaign, FactionId::west);

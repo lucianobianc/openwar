@@ -278,7 +278,7 @@ bool CampaignState::update_operations()
         }
         auto& item = equipment_.at(mission.equipment);
         const auto log = [&](std::string_view reason) {
-            record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, reason});
+            record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, std::string(reason)});
         };
         const bool invalid_preparation = mission.status == MissionStatus::preparing &&
             item.status != EquipmentStatus::ready &&
@@ -366,7 +366,7 @@ bool CampaignState::update_operations()
                 }
                 const auto result = schedule_mission(faction, plan.kind, plan.target, false);
                 record_event(operations_log_, {tick, faction, plan.target, result.mission,
-                                           result.mission ? plan.reason : result.reason});
+                                           std::string(result.mission ? plan.reason : result.reason)});
                 if (result.mission) {
                     equipment_changed = true;
                     busy_targets.insert(plan.target);
