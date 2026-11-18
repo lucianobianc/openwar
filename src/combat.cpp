@@ -204,28 +204,48 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
     if (!combat_.enabled || war_ended()) {
         return {{}, "ground operations unavailable"};
     }
-    if (!ground_weight(world_.sector(target))) {
-        return {{}, "ground target is not traversable"};
-    }
     const auto view = faction_view(faction, false);
+    if (const auto refusal = ground_target_refusal(view, faction, kind, target); !refusal.empty()) {
+        return {{}, refusal};
+    }
+    auto chosen = plan_ground_mission(faction, kind, target, view, {});
+    if (!chosen) {
+        return {{}, "no eligible supplied ground unit with a known route"};
+    }
+    chosen->manual = manual;
+    return {commit_ground_mission(std::move(*chosen)), "scheduled"};
+}
+
+std::string_view CampaignState::ground_target_refusal(const FactionView& view, FactionId faction,
+                                                     MissionKind kind, SectorId target) const
+{
+    if (!ground_weight(world_.sector(target))) {
+        return "ground target is not traversable";
+    }
     const auto report = view.sectors.find(target);
     if (report == view.sectors.end() || report->second.confidence < 750 ||
         (report->second.estimated_controller == faction) != (kind == MissionKind::defend)) {
-        return {{}, "target lacks suitable confirmed territorial intelligence"};
+        return "target lacks suitable confirmed territorial intelligence";
     }
     if (kind == MissionKind::attack && report->second.estimated_controller != FactionId::neutral &&
         !report->second.surveyed &&
         std::ranges::none_of(view.contacts, [target](const auto& contact) {
             return contact.estimated_sector == target && contact.confidence >= 350;
         })) {
-        return {{}, "attack requires a reported contact in the estimated sector"};
+        return "attack requires a reported contact in the estimated sector";
     }
+    return {};
+}
 
+std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,
+                                                       const FactionView& view, std::span<const UnitId> excluded) const
+{
     std::optional<Mission> chosen;
     std::uint64_t best_seconds = 0;
     for (const auto& [id, combat] : combat_units_) {
         const auto& unit = units_.at(id);
         if (unit.faction != faction || combat.status != GroundStatus::holding ||
+            std::ranges::find(excluded, id) != excluded.end() ||
             std::ranges::any_of(view.missions, [&](const auto& mission) {
                 return (mission.status == MissionStatus::preparing || active_ground(mission.status)) &&
                        equipment_.at(mission.equipment).assignment.unit == id;
@@ -252,22 +272,27 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
             chosen = Mission{MissionId{}, faction, kind, target, item_id, combat.stores, 0, 0};
             chosen->ground_path = std::move(path.sectors);
             chosen->ground_unit = id;
+            chosen->duration_ticks = std::max<std::uint64_t>(1, ceil_divide(seconds, clock_.tick_seconds()));
             best_seconds = seconds;
             break;
         }
     }
-    if (!chosen) {
-        return {{}, "no eligible supplied ground unit with a known route"};
-    }
-    const auto mission_id = next_mission_id(faction);
-    chosen->id = mission_id;
-    chosen->manual = manual;
-    const auto equipment = chosen->equipment;
-    missions_.emplace(std::pair{faction, mission_id}, std::move(*chosen));
+    return chosen;
+}
+
+MissionId CampaignState::commit_ground_mission(Mission mission)
+{
+    const auto mission_id = next_mission_id(mission.faction);
+    mission.id = mission_id;
+    const auto equipment = mission.equipment;
+    const auto faction = mission.faction;
+    const auto target = mission.target;
+    const auto manual = mission.manual;
+    missions_.emplace(std::pair{faction, mission_id}, std::move(mission));
     reserve_equipment(equipment);
     record_event(operations_log_, {clock_.tick(), faction, target, mission_id,
         manual ? "player ground order scheduled" : "autonomous ground order scheduled"});
-    return {mission_id, "scheduled"};
+    return mission_id;
 }
 
 std::uint32_t CampaignState::ground_speed(UnitId id) const
@@ -429,6 +454,9 @@ void CampaignState::update_combat()
             continue;
         }
         if (mission.status == MissionStatus::scheduled) {
+            if (tick < mission.earliest_launch_tick) {
+                continue;
+            }
             mission.status = MissionStatus::in_progress;
             mission.launch_tick = tick;
             set_equipment_status(item, EquipmentStatus::in_operation, tick);

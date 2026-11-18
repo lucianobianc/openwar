@@ -427,8 +427,11 @@ private:
     void set_equipment_status(Equipment& equipment, EquipmentStatus status, std::uint64_t tick);
     void queue_service(Equipment& equipment, ServiceKind kind, std::uint64_t tick);
     bool reinforcement_destination_active(UnitId id) const;
+    bool reinforcement_entry_ready(const Equipment& item) const;
     void initialize_operations(const ScenarioDefinition& scenario);
     bool update_operations();
+    bool update_strategy(FactionId faction);
+    void dispatch_reinforcement(FactionId faction, const FactionView& view, const StrategicPlan& plan);
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
     void release_unspent_mission_stock(Mission& mission);
     void release_air_mission_equipment(const Mission& mission, EquipmentStatus standby);
@@ -436,6 +439,11 @@ private:
     MissionId next_mission_id(FactionId faction) const;
     void initialize_combat(const ScenarioDefinition& scenario);
     OrderResult schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
+    std::string_view ground_target_refusal(const FactionView& view, FactionId faction,
+                                           MissionKind kind, SectorId target) const;
+    std::optional<Mission> plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,
+                                              const FactionView& view, std::span<const UnitId> excluded) const;
+    MissionId commit_ground_mission(Mission mission);
     void update_combat();
     void move_combat_unit(CombatUnit& unit, SectorId sector);
     std::uint32_t ground_speed(UnitId id) const;
@@ -477,6 +485,7 @@ private:
     std::map<EquipmentId, Equipment> equipment_;
     std::vector<ForcesEvent> forces_log_;
     OperationsSettings operations_;
+    std::map<FactionId, StrategicPlan> strategies_;
     std::vector<Objective> objectives_;
     std::map<FactionId, IntelStore> intelligence_;
     std::map<std::pair<FactionId, MissionId>, Mission> missions_;
@@ -498,7 +507,7 @@ ScenarioDefinition logistics_example_scenario();
 CampaignState maintenance_example_campaign(std::uint32_t seed);
 CampaignState operations_example_campaign(std::uint32_t seed, std::optional<FactionId> player = {});
 ScenarioDefinition combat_example_scenario(std::optional<FactionId> player = {});
-CampaignState long_example_campaign(std::uint32_t seed);
+CampaignState long_example_campaign(std::uint32_t seed, bool strategic_command = true);
 
 }  // namespace openwar
 

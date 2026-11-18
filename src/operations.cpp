@@ -330,6 +330,10 @@ bool CampaignState::update_operations()
     }
     if (operations_.planner_interval_ticks != 0 && tick % operations_.planner_interval_ticks == 0) {
         for (const auto faction : {FactionId::west, FactionId::east}) {
+            if (combat_.enabled && operations_.strategy_review_ticks) {
+                equipment_changed = update_strategy(faction) || equipment_changed;
+                continue;
+            }
             const auto view = faction_view(faction, false);
             auto assigned = static_cast<std::size_t>(std::ranges::count_if(view.missions, [](const auto& mission) {
                 return !mission.manual && active(mission.status);

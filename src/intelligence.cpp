@@ -76,6 +76,9 @@ FactionView CampaignState::faction_view(FactionId faction, bool include_events) 
 {
     const auto& store = intelligence_.at(faction);
     FactionView view;
+    if (const auto strategy = strategies_.find(faction); strategy != strategies_.end()) {
+        view.strategy = strategy->second;
+    }
     const auto age = [this](std::uint64_t tick) {
         return (clock_.tick() - tick) * clock_.tick_seconds();
     };

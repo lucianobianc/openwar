@@ -255,9 +255,7 @@ void CampaignState::evaluate_war()
             if (unit.faction != faction) {
                 continue;
             }
-            if (item.reinforcement_eta && unit.facility && reinforcement_destination_active(unit.id) &&
-                facilities_.at(*unit.facility).operational &&
-                sector_state(unit.sector).controller == faction) {
+            if (item.reinforcement_eta && reinforcement_entry_ready(item)) {
                 const auto eta = std::max(clock_.tick(), *item.reinforcement_eta);
                 recovery = recovery || eta - clock_.tick() <=
                     combat_.reinforcement_horizon_seconds / clock_.tick_seconds();

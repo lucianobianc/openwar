@@ -194,7 +194,7 @@ CampaignState operations_example_campaign(std::uint32_t seed, std::optional<Fact
     return CampaignState(std::move(scenario), seed);
 }
 
-CampaignState long_example_campaign(std::uint32_t seed)
+CampaignState long_example_campaign(std::uint32_t seed, bool strategic_command)
 {
     const SectorProperties plains{};
     const SectorProperties forest{Terrain::forest, true};
@@ -210,6 +210,7 @@ CampaignState long_example_campaign(std::uint32_t seed)
     }), {}};
     scenario.operations = {true, 10};
     scenario.operations.max_autonomous_missions = 4;
+    scenario.operations.strategy_review_ticks = strategic_command ? 60 : 0;
     scenario.combat.enabled = true;
     scenario.combat.interval_ticks = 5;
     scenario.combat.time_limit_seconds = 48 * 3600;

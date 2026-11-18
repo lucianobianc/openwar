@@ -232,6 +232,23 @@ It counts combat resolution intervals, ownership transfers, equipment and
 mission outcomes, and stockpile consumption. Shipments are reported separately
 because moving stock does not consume the cargo.
 
+### Advanced strategic command
+
+In `--demo campaign`, each faction keeps a strategic objective between
+reviews. Command revisits its priorities every 60 simulated ticks and when
+it secures its focus or takes losses. Scenario victory targets receive extra
+weight. If a direct advance is unavailable, command can survey and secure
+approach sectors, or use available formations on another front.
+
+The planner uses faction reports to identify threats. It guards threatened
+command posts and objectives, and can synchronize two formations against
+reported opposition by delaying the nearer formation. Existing movement,
+stock, readiness and manual order checks still apply. After losses, command
+can dispatch one existing replacement per review from a friendly functional
+entry point. Heavy losses can pause new offensives until forces recover.
+The demo prints each faction's current focus and review tick. Use `--events`
+to see strategic decisions alongside operations and logistics.
+
 ## Campaign viewer
 
 With raylib available through `pkg-config`, the build commands above

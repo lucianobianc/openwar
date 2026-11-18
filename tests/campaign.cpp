@@ -1169,7 +1169,7 @@ void test_war_endings()
 
 void test_long_campaign()
 {
-    auto campaign = long_example_campaign(42);
+    auto campaign = long_example_campaign(42, false);
     require(campaign.world().width() == 9 && campaign.world().height() == 7 &&
             !campaign.world().sector(SectorId{13}).properties.traversable &&
             !campaign.shipments().empty(), "Missing campaign geography or supply orders");
@@ -1193,7 +1193,7 @@ void test_long_campaign()
         campaign.advance_ticks(17);
         require(campaign.clock().tick() <= 2880, "The long scenario missed its terminal deadline");
     }
-    auto repeated = long_example_campaign(42);
+    auto repeated = long_example_campaign(42, false);
     repeated.advance_ticks(3000);
     require(campaign.clock().tick() > 355 && campaign.war_result() == repeated.war_result() &&
             std::ranges::equal(campaign.observer_battle_log(), repeated.observer_battle_log()) &&
@@ -1230,6 +1230,158 @@ void test_long_campaign()
                     return event.previous_controller && event.amount == static_cast<std::uint32_t>(faction);
                 }), "A faction failed to complete repeated territorial attacks");
     }
+}
+
+void test_strategic_command()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr SectorId home{0};
+    constexpr SectorId approach{1};
+    constexpr SectorId objective{2};
+    auto scenario = combat_example_scenario(west);
+    scenario.operations.planner_interval_ticks = 10;
+    scenario.operations.strategy_review_ticks = 60;
+    scenario.operations.max_autonomous_missions = 3;
+    scenario.operations.territory_half_life_seconds = 360 * 60;
+    scenario.operations.contact_half_life_seconds = 30 * 60;
+    scenario.victory_objectives.clear();
+    scenario.command_objectives.clear();
+    scenario.public_sectors = {objective};
+    scenario.objectives = {{west, objective, 6}};
+    for (auto& sector : scenario.initial_sectors) {
+        if (sector.sector == approach) {
+            sector.state.controller = west;
+        }
+        if (sector.sector == objective) {
+            sector.state.controller = FactionId::neutral;
+        }
+    }
+    auto stores = *std::ranges::find(scenario.stockpiles, StockpileId{10}, &Stockpile::id);
+    stores.id = StockpileId{20};
+    stores.sector = approach;
+    scenario.stockpiles.push_back(stores);
+    scenario.units.push_back({UnitId{3}, "Second formation", west, approach});
+    scenario.combat_units.push_back({UnitId{3}, stores.id});
+    scenario.equipment.push_back({EquipmentId{4}, EquipmentTypeId{1}, UnitId{3}});
+    scenario.units.push_back({UnitId{4}, "Scout flight", west, home, {}, FacilityId{1}});
+    scenario.equipment_types.push_back({EquipmentTypeId{3}, "Scout", west, EquipmentCategory::helicopter,
+                                        {}, {}, {}, {}, 3600, 3});
+    scenario.equipment.push_back({EquipmentId{5}, EquipmentTypeId{3}, UnitId{4}});
+
+    CampaignState coordinated(scenario, 42);
+    require(coordinated.issue_order(west, MissionKind::recon, objective).mission.has_value(),
+            "Could not survey the offensive objective");
+    coordinated.advance_ticks(10);
+    const auto orders = coordinated.faction_view(west);
+    require(orders.strategy && orders.strategy->focus == objective && orders.strategy->reviewed_tick == 10 &&
+            orders.missions.size() == 3 && orders.missions.front().manual &&
+            orders.missions[1].ground_unit != orders.missions[2].ground_unit &&
+            orders.missions[1].earliest_launch_tick == 12 && orders.missions[2].duration_ticks == 2,
+            "Strategic command did not coordinate independent formations with different travel times");
+    coordinated.advance_ticks(1);
+    require(coordinated.units().at(UnitId{3}).sector == approach,
+            "The nearer formation did not wait for its support");
+    coordinated.advance_ticks(1);
+    require(std::ranges::count_if(coordinated.observer_battle_log(), [](const auto& event) {
+                return event.tick == 12 && event.sector == objective && event.reason == "unit moved";
+            }) == 2, "The planned offensive did not arrive together");
+
+    auto manual = scenario;
+    manual.world = WorldDefinition(3, 2, 2000, std::vector<SectorProperties>(6));
+    CampaignState player_order(manual, 42);
+    player_order.advance_ticks(9);
+    require(player_order.issue_order(west, MissionKind::attack, objective).mission.has_value(),
+            "Could not establish a manual operation before the strategic review");
+    player_order.advance_ticks(1);
+    const auto player_view = player_order.faction_view(west);
+    require(std::ranges::count(player_view.missions, objective, &Mission::target) == 1 &&
+            player_view.missions.front().manual && player_view.missions.front().status == MissionStatus::in_progress,
+            "The strategy duplicated or displaced a manual operation");
+
+    auto defense = scenario;
+    for (auto& sector : defense.initial_sectors) {
+        if (sector.sector == objective) {
+            sector.state.controller = west;
+        }
+    }
+    CampaignState unaware(defense, 42);
+    unaware.advance_ticks(10);
+    require(unaware.faction_view(west).missions.empty(),
+            "Strategic defense reacted to an unobserved hostile formation");
+    CampaignState defending(defense, 42);
+    require(defending.issue_order(west, MissionKind::recon, objective).mission.has_value(),
+            "Could not survey the defensive objective");
+    defending.advance_ticks(10);
+    const auto response = defending.faction_view(west);
+    require(response.missions.size() == 2 && response.missions.back().kind == MissionKind::defend &&
+            response.missions.back().target == objective, "Strategic defense ignored a reported incursion");
+
+    auto staging = combat_example_scenario();
+    staging.operations.planner_interval_ticks = 1;
+    staging.operations.strategy_review_ticks = 5;
+    staging.victory_objectives.clear();
+    staging.command_objectives.clear();
+    staging.objectives = {{west, objective, 6}};
+    staging.public_sectors.push_back(objective);
+    for (auto& sector : staging.initial_sectors) {
+        if (sector.sector == objective) {
+            sector.state.controller = FactionId::neutral;
+        }
+    }
+    CampaignState staged(staging, 42);
+    staged.advance_ticks(1);
+    const auto opening = staged.faction_view(west);
+    require(opening.strategy->focus == objective && opening.missions.size() == 1 &&
+            opening.missions.front().target == approach, "Command did not stage a reachable approach");
+    staged.advance_ticks(2);
+    require(staged.faction_view(west).strategy == opening.strategy,
+            "Command discarded its objective between strategic reviews");
+
+    staging.operations.strategy_review_ticks = 2;
+    staging.operations.reinforcement_travel_ticks = 2;
+    staging.equipment.push_back({EquipmentId{4}, EquipmentTypeId{1}, UnitId{1}});
+    staging.equipment.push_back({EquipmentId{5}, EquipmentTypeId{1}, UnitId{1}});
+    staging.equipment.push_back({EquipmentId{6}, EquipmentTypeId{1}, UnitId{1}, "Reserve"});
+    CampaignState recovery(staging, 42);
+    recovery.lose_equipment(EquipmentId{4});
+    recovery.lose_equipment(EquipmentId{5});
+    recovery.advance_ticks(1);
+    const auto recovering = recovery.faction_view(west);
+    require(recovering.strategy->recovering && recovering.strategy->ground_losses == 2 &&
+            recovering.missions.empty() && recovery.equipment().at(EquipmentId{6}).reinforcement_eta == 3,
+            "Losses did not lead to consolidation and a finite reserve commitment");
+    recovery.advance_ticks(2);
+    const auto resumed = recovery.faction_view(west);
+    require(!resumed.strategy->recovering && !resumed.missions.empty() &&
+            recovery.equipment().at(EquipmentId{6}).status != EquipmentStatus::in_transit,
+            "An arriving replacement did not restore offensive activity");
+
+    auto moving = combat_example_scenario(west);
+    moving.operations.planner_interval_ticks = 0;
+    moving.equipment.push_back({EquipmentId{6}, EquipmentTypeId{1}, UnitId{1}, "Reserve"});
+    CampaignState displaced(moving, 42);
+    require(displaced.authorize_reinforcement(EquipmentId{6}, 3) &&
+            displaced.issue_order(west, MissionKind::defend, SectorId{3}).mission.has_value(),
+            "Could not schedule reinforcement before the formation moved");
+    displaced.advance_ticks(3);
+    require(displaced.units().at(UnitId{1}).sector == SectorId{3} &&
+            displaced.equipment().at(EquipmentId{6}).arrival_delayed,
+            "A reinforcement bypassed its entry point to join a deployed formation");
+
+    auto batch = long_example_campaign(42);
+    auto stepped = long_example_campaign(42);
+    batch.advance_ticks(1000);
+    for (int tick = 0; tick < 1000 && !stepped.war_ended(); ++tick) {
+        stepped.advance_ticks(1);
+    }
+    require(batch.faction_view(west, false).strategy == stepped.faction_view(west, false).strategy &&
+            batch.faction_view(east, false).strategy == stepped.faction_view(east, false).strategy &&
+            batch.war_result() == stepped.war_result() &&
+            std::ranges::equal(batch.observer_operations_log(), stepped.observer_operations_log()) &&
+            std::ranges::equal(batch.observer_battle_log(), stepped.observer_battle_log()) &&
+            std::ranges::equal(batch.logistics_log(), stepped.logistics_log()),
+            "Strategic command changed with tick batching");
 }
 
 void test_ground_movement()
@@ -1401,6 +1553,7 @@ int main()
     test_combat_and_territory();
     test_war_endings();
     test_long_campaign();
+    test_strategic_command();
     test_ground_movement();
     test_depleted_withdrawal();
 }

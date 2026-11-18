@@ -195,6 +195,15 @@ void report_movement(std::ostream& out, const GroundMovement& movement)
     }
 }
 
+void report_strategy(std::ostream& out, FactionId faction, const StrategicPlan& strategy)
+{
+    out << faction_name(faction) << " strategy | " << (strategy.recovering ? "recovering" : "operational");
+    if (strategy.focus) {
+        out << " | focus sector " << static_cast<std::uint32_t>(*strategy.focus);
+    }
+    out << " | ground losses " << strategy.ground_losses << " | reviewed tick " << strategy.reviewed_tick << '\n';
+}
+
 void report_operations(std::ostream& out, const CampaignState& campaign, FactionId perspective, bool compact)
 {
     if (perspective == FactionId::neutral) {
@@ -237,6 +246,9 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
             continue;
         }
         const auto view = campaign.faction_view(faction, false);
+        if (view.strategy) {
+            report_strategy(out, faction, *view.strategy);
+        }
         out << faction_name(faction) << " intelligence | " << view.sectors.size() << " reports | "
             << campaign.world().sectors().size() - view.sectors.size() << " unknown sectors | "
             << view.installations.size() << " known installation sites\n";
@@ -495,6 +507,9 @@ void print_campaign_summary(std::ostream& out, const CampaignState& campaign, st
             }
         }
         const auto view = campaign.faction_view(faction, false);
+        if (view.strategy) {
+            report_strategy(out, faction, *view.strategy);
+        }
         const auto count = [&](MissionStatus status) {
             return std::ranges::count(view.missions, status, &Mission::status);
         };

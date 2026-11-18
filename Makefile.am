@@ -4,7 +4,7 @@ AM_CXXFLAGS = -std=c++20
 noinst_LIBRARIES = libcampaign.a
 libcampaign_a_SOURCES = src/campaign.cpp src/campaign.hpp src/economy.cpp \
 	src/logistics.cpp src/forces.cpp src/scenario.cpp src/intelligence.cpp \
-	src/operations.cpp src/operations.hpp src/combat.cpp src/combat.hpp src/territory.cpp
+	src/operations.cpp src/operations.hpp src/strategy.cpp src/combat.cpp src/combat.hpp src/territory.cpp
 
 bin_PROGRAMS = openwar
 openwar_SOURCES = src/main.cpp src/realtime.cpp src/realtime.hpp

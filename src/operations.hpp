@@ -29,6 +29,17 @@ struct OperationsSettings {
     std::uint32_t installation_half_life_seconds = 1440 * 60;
     std::optional<FactionId> player{};
     std::size_t max_autonomous_missions = 1;
+    std::uint32_t strategy_review_ticks = 0;
+    std::uint32_t reinforcement_travel_ticks = 30;
+    std::uint32_t coordination_window_ticks = 8;
+};
+
+struct StrategicPlan {
+    std::optional<SectorId> focus{};
+    std::uint64_t reviewed_tick = 0;
+    std::size_t ground_losses = 0;
+    bool recovering = false;
+    bool operator==(const StrategicPlan&) const = default;
 };
 
 struct Objective {
@@ -80,6 +91,7 @@ struct Mission {
     std::size_t ground_leg = 0;
     bool preparation_reserved = false;
     std::uint64_t ground_progress = 0;
+    std::uint64_t earliest_launch_tick = 0;
     bool operator==(const Mission&) const = default;
 };
 
@@ -100,6 +112,7 @@ struct FactionView {
     std::vector<Objective> objectives;
     std::vector<Mission> missions;
     std::vector<OperationsEvent> events;
+    std::optional<StrategicPlan> strategy{};
 };
 
 // A complete sector survey supersedes contacts that it did not observe again.
