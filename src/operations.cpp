@@ -216,6 +216,20 @@ void CampaignState::release_unspent_mission_stock(Mission& mission)
     }
 }
 
+void CampaignState::release_air_mission_equipment(const Mission& mission, EquipmentStatus standby)
+{
+    auto& item = equipment_.at(mission.equipment);
+    const bool mission_preparation = mission.status == MissionStatus::preparing &&
+        (item.status == EquipmentStatus::ready ||
+         (item.job && item.job->kind == ServiceKind::preparation && !item.needs_turnaround));
+    if (mission_preparation || item.status == EquipmentStatus::reserved) {
+        item.job.reset();
+        set_equipment_status(item, standby, clock_.tick());
+    } else {
+        finish_operation(mission.equipment);
+    }
+}
+
 MissionId CampaignState::next_mission_id(FactionId faction) const
 {
     const auto maximum = std::numeric_limits<std::uint32_t>::max();

@@ -172,8 +172,7 @@ void CampaignState::capture_sector(SectorId sector, FactionId faction)
                 continue;
             }
             release_unspent_mission_stock(mission);
-            cancel_equipment_reservation(mission.equipment);
-            finish_operation(mission.equipment);
+            release_air_mission_equipment(mission, EquipmentStatus::grounded);
             mission.status = MissionStatus::failed;
             record_event(operations_log_, {clock_.tick(), mission.faction, mission.target, mission.id,
                                        "launch stockpile captured"});
@@ -256,7 +255,8 @@ void CampaignState::evaluate_war()
             if (unit.faction != faction) {
                 continue;
             }
-            if (item.reinforcement_eta && unit.facility && facilities_.at(*unit.facility).operational &&
+            if (item.reinforcement_eta && unit.facility && reinforcement_destination_active(unit.id) &&
+                facilities_.at(*unit.facility).operational &&
                 sector_state(unit.sector).controller == faction) {
                 const auto eta = std::max(clock_.tick(), *item.reinforcement_eta);
                 recovery = recovery || eta - clock_.tick() <=
@@ -337,8 +337,7 @@ void CampaignState::conclude_war(WarStatus status, std::string_view cause)
         if (mission.ground_unit) {
             release_ground_equipment(mission.equipment);
         } else {
-            cancel_equipment_reservation(mission.equipment);
-            finish_operation(mission.equipment);
+            release_air_mission_equipment(mission, EquipmentStatus::available);
         }
         mission.status = MissionStatus::cancelled;
         record_event(operations_log_, {clock_.tick(), mission.faction, mission.target, mission.id, "war ended"});

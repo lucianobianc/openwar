@@ -268,12 +268,19 @@ bool CampaignState::lose_equipment(EquipmentId id)
     return true;
 }
 
+bool CampaignState::reinforcement_destination_active(UnitId id) const
+{
+    const auto combat = combat_units_.find(id);
+    return combat == combat_units_.end() ||
+           (combat->second.status != GroundStatus::destroyed && combat->second.status != GroundStatus::surrendered);
+}
+
 bool CampaignState::authorize_reinforcement(EquipmentId id, std::uint64_t eta)
 {
     auto& item = equipment_.at(id);
     auto arrival = clock_;
     if (war_ended() || item.status != EquipmentStatus::reserve || eta <= arrival.tick() ||
-        !units_.at(item.assignment.unit).facility) {
+        !units_.at(item.assignment.unit).facility || !reinforcement_destination_active(item.assignment.unit)) {
         return false;
     }
     arrival.advance(eta - arrival.tick());
@@ -302,7 +309,7 @@ bool CampaignState::update_forces(std::uint64_t tick)
             queue_service(item, ServiceKind::inspection, tick);
         } else if (item.reinforcement_eta && *item.reinforcement_eta <= tick) {
             const auto& unit = units_.at(item.assignment.unit);
-            if (facilities_.at(*unit.facility).operational &&
+            if (reinforcement_destination_active(unit.id) && facilities_.at(*unit.facility).operational &&
                 sector_state(unit.sector).controller == unit.faction) {
                 set_equipment_status(item, EquipmentStatus::available, tick);
                 item.reinforcement_eta.reset();

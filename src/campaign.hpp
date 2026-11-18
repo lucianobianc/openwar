@@ -426,10 +426,12 @@ private:
     bool update_forces(std::uint64_t tick);
     void set_equipment_status(Equipment& equipment, EquipmentStatus status, std::uint64_t tick);
     void queue_service(Equipment& equipment, ServiceKind kind, std::uint64_t tick);
+    bool reinforcement_destination_active(UnitId id) const;
     void initialize_operations(const ScenarioDefinition& scenario);
     bool update_operations();
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
     void release_unspent_mission_stock(Mission& mission);
+    void release_air_mission_equipment(const Mission& mission, EquipmentStatus standby);
     std::uint32_t observe(FactionId faction, SectorId sector);
     MissionId next_mission_id(FactionId faction) const;
     void initialize_combat(const ScenarioDefinition& scenario);

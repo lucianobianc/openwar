@@ -894,6 +894,76 @@ void test_mission_preparation_reservation()
     }
 }
 
+void test_destroyed_reinforcement()
+{
+    constexpr UnitId formation{1};
+    constexpr EquipmentId vehicle{1};
+    constexpr EquipmentId reserve{4};
+    auto scenario = combat_example_scenario();
+    scenario.equipment.push_back({reserve, EquipmentTypeId{1}, formation, "Reserve"});
+    CampaignState destroyed(scenario, 42);
+    destroyed.lose_equipment(vehicle);
+    destroyed.advance_ticks(1);
+    require(destroyed.combat_units().at(formation).status == GroundStatus::destroyed &&
+            !destroyed.authorize_reinforcement(reserve, 3) &&
+            destroyed.equipment().at(reserve).status == EquipmentStatus::reserve &&
+            destroyed.unit_readiness(formation).ready == 0,
+            "A destroyed formation accepted a new reinforcement");
+
+    CampaignState en_route(scenario, 42);
+    require(en_route.authorize_reinforcement(reserve, 3), "A surviving formation could not accept reinforcement");
+    en_route.lose_equipment(vehicle);
+    en_route.advance_ticks(3);
+    const auto& item = en_route.equipment().at(reserve);
+    require(en_route.combat_units().at(formation).status == GroundStatus::destroyed &&
+            item.status == EquipmentStatus::in_transit && item.arrival_delayed &&
+            en_route.unit_readiness(formation).ready == 0,
+            "A reinforcement already in transit arrived at a destroyed formation");
+}
+
+void test_capture_cancels_preparation()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr SectorId center{1};
+    constexpr StockpileId base{12};
+    constexpr EquipmentId scout{10};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr auto parts = static_cast<std::size_t>(Resource::spare_parts);
+    auto scenario = combat_example_scenario(east);
+    scenario.operations.planner_interval_ticks = 1;
+    scenario.objectives = {{west, center, 3}};
+    auto& stock = scenario.stockpiles.back();
+    stock.quantity[fuel] = stock.capacity[fuel] = 10;
+    scenario.facilities.push_back({FacilityId{10}, base, 1, 1});
+    scenario.units.push_back({UnitId{10}, "Scout flight", east, center, {}, FacilityId{10}});
+    ServiceProfile preparation{600};
+    preparation.costs[parts] = 1;
+    scenario.equipment_types.push_back({EquipmentTypeId{10}, "Scout", east,
+        EquipmentCategory::helicopter, preparation, {}, {}, {}, 3600, 2});
+    scenario.equipment.push_back({scout, EquipmentTypeId{10}, UnitId{10}});
+    // The capture can interrupt queued work, started work, or preparation that finished this tick.
+    for (const auto seconds : {0u, 600u, 180u}) {
+        scenario.facilities.back().technicians = seconds ? 1 : 0;
+        scenario.equipment_types.back().preparation.seconds = seconds ? seconds : 600;
+        CampaignState campaign(scenario, 42);
+        require(campaign.issue_order(east, MissionKind::recon, center).mission.has_value(),
+                "Could not schedule the capture fixture");
+        campaign.advance_ticks(4);
+        require(campaign.faction_view(east).missions.front().status == MissionStatus::preparing &&
+                campaign.equipment().at(scout).job.has_value(), "Capture fixture did not reach preparation");
+        campaign.advance_ticks(1);
+        const auto& item = campaign.equipment().at(scout);
+        const auto& captured = campaign.stockpiles().at(base);
+        require(campaign.sector_state(center).controller == west &&
+                campaign.faction_view(east).missions.front().status == MissionStatus::failed &&
+                item.status == EquipmentStatus::grounded && !item.job &&
+                captured.reserved == ResourceAmounts{} && captured.quantity[fuel] == 10 &&
+                captured.quantity[parts] == (seconds ? 6u : 7u),
+                "Capture retained mission preparation or incorrectly refunded its costs");
+    }
+}
+
 void test_combat_and_territory()
 {
     constexpr auto west = FactionId::west;
@@ -1326,6 +1396,8 @@ int main()
     test_operations_and_intelligence();
     test_recon_revisit();
     test_mission_preparation_reservation();
+    test_destroyed_reinforcement();
+    test_capture_cancels_preparation();
     test_combat_and_territory();
     test_war_endings();
     test_long_campaign();
