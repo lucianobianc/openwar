@@ -578,7 +578,7 @@ void test_operations_and_intelligence()
             !campaign.issue_order(west, MissionKind::recon, SectorId{99}).mission,
             "Order bypassed faction authority or target validation");
     const auto order = campaign.issue_order(west, MissionKind::recon, enemy);
-    require(order.mission && campaign.stockpiles().at(base).reserved[fuel] == 5 &&
+    require(order.mission && campaign.stockpiles().at(base).reserved[fuel] == 10 &&
             campaign.equipment().at(scout).status == EquipmentStatus::reserved &&
             !campaign.issue_order(west, MissionKind::recon, enemy).mission &&
             !campaign.cancel_order(east, *order.mission), "Equipment or fuel was reserved twice");
@@ -732,8 +732,70 @@ void test_recon_revisit()
                 "An uncertain contact did not trigger a new reconnaissance of its priority sector");
         const auto& mission = view.missions[1];
         require(campaign.equipment().at(mission.equipment).status == EquipmentStatus::reserved &&
-                campaign.stockpiles().at(mission.launch_stock).reserved[fuel] == mission.fuel,
-                "The new mission did not hold exactly one fuel reservation");
+                campaign.stockpiles().at(mission.launch_stock).reserved[fuel] == mission.fuel + 5,
+                "The new mission did not hold its flight and preparation fuel");
+    }
+}
+
+void test_mission_preparation_reservation()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr auto parts = static_cast<std::size_t>(Resource::spare_parts);
+    constexpr StockpileId base{1};
+    constexpr SectorId target{0};
+    constexpr EquipmentId scout{10};
+    auto scenario = combat_example_scenario(west);
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.stockpiles.front().quantity[fuel] = 6;
+    scenario.stockpiles.front().quantity[parts] = scenario.stockpiles.front().capacity[parts] = 2;
+    ServiceProfile preparation{60};
+    preparation.costs[fuel] = 4;
+    preparation.costs[parts] = 1;
+    scenario.equipment_types.push_back({EquipmentTypeId{10}, "Scout", west,
+        EquipmentCategory::helicopter, preparation, {}, {}, {}, 3600, 2});
+    for (std::uint32_t id : {10, 11}) {
+        scenario.units.push_back({UnitId{id}, "Scout flight", west, target, {}, FacilityId{1}});
+        scenario.equipment.push_back({EquipmentId{id}, EquipmentTypeId{10}, UnitId{id}});
+    }
+
+    CampaignState campaign(scenario, 42);
+    const auto first = campaign.issue_order(west, MissionKind::recon, target);
+    require(first.mission && !campaign.issue_order(west, MissionKind::recon, target).mission,
+            "Two missions overcommitted the same preparation stock");
+    const auto& stock = campaign.stockpiles().at(base);
+    ResourceAmounts competing{};
+    competing[parts] = 2;
+    require(stock.reserved[fuel] == 5 && stock.reserved[parts] == 1 && !campaign.consume(base, competing),
+            "Preparation stock was available to a competing consumer");
+    require(campaign.cancel_order(west, *first.mission) && stock.reserved == ResourceAmounts{} &&
+            stock.quantity[fuel] == 6 && stock.quantity[parts] == 2,
+            "Cancellation charged or retained unused preparation stock");
+    require(campaign.issue_order(west, MissionKind::recon, target).mission.has_value(),
+            "Freed stock could not be allocated again");
+    campaign.advance_ticks(2);
+    require(stock.quantity[fuel] == 2 && stock.quantity[parts] == 1 &&
+            stock.reserved[fuel] == 1 && stock.reserved[parts] == 0,
+            "Preparation failed to consume its reservation exactly once");
+    campaign.advance_ticks(1);
+    require(stock.quantity[fuel] == 1 && stock.quantity[parts] == 1 &&
+            stock.reserved == ResourceAmounts{} &&
+            campaign.faction_view(west).missions.back().status == MissionStatus::in_progress,
+            "Launch charged preparation twice or retained the flight allocation");
+
+    for (const auto ticks : {1u, 2u}) {
+        CampaignState interrupted(scenario, 42);
+        require(interrupted.issue_order(west, MissionKind::recon, target).mission.has_value(),
+                "Could not schedule preparation failure fixture");
+        interrupted.advance_ticks(ticks);
+        require(interrupted.lose_equipment(scout), "Could not interrupt preparation");
+        interrupted.advance_ticks(1);
+        const auto& remaining = interrupted.stockpiles().at(base);
+        require(interrupted.faction_view(west).missions.front().status == MissionStatus::failed &&
+                remaining.reserved == ResourceAmounts{} &&
+                remaining.quantity[fuel] == (ticks == 1 ? 6u : 2u) &&
+                remaining.quantity[parts] == (ticks == 1 ? 2u : 1u),
+                "Preparation failure did not release exactly the unspent stock");
     }
 }
 
@@ -1029,6 +1091,7 @@ int main()
     test_forces_and_maintenance();
     test_operations_and_intelligence();
     test_recon_revisit();
+    test_mission_preparation_reservation();
     test_combat_and_territory();
     test_war_endings();
     test_long_campaign();

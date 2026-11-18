@@ -7,7 +7,6 @@
 namespace openwar {
 namespace {
 
-constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
 constexpr auto supplies = static_cast<std::size_t>(Resource::supplies);
 
 bool military_order_active(MissionStatus status)
@@ -172,9 +171,7 @@ void CampaignState::capture_sector(SectorId sector, FactionId faction)
             if (mission.launch_stock != id || !military_order_active(mission.status)) {
                 continue;
             }
-            if (mission.status != MissionStatus::in_progress) {
-                stock.reserved[fuel] -= mission.fuel;
-            }
+            release_unspent_mission_stock(mission);
             cancel_equipment_reservation(mission.equipment);
             finish_operation(mission.equipment);
             mission.status = MissionStatus::failed;
@@ -336,9 +333,7 @@ void CampaignState::conclude_war(WarStatus status, std::string_view cause)
         if (!military_order_active(mission.status)) {
             continue;
         }
-        if (mission.status != MissionStatus::in_progress) {
-            stockpiles_.at(mission.launch_stock).reserved[fuel] -= mission.fuel;
-        }
+        release_unspent_mission_stock(mission);
         if (mission.ground_unit) {
             release_ground_equipment(mission.equipment);
         } else {

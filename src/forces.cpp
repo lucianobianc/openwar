@@ -358,9 +358,20 @@ bool CampaignState::update_forces(std::uint64_t tick)
             continue;
         }
         if (!job.started) {
-            if (!consume_at(facility.stockpile, service.costs, tick, item->assignment.id)) {
+            auto mission = missions_.end();
+            if (job.kind == ServiceKind::preparation && !item->needs_turnaround) {
+                mission = std::ranges::find_if(missions_, [&](const auto& entry) {
+                    const auto& order = entry.second;
+                    return order.preparation_reserved && order.status == MissionStatus::preparing &&
+                           order.equipment == item->assignment.id && order.launch_stock == facility.stockpile;
+                });
+            }
+            if (!consume_at(facility.stockpile, service.costs, tick, item->assignment.id, mission != missions_.end())) {
                 set_equipment_status(*item, EquipmentStatus::awaiting_parts, tick);
                 continue;
+            }
+            if (mission != missions_.end()) {
+                mission->second.preparation_reserved = false;
             }
             job.started = true;
             set_equipment_status(*item, active_status(job.kind), tick);

@@ -91,14 +91,20 @@ bool CampaignState::consume(StockpileId id, const ResourceAmounts& amounts)
 }
 
 bool CampaignState::consume_at(StockpileId id, const ResourceAmounts& amounts, std::uint64_t tick,
-                               std::optional<EquipmentId> equipment)
+                               std::optional<EquipmentId> equipment, bool from_reservation)
 {
     auto& stock = stockpiles_.at(id);
-    if (!can_apply(stock, amounts, {})) {
+    if (from_reservation ? !std::ranges::equal(amounts, stock.reserved, std::less_equal<>{})
+                         : !can_apply(stock, amounts, {})) {
         return false;
     }
     if (!empty(amounts)) {
         record_event(economy_ledger_, {tick, id, std::nullopt, amounts, {}, {}, equipment});
+        if (from_reservation) {
+            for (std::size_t i = 0; i < amounts.size(); ++i) {
+                stock.reserved[i] -= amounts[i];
+            }
+        }
         apply(stock, amounts, {});
     }
     return true;

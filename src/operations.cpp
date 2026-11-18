@@ -186,12 +186,34 @@ OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind,
     chosen->id = next_mission_id(faction);
     chosen->manual = manual;
     chosen->relocation = relocation;
+    const auto& costs = equipment_types_.at(equipment_.at(chosen->equipment).assignment.type).preparation.costs;
+    chosen->preparation_reserved = std::ranges::any_of(costs, [](auto cost) { return cost != 0; });
     missions_.emplace(std::pair{faction, chosen->id}, *chosen);
     reserve_equipment(chosen->equipment);
-    stockpiles_.at(chosen->launch_stock).reserved[fuel_index] += chosen->fuel;
+    auto& reserved = stockpiles_.at(chosen->launch_stock).reserved;
+    reserved[fuel_index] += chosen->fuel;
+    for (std::size_t i = 0; i < costs.size(); ++i) {
+        reserved[i] += costs[i];
+    }
     record_event(operations_log_, {clock_.tick(), faction, target, chosen->id,
                                manual ? "player order scheduled" : "autonomous order scheduled"});
     return {chosen->id, "scheduled"};
+}
+
+void CampaignState::release_unspent_mission_stock(Mission& mission)
+{
+    if (mission.ground_unit || mission.status == MissionStatus::in_progress) {
+        return;
+    }
+    auto& reserved = stockpiles_.at(mission.launch_stock).reserved;
+    reserved[fuel_index] -= mission.fuel;
+    if (mission.preparation_reserved) {
+        const auto& costs = equipment_types_.at(equipment_.at(mission.equipment).assignment.type).preparation.costs;
+        for (std::size_t i = 0; i < costs.size(); ++i) {
+            reserved[i] -= costs[i];
+        }
+        mission.preparation_reserved = false;
+    }
 }
 
 MissionId CampaignState::next_mission_id(FactionId faction) const
@@ -221,7 +243,7 @@ bool CampaignState::cancel_order(FactionId actor, MissionId id)
     }
     auto& mission = found->second;
     cancel_equipment_reservation(mission.equipment);
-    stockpiles_.at(mission.launch_stock).reserved[fuel_index] -= mission.fuel;
+    release_unspent_mission_stock(mission);
     mission.status = MissionStatus::cancelled;
     record_event(operations_log_, {clock_.tick(), actor, mission.target, id, "player order cancelled"});
     return true;
@@ -239,16 +261,13 @@ bool CampaignState::update_operations()
         const auto log = [&](std::string_view reason) {
             record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, reason});
         };
-        auto& stock = stockpiles_.at(mission.launch_stock);
         const bool invalid_preparation = mission.status == MissionStatus::preparing &&
             item.status != EquipmentStatus::ready &&
             (!item.job || item.job->kind != ServiceKind::preparation);
         if (item.status == EquipmentStatus::lost || invalid_preparation ||
             (mission.status == MissionStatus::scheduled && item.status != EquipmentStatus::reserved) ||
             (mission.status == MissionStatus::in_progress && item.status != EquipmentStatus::in_operation)) {
-            if (mission.status != MissionStatus::in_progress) {
-                stock.reserved[fuel_index] -= mission.fuel;
-            }
+            release_unspent_mission_stock(mission);
             mission.status = MissionStatus::failed;
             log("equipment no longer available");
             continue;
@@ -261,8 +280,9 @@ bool CampaignState::update_operations()
         } else if (mission.status == MissionStatus::preparing && item.status == EquipmentStatus::ready) {
             ResourceAmounts cost{};
             cost[fuel_index] = mission.fuel;
-            stock.reserved[fuel_index] -= mission.fuel;
-            consume_at(stock.id, cost, tick, mission.equipment);
+            if (!consume_at(mission.launch_stock, cost, tick, mission.equipment, true)) {
+                throw std::logic_error("Missing mission fuel reservation");
+            }
             begin_operation(mission.equipment);
             mission.status = MissionStatus::in_progress;
             mission.launch_tick = tick;

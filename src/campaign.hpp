@@ -386,7 +386,7 @@ private:
     void initialize_economy(ScenarioDefinition& scenario);
     bool update_economy(std::uint64_t tick);
     bool consume_at(StockpileId id, const ResourceAmounts& amounts, std::uint64_t tick,
-                    std::optional<EquipmentId> equipment = {});
+                    std::optional<EquipmentId> equipment = {}, bool from_reservation = false);
     void initialize_logistics(const ScenarioDefinition& scenario);
     bool update_logistics(std::uint64_t tick);
     bool advance_shipment(Shipment& shipment, std::uint64_t tick,
@@ -400,6 +400,7 @@ private:
     void initialize_operations(const ScenarioDefinition& scenario);
     bool update_operations();
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
+    void release_unspent_mission_stock(Mission& mission);
     std::uint32_t observe(FactionId faction, SectorId sector);
     MissionId next_mission_id(FactionId faction) const;
     void initialize_combat(const ScenarioDefinition& scenario);

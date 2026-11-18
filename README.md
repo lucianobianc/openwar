@@ -139,9 +139,9 @@ compatible friendly facility.
 Every four demo ticks the planner ranks known objectives by priority and
 the need to refresh uncertain intelligence. It tries the ranked options
 against friendly availability, range, and depot stock. Missions reserve
-equipment and fuel, prepare through a workshop, consume reserved mission
-fuel on launch, and return through inspection and turnaround. Preparation
-costs use the workshop's normal stock debit.
+equipment, preparation stock, and flight fuel. The workshop debits preparation
+stock when work starts, and the mission debits flight fuel on launch. Returning
+equipment undergoes inspection and turnaround.
 
 Contact and territorial confidence decay independently. In the demo, a
 contact's four-minute half-life can prompt another reconnaissance of a
