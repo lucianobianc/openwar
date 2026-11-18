@@ -1,4 +1,4 @@
-# Campaign Simulator — Initial Implementation Instructions
+# OpenWar — Development Instructions
 
 Read `docs/DESIGN.md` and `docs/TERRITORY.md` thoroughly before making any changes.
 
@@ -49,7 +49,16 @@ Simulation time must be independent of rendering frame rates and wall-clock exec
 
 Ensure reproducible behavior through configurable random seeds and deterministic update ordering.
 
-## M0: simulation foundation
+Use three separate concepts for campaign content. The geographic world holds
+physical data and the derived strategic grid. A military scenario references that
+world and declares the initial military situation. `CampaignState` owns live
+simulation state. Its checkpoint embeds the resolved data required for offline
+continuation. Preserve existing procedural and combined demonstration inputs.
+
+OpenWar supports a standalone campaign simulator and a reusable campaign engine
+for a future helicopter game. The simulation and its content loaders run headless.
+
+## Historical milestone M0 — simulation foundation
 
 Implement the following:
 
@@ -62,9 +71,7 @@ Implement the following:
 7. **Command-line executable:** Initialize a small example world, advance the simulation, and display its state.
 8. **Automated tests:** Verify clock behavior, sector topology, faction identifiers, world initialization, and deterministic execution.
 
-Follow the specifications in `docs/TERRITORY.md`, but implement only the structures and behavior necessary for this milestone.
-
-Logistics, combat, aircraft, strategic AI, graphics, and gameplay are outside M0.
+M0 originally excluded logistics, combat, aircraft, strategic AI, and graphics. Use the current roadmap and task scope when working on these later systems.
 
 ## Development process
 

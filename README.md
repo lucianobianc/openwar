@@ -1,5 +1,7 @@
 # openwar
-Dynamic war simulator that will work as the basis for further simulation projects
+OpenWar is a headless-capable, autonomous and persistent military campaign
+engine. It supports a standalone campaign simulator with a geographic 2D viewer
+and provides a campaign foundation for a future helicopter game.
 
 ## Build and test
 
@@ -32,11 +34,13 @@ elapsed simulated time and sector ownership. Batch reports include terrain
 and neighbors. The default seed is 0 and each tick advances 60 simulated
 seconds. Use `--ticks 0` to inspect the initial state.
 
-`WorldDefinition` holds the grid and its static geography.
-`ScenarioDefinition` supplies the initial ownership, objective values, and
-tick duration. `CampaignState` owns the current sector state, clock, and a
-seeded MT19937 stream. Each sector uses the ID `y * width + x` and has
-orthogonal geometric neighbors, including across non-traversable terrain.
+A geographic world contains physical data in `geography::Map` and a strategic
+grid in `WorldDefinition`. Each sector uses the ID `y * width + x`. Its
+orthogonal neighbors follow grid geometry, while road connectivity follows
+the geographic network. A military scenario references a world and resolves
+initial ownership, forces, deployments, installations, stocks, objectives,
+and campaign settings into `ScenarioDefinition`. `CampaignState` owns the
+live simulation, including the clock, seeded MT19937 stream, orders and events.
 
 ## Command-line usage
 
@@ -316,9 +320,10 @@ places the river and corridors and removes isolated land. The generated
 scenario uses the same economy, logistics, strategic command and combat
 engine as the fixed campaigns.
 
-This version accepts procedural configurations and ships the existing fixed
-scenarios as demos. Authored map packages and real-world map import remain
-outside this generator.
+The procedural generator creates both sector terrain and an initial military
+situation. It remains available for compatibility, demos, and regression
+testing. Future military scenario generation can instead use an existing
+geographic world as its input.
 
 ### Large-world measurements
 
@@ -347,14 +352,21 @@ machine. Campaigns with more equipment or more active fronts can cost more.
 ## Geographic scenarios
 
 ```sh
-./openwar --scenario examples/connecticut-valley/connecticut-valley.owgeo --ticks 120 --events
+valley=examples/connecticut-valley
+./openwar --inspect-world "$valley/valley-world.owgeo"
+./openwar --scenario "$valley/valley-demo.owscenario" --ticks 40 --events
+./openwar --scenario "$valley/valley-autonomous.owscenario" --ticks 40 --events
+./openwar-gui --scenario "$valley/valley-autonomous.owscenario"
 ```
 
-The bundled 32×32 km Connecticut Valley scenario uses a fixed OpenStreetMap
-extract and a Copernicus DEM. The terrain and roads are resolved offline. The
-geographic catalog preserves typed site candidates independently of the
-scenario's fictional installations. See the [import guide](docs/GEOGRAPHIC_IMPORT.md)
-and [source attribution](examples/connecticut-valley/README.md).
+The two scenarios reference the same 32×32 km `OWGEO 2` world. Both use terrain
+and roads resolved offline from a fixed OpenStreetMap extract and a Copernicus
+DEM. The independent `OWSCENARIO 1` files declare fictional deployments,
+resources, and objectives. The autonomous variant reverses the initial
+territorial corridors and enables faction planning. The original combined
+`connecticut-valley.owgeo` remains available through `--scenario`.
+See the [scenario format](docs/SCENARIOS.md#22-current-format-owscenario-1),
+[import guide](docs/GEOGRAPHIC_IMPORT.md) and [source attribution](examples/connecticut-valley/README.md).
 
 ## Saving and resuming campaigns
 
@@ -406,7 +418,7 @@ For a raylib installation outside `pkg-config`, pass its include and link
 flags through `RAYLIB_CFLAGS` and `RAYLIB_LIBS` when running `configure`.
 
 Open the bundled geographic scenario with
-`./openwar-gui --scenario examples/connecticut-valley/connecticut-valley.owgeo`.
+`./openwar-gui --scenario examples/connecticut-valley/valley-demo.owscenario`.
 The map shows shaded elevation, roads and bridges, surface water, and
 geographic sites. The layer buttons also control sector boundaries,
 territory, formations, and carriers. Zoom in to see smaller geographic sites.
@@ -441,8 +453,8 @@ checkpoint format with `--load` and `--save`.
 7. M6 — Advanced strategic command. Coordinate the war through long-term planning,
    strategic priorities, coordinated offensives, military reserves, defense,
    and adaptation to losses.
-8. M7 — Scenarios and procedural campaigns. Generate maps and configure initial
-   force deployments, infrastructure, resources, objectives, and victory conditions.
+8. M7 — Scenario inputs. Load reusable geographic worlds and independent
+   military definitions. Retain the original procedural generator for demos and regressions.
 9. M8 — Persistence. Save and resume the full simulation state, including forces,
    economy, logistics, intelligence, and operations in progress.
 10. M9 — Strategic interface. Replace the temporary viewer with an interactive

@@ -18,7 +18,8 @@ geographic_movement_tests_SOURCES = tests/geographic_movement.cpp
 geographic_movement_tests_LDADD = libcampaign.a
 
 AM_TESTS_ENVIRONMENT = OPENWAR=./openwar$(EXEEXT); export OPENWAR; \
-	OWGEO_FIXTURE="$(srcdir)/examples/connecticut-valley/connecticut-valley.owgeo"; export OWGEO_FIXTURE;
+	OWGEO_FIXTURE="$(srcdir)/examples/connecticut-valley/connecticut-valley.owgeo"; export OWGEO_FIXTURE; \
+	VALLEY_FIXTURES="$(srcdir)/examples/connecticut-valley"; export VALLEY_FIXTURES;
 TESTS = campaign-tests$(EXEEXT) tests/cli.sh geographic-movement-tests$(EXEEXT)
 
 if BUILD_VIEWER
@@ -46,4 +47,6 @@ EXTRA_DIST = tests/cli.sh AGENTS.md LICENSE \
 	tools/import_geography.py tools/benchmark_geography.cpp \
 	examples/connecticut-valley/README.md examples/connecticut-valley/connecticut-valley.json \
 	examples/connecticut-valley/connecticut-valley.owgeo examples/connecticut-valley/valley.osm.pbf \
-	examples/connecticut-valley/valley-elevation.tif
+	examples/connecticut-valley/valley-elevation.tif \
+	examples/connecticut-valley/valley-world.json examples/connecticut-valley/valley-world.owgeo \
+	examples/connecticut-valley/valley-demo.owscenario examples/connecticut-valley/valley-autonomous.owscenario

@@ -1,4 +1,4 @@
-# Simulador de helicópteros arcade com campanha dinâmica
+# OpenWar campaign architecture and helicopter game concept
 
 DOCUMENTO DE CONCEPÇÃO
 
@@ -8,7 +8,12 @@ Versão 0.1 · 17 de novembro de 2026 · Documento de trabalho. “Definido” i
 
 ## 1. Visão e pilares do projeto
 
-Jogo de combate de helicópteros com pilotagem acessível, visual 3D poligonal inspirado nos simuladores dos anos 1990 e guerra persistente que evolui mesmo sem a intervenção do jogador. A inspiração central para a campanha é Falcon 4.0; a campanha, contudo, será concebida do zero.
+OpenWar is an autonomous, persistent campaign engine with two applications.
+The standalone simulator presents an ongoing war in a geographic 2D command
+interface. A future arcade helicopter game can reuse the engine and that
+interface for briefings, planning, and mission outcomes. The engine and
+standalone application operate independently of tactical rendering and flight
+physics. The table below retains the original product pillars.
 
 | **Pilar**              | **Decisão consolidada**                                                                                        |
 |------------------------|----------------------------------------------------------------------------------------------------------------|
@@ -34,6 +39,14 @@ Na entrada da região tática, entidades estratégicas são materializadas em 3D
 Frequências indicativas, não especificações finais: voo a ~60 Hz; combate próximo a 10–30 Hz; operacional por segundos; logística por minutos simulados; comando estratégico em intervalos de vários minutos. Ajustar por perfilamento.
 
 ## 3. Mundo, território e infraestrutura
+
+A geographic world describes the physical theater. Imported or explicitly
+authored geography supplies its terrain, elevation, road network, water, and
+locations. The strategic grid is derived from the theater and aggregates
+territorial control, objectives, and intelligence. Military scenario files
+reference the world and set initial deployments and rules. Campaign state owns
+live positions, resources, control, and events. Resolved state is preserved in
+checkpoints. `OWGEO 2` and `OWSCENARIO 1` are the current independent inputs.
 
 O teatro de operações conterá bases aéreas, instalações industriais, centros de comando, depósitos, vias de transporte, posições defensivas, radares e objetivos capturáveis. Uma infraestrutura pode ser conquistada, danificada, reparada, ficar sem insumos ou ser temporariamente inutilizada.
 
@@ -94,6 +107,10 @@ O simulador detém o estado real do mundo. Cada facção mantém somente seu con
 Derrotas, isolamento, perdas, falta de suprimentos e cansaço deterioram condições; vitórias, descanso, reforços e liderança podem recuperá-las. Unidades não devem combater automaticamente até a destruição: podem pedir apoio, recuar, reorganizar-se ou render-se. Evitar limiares artificiais que produzam comportamento abrupto.
 
 ## 6. Interface de comando e criação de missões
+
+The 2D viewer currently supports observation and inspection. The CLI can issue
+the orders implemented by the campaign engine. The operational command interface
+below is the intended product.
 
 O mapa estratégico 2D é interativo e funciona como centro de operações, não apenas observação. O jogador acompanha movimentos, objetivos, estoques, inteligência e operações planejadas pela IA; também pode criar missões, alterar prioridades, determinar alvos, cancelar ordens e redistribuir meios sob sua autoridade.
 
@@ -195,11 +212,17 @@ Essa seleção mínima define tipos iniciais, não a quantidade de exemplares. S
 
 ## 12. Direção visual e tecnologia
 
+The current engine uses C++20 and the optional 2D viewer uses raylib. The
+technology choices below concern the future tactical application.
+
 Visual old-school, poligonal/low-poly, inspirado em Gunship 2000 e Hind (1996), com leitura visual moderna: resolução nativa, silhuetas reconhecíveis, texturas simples, terreno por heightmap, neblina/LOD, poucos efeitos e HUD legível. Evitar simulação de cockpit nesta fase. Tanques jogáveis ficam para etapa posterior.
 
 Tecnologia ainda não fechada: C++ para núcleo independente da apresentação; raylib é candidata preferencial para prototipagem 3D leve; Godot 4 com renderizador Compatibility permanece alternativa a ser comparada por protótipo e medições. O núcleo deve rodar sem renderizador, com relógio próprio, estados reproduzíveis e semente aleatória fixa.
 
-## 13. Plano de implementação e critérios de aceitação
+## 13. Historical implementation plan and acceptance criteria
+
+The table preserves the original milestone plan for the helicopter concept.
+The README tracks the current engineering roadmap.
 
 | **Marco**                   | **Entrega verificável**                                                                                             |
 |-----------------------------|---------------------------------------------------------------------------------------------------------------------|

@@ -31,7 +31,15 @@ Física detalhada de suspensão/tração, dinâmica de helicópteros, balística
 
 ## 2. Relação com a arquitetura existente
 
-Em novembro de 2026, o repositório utiliza `WorldDefinition(width, height, sector_size_m, ...)`, `SectorId`, terreno principal por setor (`plains`, `forest`, `water`), movimento terrestre em caminhos de setores ortogonais com progresso entre ticks e transporte logístico por enlaces `TransportRoute`. `MilitaryUnit` e `Carrier` armazenam setores; depósitos e instalações são localizados por relações de estoque. O gerador procedural chega a 128×128 setores e o M8 já possui checkpoints versionados.
+The current implementation loads physical geography into `geography::Map`
+and derives `WorldDefinition` as a strategic grid, including terrain summaries.
+`OWGEO 2` is loadable on its own. Independent `OWSCENARIO 1` definitions
+reference it and resolve deployments, objectives, and rules. Formations and
+carriers move along metric routes. Fixed stockpile access points locate
+installations, and mobile stocks follow a formation. Campaign state owns
+territorial control and active journeys. Checkpoints embed the resolved world
+and live state. The procedural sector generator and `TransportRoute` remain
+available through the legacy path.
 
 **Estratégia de evolução:** adicionar o mundo geográfico sem descartar imediatamente esses cenários e invariantes. O adaptador legado deve preservar os testes antigos, enquanto novos cenários geográficos adotam coordenadas, redes e movimento espacial. A troca da localização autoritativa dos subsistemas será feita explicitamente, não por campos duplicados inconsistentes.
 
@@ -39,13 +47,17 @@ Em novembro de 2026, o repositório utiliza `WorldDefinition(width, height, sect
 
 | Camada | Responsabilidade | Mutável em campanha? |
 |---|---|---|
-| `WorldDefinition` geográfico resolvido | Referencial espacial, relevo, solo, hidrografia, vias, pontes, limites, malha e pontos fixos | Não; dados de base imutáveis |
+| Geographic world (`geography::Map` and derived `WorldDefinition`) | Spatial frame, elevation, land cover, water, roads, bridges, extent, grid, and fixed geographic features | Reusable physical source |
 | `ScenarioDefinition` | Facções, posicionamentos iniciais, instalações, estoques, objetivos e regras | Não, após iniciar |
 | `CampaignState` | Posições atuais, controle, destruição de pontes, obstruções, missões, inteligência, logística e progressos | Sim, pelas regras |
 | `FactionView` / snapshot autorizado | Informações e posições conhecidas por determinada facção | Derivação filtrada; nunca fonte de verdade |
 | Frontend 2D/3D | Câmera, zoom, seleção, desenho e rascunhos de ordens | Não altera estado sem comando validado |
 
 Uma ponte pertence à geometria do mundo; seu estado *intacta/destruída/bloqueada* pertence à campanha. O mesmo vale para condição de uma estrada, disponibilidade de um aeroporto e posições de unidades móveis.
+
+The current engine stores road conditions in its private resolved map copy.
+Separate campaigns can load the same source and change their own conditions
+independently. The source world file remains reusable.
 
 ## 3. Sistema de coordenadas e precisão
 
@@ -246,6 +258,11 @@ Conferir continuidade de estradas, conexões por nível, sentido, geometrias dup
 
 A geração procedural existente deve permanecer utilizável. Um adaptador legado coloca unidades e instalações em âncoras determinísticas (por exemplo, centro do setor quando legal), transforma enlaces atuais em corredores geométricos dirigidos e representa travessias de água por pontes identificadas. Esse adaptador **não comprova realismo geográfico**: é uma etapa de compatibilidade para comparar resultados.
 
+Current geographic scenarios use explicitly loaded worlds. The procedural
+sector generator remains available as a compatibility fixture. Generating
+military deployments and objectives on a loaded geographic world is a later
+feature.
+
 Uma nova versão de gerador pode construir rios curvos, estradas sinuosas e distribuição de solo em resolução fina e, então, produzir setores de 2 km apenas como sobreposição. Os parâmetros geográficos, seed, versão do gerador, algoritmo e dados resolvidos devem ser registrados. Manter testes do mundo legado mesmo depois de adotar novos caminhos.
 
 ## 11. Persistência e compatibilidade de regras
@@ -284,7 +301,12 @@ O eventual produto 3D usa os mesmos pontos geográficos e ativos de terreno mais
 
 **Nota de precisão:** os resultados dos testes em pontos de passagem assumem geometria de rota exatamente definida na fixture. A ordem dos eventos dentro de um tick, arredondamento temporal e desempates devem ser documentados e fixados na implementação.
 
-## 14. Etapas de implantação
+## 14. Historical implementation stages
+
+The movement core, geographic ground and logistics routing, offline import,
+regional routing and 2D viewer are implemented. Geographic world and military
+scenario files can be loaded separately. Operational UI orders, APP-6, and
+generation of military deployments on imported worlds remain planned.
 
 1. **Geo-P0 — Núcleo isolado:** `MapPoint`, limites, CRS interno documentado, segmentos, terreno fino, perfis de mobilidade, rotas mistas e fixture de 3×2. Nenhuma mudança no motor legado.
 2. **Geo-P1 — Mundo geográfico e adaptador:** versão do formato, mundo autoral procedural geográfico e âncoras estáveis; mapa debug 2D apenas para inspeção.

@@ -18,7 +18,7 @@ import numpy as np
 from osgeo import gdal, ogr, osr
 
 
-VERSION = 1
+WORLD_VERSION = 2
 SITES = ("west_base", "west_outpost", "east_base", "east_outpost")
 ROAD_CLASSES = {
     "motorway": 90, "trunk": 70, "primary": 60, "secondary": 50,
@@ -41,7 +41,8 @@ def spatial_reference(epsg):
 
 def read_config(path):
     config = json.loads(path.read_text(encoding="utf-8"))
-    if config["version"] != VERSION:
+    version = config["version"]
+    if type(version) is not int or version not in (1, WORLD_VERSION):
         raise ValueError("unsupported import configuration version")
     columns, rows = (config[key] for key in ("columns", "rows"))
     sector, tile = (config[key] for key in ("sector_m", "tile_m"))
@@ -55,8 +56,12 @@ def read_config(path):
         raise ValueError("invalid projected origin")
     if not config["vertical_datum"]:
         raise ValueError("a vertical datum description is required")
-    if set(config["sites"]) != set(SITES):
-        raise ValueError("four named deployment sites are required")
+    if version == 1:
+        sites = config.get("sites")
+        if not isinstance(sites, dict) or set(sites) != set(SITES):
+            raise ValueError("four named deployment sites are required for OWGEO 1")
+    if version == WORLD_VERSION and "sites" in config:
+        raise ValueError("OWGEO 2 configuration cannot include military sites")
     for source in ("osm", "dem"):
         if not all(config["sources"][source][key] for key in ("url", "license", "attribution")):
             raise ValueError(f"{source} provenance requires url, license and attribution")
@@ -470,10 +475,11 @@ def compile_world(config, osm_xml, osm_dataset, osm_input, dem_path, output):
     node_ids, segments = road_graph(roads, projected, barriers, counts)
     rivers = waterway_segments(waterways, positions, width_mm, height_mm, counts)
     features = catalog_features(candidates, positions, relation_shapes, width_mm, height_mm, point, counts)
-    if not node_ids or not segments:
+    if config["version"] == 1 and (not node_ids or not segments):
         raise ValueError("no connected road sections inside the projected extent")
     sites = []
-    for name in SITES:
+    deployments = SITES if config["version"] == 1 else ()
+    for name in deployments:
         chosen = config["sites"][name]
         if type(chosen) is int:
             if chosen not in projected or chosen in barriers:
@@ -489,7 +495,7 @@ def compile_world(config, osm_xml, osm_dataset, osm_input, dem_path, output):
                 raise ValueError(f"{name} coordinate outside extent")
             sites.append(point(east, south))
     metadata = dict(config)
-    metadata.update({"importer": VERSION, "gdal": gdal.VersionInfo("RELEASE_NAME"),
+    metadata.update({"importer": config["version"], "gdal": gdal.VersionInfo("RELEASE_NAME"),
                      "target_wkt": crs.ExportToWkt(), "dem_source_wkt": source_crs,
                      "source_sha256": {"osm": digest(osm_input), "dem": digest(dem_path)},
                      "sampling": "bilinear DEM; pixel-centre land cover",
@@ -504,7 +510,7 @@ def compile_world(config, osm_xml, osm_dataset, osm_input, dem_path, output):
             def emit(*items):
                 print(*items, file=file)
 
-            emit("OWGEO", VERSION)
+            emit("OWGEO", config["version"])
             emit("grid", config["columns"], config["rows"], config["sector_m"] * 1000, tile_mm)
             emit("provenance", json.dumps(content))
             emit("tiles")

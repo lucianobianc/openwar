@@ -29,11 +29,17 @@ não muda as regras de simulação, dificuldade da IA ou nível de realismo.
 
 ### 1.1 Decisões consolidadas e propostas
 
-**Consolidadas:** WEST/EAST, cenário predefinido ou procedural, geografia real
-opcional, personalização sem programar, recursos finitos, campanha autônoma,
-inteligência imperfeita por facção, comandos do jogador sujeitos à autoridade,
-C++20 simples, GNU Autotools, Linux/FreeBSD/Windows, núcleo headless e desempenho em
-hardware modesto.
+**Consolidated:** WEST/EAST, separate geographic worlds and military definitions,
+finite resources and autonomous campaigns. Real or explicitly authored
+geography is the primary world input. The original procedural generator
+continues to support legacy scenarios and regression tests.
+
+The current workflow uses versioned text files and the CLI or viewer.
+The setup wizard, previews, and broader presets below are design proposals.
+
+Other established requirements include imperfect faction intelligence, player
+orders subject to authority, conventional C++20, GNU Autotools, headless
+execution, and support for modest Linux, FreeBSD, and Windows systems.
 
 **Propostas deste anexo:** telas/ordem do assistente, modelos de configuração,
 predefinições, presets de forças, parâmetros de vantagem, validações e formatos
@@ -85,7 +91,10 @@ avisos não bloqueiam por padrão.
 
 ## 3. Origem do mundo e cenário-base
 
-A escolha de origem é independente da composição das forças:
+The world source and military composition are separate decisions. The current
+file-based workflow loads an `OWGEO 2` geographic world and resolves a military
+scenario from `OWSCENARIO 1`. Creating a campaign produces mutable state, which
+can later be saved to a checkpoint. The table includes future combinations.
 
 | Origem | Mundo | Forças iniciais |
 |---|---|---|
@@ -110,6 +119,10 @@ inicial. Coordenadas, projeção e escala são validadas antes de criar setores.
 A ausência de dados de instalações militares **não implica** bases reais.
 
 ### 3.2 Geração procedural
+
+Future procedural military generation should place forces, stocks, and
+objectives on a selected geographic world, using an explicit seed. The
+paragraph below describes a possible UI for the legacy terrain generator.
 
 Oferecer campo de seed, opção de gerar outra seed e prévia do mundo. Parâmetros
 mínimos: tamanho, relevo predominante, água, densidade viária e infraestrutura.

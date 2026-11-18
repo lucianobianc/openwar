@@ -15,6 +15,7 @@
 #include <set>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -2338,6 +2339,78 @@ void test_long_geographic_dispatch()
             "Resuming regional routes changed their ordered events");
 }
 
+void test_independent_geographic_scenarios()
+{
+    const auto* fixtures = std::getenv("VALLEY_FIXTURES");
+    const auto directory = std::filesystem::path(fixtures ? fixtures : "examples/connecticut-valley");
+    const auto world = read_geographic_world(directory / "valley-world.owgeo");
+    require(world.grid.width() == 16 && world.grid.height() == 16 && world.map.tiles.size() == 25600 &&
+            world.map.roads.size() == 9342 && world.map.waterways.size() == 3948 &&
+            world.map.site_features.size() == 1761 && world.map.provenance.find("west_base") == std::string::npos,
+            "Independent world omitted physical data or retained a military deployment");
+
+    const auto same_geography = [](const geography::Map& a, const geography::Map& b) {
+        const auto node = [](const auto& n) { return std::tie(n.id, n.position, n.osm_node_id); };
+        const auto road = [](const auto& r) {
+            return std::tie(r.id, r.from, r.to, r.waypoints, r.surface, r.direction, r.crossing, r.speed_limit_mm_s,
+                            r.interior_access, r.closed, r.interior_access_points, r.slots, r.osm_way_id);
+        };
+        const auto tile = [](const auto& t) { return std::tie(t.first, t.second.cover, t.second.elevation); };
+        const auto river = [](const auto& w) { return std::tie(w.from, w.to); };
+        const auto site = [](const auto& f) {
+            return std::tie(f.kind, f.element, f.source_id, f.position, f.length_mm, f.width_mm, f.area_m2,
+                            f.name, f.surface, f.geometry_wkt);
+        };
+        return std::tie(a.columns, a.rows, a.sector_mm, a.tile_mm, a.default_tile.cover, a.default_tile.elevation,
+                        a.provenance) ==
+               std::tie(b.columns, b.rows, b.sector_mm, b.tile_mm, b.default_tile.cover, b.default_tile.elevation,
+                        b.provenance) &&
+               std::ranges::equal(a.nodes, b.nodes, {}, node, node) &&
+               std::ranges::equal(a.roads, b.roads, {}, road, road) &&
+               std::ranges::equal(a.tiles, b.tiles, {}, tile, tile) &&
+               std::ranges::equal(a.waterways, b.waterways, {}, river, river) &&
+               std::ranges::equal(a.site_features, b.site_features, {}, site, site);
+    };
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    CampaignState demo(read_geographic_scenario(directory / "valley-demo.owscenario"), 42);
+    CampaignState autonomous(read_geographic_scenario(directory / "valley-autonomous.owscenario"), 42);
+    require(same_geography(world.map, *demo.geographic_world()) &&
+            same_geography(world.map, *autonomous.geographic_world()), "Scenarios resolved different physical maps");
+    require(demo.units().at(UnitId{1}).faction == west && autonomous.units().at(UnitId{1}).faction == east &&
+            demo.sector_state(SectorId{120}).controller == west &&
+            autonomous.sector_state(SectorId{120}).controller == east &&
+            demo.faction_view(west).objectives.front().sector == SectorId{122} &&
+            autonomous.faction_view(west).objectives.front().sector == SectorId{175},
+            "Scenario control, forces or objectives were coupled to the map");
+    for (const auto* campaign : {&demo, &autonomous}) {
+        for (const auto& [id, unit] : campaign->combat_units()) {
+            const auto sector = *world.map.sector(*unit.position);
+            require(campaign->units().at(id).sector == static_cast<SectorId>(sector) &&
+                    campaign->stockpiles().at(unit.stores).sector == static_cast<SectorId>(sector),
+                    "Initial unit sector and mobile stock were not derived from their deployment point");
+        }
+        for (const auto& [id, carrier] : campaign->carriers())
+            require(world.map.sector(*carrier.position) == static_cast<std::uint32_t>(carrier.sector),
+                    "Initial carrier sector was not derived from its position");
+        for (const auto& [id, stock] : campaign->stockpiles())
+            require(world.map.sector(campaign->stockpile_position(id)) == static_cast<std::uint32_t>(stock.sector),
+                    "Initial stock sector was not derived from its access point");
+    }
+    autonomous.advance_ticks(40);
+    for (const auto faction : {west, east}) {
+        require(std::ranges::any_of(autonomous.faction_view(faction).missions, [](const Mission& mission) {
+            return !mission.manual && mission.status == MissionStatus::completed;
+        }), "An autonomous faction failed to complete a mission on imported geography");
+    }
+    const auto road = world.map.roads.front().id;
+    autonomous.set_road_closed(road, true);
+    require(autonomous.geographic_world()->roads.front().closed &&
+            same_geography(world.map, *demo.geographic_world()) &&
+            same_geography(world.map, read_geographic_world(directory / "valley-world.owgeo").map),
+            "Campaign changes reached another scenario or its geographic source");
+}
+
 void test_checkpoints()
 {
     const CheckpointFiles files;
@@ -2476,5 +2549,6 @@ int main()
     test_geographic_transport_control_change();
     test_depleted_withdrawal();
     test_checkpoints();
+    test_independent_geographic_scenarios();
     test_long_geographic_dispatch();
 }

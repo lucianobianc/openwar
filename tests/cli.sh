@@ -234,6 +234,64 @@ EOF
     grep -F 'ground objective secured' "$scratch/resumed.txt"
     grep -Fx 'Shipments delivered: 2/2' "$scratch/resumed.txt"
 
+    valley=${VALLEY_FIXTURES:-examples/connecticut-valley}
+    world="$valley/valley-world.owgeo"
+    "$openwar" --inspect-world "$world" | grep -F 'Geographic world: 16x16 sectors, 9342 road segments'
+    reject --inspect-world "$geographic"
+    reject --inspect-world "$world" --ticks 0
+    reject --scenario "$world" --ticks 0
+
+    "$openwar" --scenario "$geographic" --faction WEST --order defend:122 --ticks 40 --events >"$scratch/legacy.txt"
+    "$openwar" --scenario "$valley/valley-demo.owscenario" --faction WEST --order defend:122 --ticks 40 --events >"$scratch/split.txt"
+    cmp "$scratch/legacy.txt" "$scratch/split.txt"
+
+    cp "$world" "$scratch/valley-world.owgeo"
+    cp "$valley/valley-autonomous.owscenario" "$scratch/valley-autonomous.owscenario"
+    autonomous="$scratch/valley-autonomous.owscenario"
+    "$openwar" --scenario "$autonomous" --ticks 6 --seed 42 --save "$scratch/split-mid.ows"
+    "$openwar" --scenario "$autonomous" --ticks 40 --seed 42 --events --save "$scratch/split-full.ows" >"$scratch/autonomous.txt"
+    grep -E 'WEST sector 175 mission [0-9]+ ground objective secured' "$scratch/autonomous.txt"
+    grep -E 'EAST sector 122 mission [0-9]+ ground objective secured' "$scratch/autonomous.txt"
+    grep -Fx 'Shipments delivered: 2/2' "$scratch/autonomous.txt"
+    cmp "$world" "$scratch/valley-world.owgeo"
+    cmp "$valley/valley-autonomous.owscenario" "$autonomous"
+    mv "$scratch/valley-world.owgeo" "$scratch/removed-world.owgeo"
+    mv "$autonomous" "$scratch/removed.owscenario"
+    "$openwar" --load "$scratch/split-mid.ows" --ticks 34 --save "$scratch/split-resumed.ows"
+    cmp "$scratch/split-full.ows" "$scratch/split-resumed.ows"
+
+    cat >"$scratch/minimal.owgeo" <<'EOF'
+OWGEO 2
+grid 1 1 2000 2000
+provenance "{}"
+tiles 0 0
+waterways 0
+nodes 0
+roads 0
+features 0
+end
+EOF
+    "$openwar" --inspect-world "$scratch/minimal.owgeo" | grep -F '1x1 sectors, 0 road segments'
+    bad_scenario="$scratch/invalid.owscenario"
+    reject_scenario()
+    {
+        if "$openwar" --scenario "$bad_scenario" --ticks 0 >"$scratch/invalid.out" 2>"$scratch/invalid.err"; then
+            printf 'Unexpectedly accepted invalid military scenario\n' >&2
+            exit 1
+        fi
+        grep -F "$1" "$scratch/invalid.err"
+    }
+    printf 'OWSCENARIO 2\nworld "minimal.owgeo"\n' >"$bad_scenario"
+    reject_scenario 'expected OWSCENARIO 1'
+    printf 'OWSCENARIO 1\nworld "missing.owgeo"\n' >"$bad_scenario"
+    reject_scenario 'cannot load scenario world'
+    printf 'OWSCENARIO 1\nworld "minimal.owgeo"\npoint invalid 2000000 0 0\n' >"$bad_scenario"
+    reject_scenario "geographic point 'invalid' is outside the world"
+    printf 'OWSCENARIO 1\nworld "minimal.owgeo"\nunit 1 WEST missing 0 0 80 "Test"\n' >"$bad_scenario"
+    reject_scenario "unknown geographic point 'missing'"
+    printf 'OWSCENARIO 1\nworld "minimal.owgeo"\ncontrol 0 WEST 0\ncontrol 0 EAST 0\n' >"$bad_scenario"
+    reject_scenario 'duplicate initial sector control'
+
     reject --load "$scratch/absent.ows" --ticks 0
     reject --load "$scratch/full.ows" --demo campaign
     reject --load "$scratch/full.ows" --scenario "$scratch/world.toml"

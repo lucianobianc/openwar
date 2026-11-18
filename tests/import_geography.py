@@ -96,6 +96,18 @@ def main():
         compile_to(copy)
         assert world.read_bytes() == copy.read_bytes()
         lines = world.read_text(encoding="utf-8").splitlines()
+        config_data = json.loads(config.read_text())
+        physical_config = {key: value for key, value in config_data.items() if key != "sites"}
+        physical_config["version"] = 2
+        config.write_text(json.dumps(physical_config))
+        compile_to(copy)
+        physical_lines = copy.read_text(encoding="utf-8").splitlines()
+        assert physical_lines[0] == "OWGEO 2"
+        assert physical_lines[3:] == [line for line in lines[3:] if not line.startswith("site ")]
+        assert "west_base" not in physical_lines[2]
+        physical_run = subprocess.run([engine, "--inspect-world", copy], check=True, text=True, capture_output=True)
+        assert "Geographic world: 4x1 sectors, 5 road segments" in physical_run.stdout
+        config.write_text(json.dumps(config_data))
         sites = [line for line in lines if line.startswith("site ")]
         assert sites[:2] == ["site 1000000 1000000 5000", "site 3000000 1000000 15000"], sites
         assert "features 4" in lines and "roads 5" in lines

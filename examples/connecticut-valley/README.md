@@ -6,16 +6,25 @@ River. The projected extent is eastings 682000–714000 m and northings
 16×16 strategic sectors and a 160×160 terrain lattice. The imported terrain
 samples range from approximately 56 to 607 m above the supplied datum.
 
-All deployments, depots, orders, and factions in the scenario are fictional.
-The WEST and EAST outposts are in sectors 122 and 175. The WEST route crosses
-the Connecticut River and uses both the imported road graph and terrain. The
-scenario schedules a 12-unit supply shipment to each outpost.
+Both fictional scenarios use `valley-world.owgeo`, the same standalone
+physical world. `valley-demo.owscenario` reproduces the original deployment,
+with WEST and EAST outposts at sectors 122 and 175. The WEST route crosses the
+Connecticut River and uses both roads and terrain. The original demonstration
+ships 12 units of supplies to each outpost. `valley-autonomous.owscenario`
+swaps the territorial corridors, changes the forces and supplies, and lets
+both factions plan ground operations.
 
 ```sh
-./openwar --scenario examples/connecticut-valley/connecticut-valley.owgeo --ticks 120 --events
-./openwar --scenario examples/connecticut-valley/connecticut-valley.owgeo \
+valley=examples/connecticut-valley
+./openwar --inspect-world "$valley/valley-world.owgeo"
+./openwar --scenario "$valley/valley-autonomous.owscenario" --ticks 40 --events
+./openwar --scenario "$valley/valley-demo.owscenario" \
     --faction WEST --order defend:122 --ticks 120 --events
+./openwar-gui --scenario "$valley/valley-autonomous.owscenario"
 ```
+
+The original combined `connecticut-valley.owgeo` is still accepted by
+`--scenario`.
 
 ## Source data and reproduction
 
@@ -36,12 +45,14 @@ scenario schedules a 12-unit supply shipment to each outpost.
 
 The fixed source inputs are bundled. The full source URLs, SHA-256 hashes,
 projection, import settings and diagnostics are embedded in the resolved
-scenario. Rebuild with GDAL 3.10.3 and osmium 1.18.0 for the checked-in output.
+world. Rebuild with GDAL 3.10.3 and osmium 1.18.0 for the checked-in output.
 
 ```sh
 base=examples/connecticut-valley
-python3 tools/import_geography.py --config "$base/connecticut-valley.json" \
+python3 tools/import_geography.py --config "$base/valley-world.json" \
     --osm "$base/valley.osm.pbf" --dem "$base/valley-elevation.tif" \
-    --output /tmp/connecticut-valley.owgeo
-cmp "$base/connecticut-valley.owgeo" /tmp/connecticut-valley.owgeo
+    --output /tmp/valley-world.owgeo
+cmp "$base/valley-world.owgeo" /tmp/valley-world.owgeo
 ```
+
+Use `connecticut-valley.json` to reproduce the legacy combined demonstration.

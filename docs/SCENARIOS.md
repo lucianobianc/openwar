@@ -19,9 +19,14 @@ autônoma, setores com controle territorial, inteligência imperfeita e um únic
 estado autoritativo; simulação sem interface gráfica; C++20 legível, GNU
 Autotools e poucas dependências; hardware modesto (i5-1135G7, Iris Xe, 8 GB).
 
-**Decisões propostas neste anexo:** pacotes de diretórios, manifestos TOML,
-tabelas CSV opcionais, identificadores textuais estáveis, validação explícita,
-separação entre definição de mundo, definição de cenário e estado da campanha.
+**Current implementation.** `OWGEO 2` holds a reusable physical world.
+`OWSCENARIO 1` references it and declares the initial military situation.
+`CampaignState` holds the live simulation and saves its resolved state to
+a checkpoint. The original `OWGEO 1` combined demo and its procedural
+contemporaries remain supported.
+
+Directory packages, general TOML manifests, and optional CSV tables in
+sections 3–5 are earlier design proposals.
 TOML é uma **proposta de formato**, não uma obrigação de escrever um parser do
 zero. Confirmar o formato concreto antes de implementar serialização. Os
 exemplos abaixo são normativos como *modelo de dados*, mas não exigem que o M0
@@ -50,7 +55,7 @@ já consiga interpretá-los.
 
 | Camada | Contém | Pode mudar durante campanha? |
 |---|---|---|
-| `WorldDefinition` | extensão, projeção/escala, relevo, água, setores, travessias, estradas, localidades e posições geográficas de instalações | Não; alterações persistentes (pontes destruídas etc.) são estados sobrepostos |
+| Geographic world | Spatial frame, relief, water, strategic grid, crossings, roads and geographic features. In C++, `geography::Map` plus the derived `WorldDefinition` grid. | Reusable physical source |
 | `ScenarioDefinition` | seleção de mundo, facções, inventários, implantação, estoques, instalações operantes, comando, objetivos, reforços e regras de término | Não: é a condição inicial |
 | `CampaignState` | relógio, RNG, ocupação, unidades, recursos, danos, ordens, observações, eventos e guerra em andamento | Sim, exclusivamente pelas regras da simulação |
 
@@ -66,8 +71,10 @@ cenário como save, nem reexecutar a geração procedural ao carregar um save.
 
 - **`authored`:** mundo e forças descritos explicitamente por arquivos; para
   teatros de ficção, reconstituições e cenários de terceiros.
-- **`procedural`:** terreno, infraestrutura, distribuição inicial e forças
-  produzidos a partir de parâmetros e `seed`; resultado deve ser inspecionável.
+- **Legacy procedural:** terrain, infrastructure and initial military
+  state generated from parameters and a seed. Available for demos and regression.
+  Future military generation can consume the same geographic input as authored
+  deployments.
 - **`geographic`:** terreno/base cartográfica derivados de arquivos geográficos
   reais, com forças explicitamente definidas **ou** geradas opcionalmente;
   dados reais não forçam um inventário histórico.
@@ -75,7 +82,53 @@ cenário como save, nem reexecutar a geração procedural ao carregar um save.
   composição de forças e estoques (ou vice-versa). Modelar como escolhas
   independentes `world.source` e `deployment.source`, não como uma quarta engine.
 
-## 3. Pacote de cenário instalável pelo usuário
+### 2.2 Current format OWSCENARIO 1
+
+Use a UTF-8 `.owscenario` file, with one record per line. Blank lines and
+comments starting with `#` are allowed. The first two records are
+`OWSCENARIO 1` and `world "relative/path.owgeo"`. The path is resolved from the
+scenario directory and must identify an `OWGEO 2` world. Strings shown in
+quotes are required to be quoted. Define names and numeric IDs before
+referencing them.
+
+| Record and fields in order | Meaning |
+|---|---|
+| `point NAME E S UP` | Named geographic location. All coordinates are local millimetres. East and south start at the northwest origin. |
+| `control SECTOR SIDE POINTS` | Initial controller and objective points. Unlisted sectors start neutral. |
+| `public SECTOR` | Add the initial territorial report to both factions. Each faction already receives reports about its own sectors and installations. |
+| `objective SIDE POINT PRIORITY` | Operational objective with a positive priority and a geographic destination. Objectives in one sector share its destination. |
+| `victory SIDE HOLD_SECONDS SECTOR` | A sector-hold victory condition. |
+| `command_site SIDE SECTOR` | A sector relevant to command collapse under the existing rules. |
+| `stock ID SIDE POINT CAPACITY QUANTITY` | Fixed stockpile, or use `-` for the dedicated mobile stock of a ground unit. |
+| `installation ID STOCK WORKERS POWERED INTEGRITY INTERVAL REQUIRED NEEDS_POWER INPUTS OUTPUTS "NAME"` | Industrial installation and production recipe. Stock provides its location and faction. Integrity is 0–100. The batch interval uses economy intervals. |
+| `facility ID STOCK BAYS TECHNICIANS OPERATIONAL` | Maintenance facility at a fixed stockpile. |
+| `type ID SIDE CATEGORY POWER OCCUPIES SPEED_KPH RANGE SERVICE_SECONDS REPAIR_SECONDS REPAIR_PARTS MOBILITY "NAME"` | Equipment type. Range is in sectors. Service seconds set the service interval. The three other service profiles use engine defaults. |
+| `unit ID SIDE POINT MOBILE_STOCK FACILITY MORALE "NAME"` | Ground units use a dedicated mobile stockpile and may use a local facility. A unit without mobile stock must deploy at its facility. Use 0 for an omitted reference. |
+| `equipment ID TYPE UNIT` | Assign one starting equipment item. |
+| `carrier ID SIDE POINT CAPACITY FUEL MOBILITY` | Logistics carrier and initial fuel in litres. |
+| `shipment ID ORIGIN DESTINATION RESOURCE QUANTITY PRIORITY` | Initial supply request. |
+| `resupply ORIGIN DESTINATION RESOURCE THRESHOLD TARGET` | Recurring supply policy. |
+| `timing TICK_SECONDS ECONOMY_TICKS LOAD_TICKS UNLOAD_TICKS TIME_LIMIT_SECONDS` | Optional clock and timing record. Zero time limit disables the limit. |
+| `operations PLANNER_TICKS STRATEGY_TICKS MAX_ORDERS TERRITORY_HALF_LIFE CONTACT_HALF_LIFE INSTALLATION_HALF_LIFE` | Optional planning settings. Use 0 to disable an interval. Half-lives use seconds. |
+| `combat INTERVAL_TICKS OCCUPATION_SECONDS CRITICAL_SECONDS STABILIZATION_SECONDS CAPITULATION_SECONDS REINFORCEMENT_HORIZON_SECONDS` | Optional abstract combat settings. |
+
+Faction names are `WEST` and `EAST`. `NEUTRAL` can own sectors and fixed
+stocks. Flags use 0 or 1. Resource vectors list seven nonnegative integers
+in the order `oil_reserve crude_oil fuel materials spare_parts supplies ammunition`.
+Shipment and resupply records name a single resource. The categories are
+`helicopter`, `tank`, `transport`, `air_defense_vehicle`, and `air_defense_team`.
+Mobility is `default` (the engine profile) or `valley` (the original
+Connecticut Valley demonstration profile). Omitted settings use the
+campaign defaults with combat and operations enabled and automatic planning
+disabled. Select a permitted CLI faction at launch.
+
+The loader derives sector membership from points and validates references.
+The regular campaign initializer validates operational, economic, and
+ownership constraints. See the [original deployment](../examples/connecticut-valley/valley-demo.owscenario)
+and the [autonomous variant](../examples/connecticut-valley/valley-autonomous.owscenario)
+for complete examples. Both reference the same `valley-world.owgeo`.
+
+## 3. Proposed installable scenario packages
 
 Estrutura proposta — *não* criar todos os arquivos se desnecessários:
 
@@ -237,16 +290,16 @@ complexas sem necessidade; separar novas tabelas quando surgirem.
 ### 5.1 `world/sectors.csv`
 
 ```csv
-x,y,terrain,traversable,initial_controller,objective_points
-0,0,plain,true,WEST,0
-1,0,hill,true,WEST,1
-2,0,forest,true,EAST,0
-3,0,plain,true,EAST,0
+x,y,terrain,traversable
+0,0,plain,true
+1,0,plain,true
+2,0,forest,true
+3,0,plain,true
 ```
 
 Regra: ID interno do setor = `y * width + x`, conforme `TERRITORY.md`.
-`initial_controller` descreve estado inicial, não substitui ocupação real e não
-pode ser alterado pela renderização. Para cenários 4×4, linhas não fornecidas
+Initial controller and objective points belong to the military definition.
+The current `OWGEO 2` loader derives this grid from the geographic raster. Para cenários 4×4, linhas não fornecidas
 somente podem receber defaults quando `allow_partial_sectors = true` estiver
 explicitamente habilitado; do contrário, requer cobertura completa.
 
@@ -485,7 +538,10 @@ sobre divergência para auditoria. Migrações futuras devem ser explícitas,
 versionadas e testadas; incompatibilidade não pode reinterpretar campos
 silenciosamente.
 
-## 12. Marcos de implementação e limites de escopo
+## 12. Historical milestones and scope limits
+
+The following table records the earlier implementation proposal. The current
+file contracts are documented in section 2.2 and the offline import guide.
 
 | Marco | Entrega | Proibido antecipar |
 |---|---|---|

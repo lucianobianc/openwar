@@ -786,7 +786,7 @@ int main(int argc, char* argv[])
             if (load_path) {
                 return CampaignState::load(*load_path);
             }
-            if (scenario_path && scenario_path->extension() == ".owgeo") {
+            if (scenario_path && is_geographic_scenario_file(*scenario_path)) {
                 const auto seed = seed_override.value_or(0);
                 if (seed > UINT32_MAX)
                     throw std::out_of_range("Seed must fit in 32 bits");

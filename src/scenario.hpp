@@ -30,6 +30,13 @@ struct ProceduralSettings {
     std::uint32_t capitulation = 1;
 };
 
+struct GeographicWorld {
+    WorldDefinition grid;
+    geography::Map map;
+};
+
+GeographicWorld read_geographic_world(const std::filesystem::path& path);
+bool is_geographic_scenario_file(const std::filesystem::path& path);
 ScenarioDefinition read_geographic_scenario(const std::filesystem::path& path,
     std::optional<FactionId> player = {});
 

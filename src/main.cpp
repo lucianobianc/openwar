@@ -16,7 +16,8 @@ Without a tick limit, the dashboard runs in real time until Ctrl+C.
 
 Options
   --demo NAME  Select economy (default), logistics, maintenance, operations, combat, campaign, or procedural.
-  --scenario FILE  Load a procedural configuration or an imported .owgeo scenario.
+  --scenario FILE  Load an .owscenario, an OWGEO 1 demo or a procedural configuration.
+  --inspect-world FILE  Inspect an OWGEO 2 world without starting a campaign.
   --load FILE      Resume a saved campaign.
   --save FILE      Write a checkpoint at the end of the run.
   --speed N    Pace the run at N simulated seconds per real second (default 60).
@@ -210,6 +211,7 @@ int main(int argc, char* argv[])
 {
     std::optional<std::uint64_t> seed_override;
     std::optional<std::filesystem::path> scenario_path;
+    std::optional<std::filesystem::path> world_path;
     std::optional<std::filesystem::path> load_path;
     std::optional<std::filesystem::path> save_path;
     std::optional<std::uint64_t> ticks;
@@ -250,7 +252,7 @@ int main(int argc, char* argv[])
             }
             if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed" &&
                 option != "--faction" && option != "--order" && option != "--cancel" && option != "--scenario" &&
-                option != "--load" && option != "--save") {
+                option != "--load" && option != "--save" && option != "--inspect-world") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
             if (++i == argc) {
@@ -268,8 +270,8 @@ int main(int argc, char* argv[])
                 scenario_path = argv[i];
                 continue;
             }
-            if (option == "--load" || option == "--save") {
-                auto& path = option == "--load" ? load_path : save_path;
+            if (option == "--load" || option == "--save" || option == "--inspect-world") {
+                auto& path = option == "--load" ? load_path : option == "--save" ? save_path : world_path;
                 if (path) {
                     throw std::invalid_argument("Specify " + std::string(option) + " only once");
                 }
@@ -303,10 +305,20 @@ int main(int argc, char* argv[])
                 speed = static_cast<std::uint32_t>(value);
             }
         }
+        if (world_path) {
+            if (argc != 3)
+                throw std::invalid_argument("--inspect-world takes one world and no campaign options");
+            const auto world = openwar::read_geographic_world(*world_path);
+            std::cout << "Geographic world: " << world.grid.width() << 'x' << world.grid.height()
+                      << " sectors, " << world.map.roads.size() << " road segments, "
+                      << world.map.waterways.size() << " waterways, " << world.map.site_features.size()
+                      << " catalogued features\n";
+            return 0;
+        }
         if (load_path && (demo || seed_override)) {
             throw std::invalid_argument("--load cannot be combined with --demo, --scenario or --seed");
         }
-        const bool geographic = scenario_path && scenario_path->extension() == ".owgeo";
+        const bool geographic = scenario_path && openwar::is_geographic_scenario_file(*scenario_path);
         const auto initialize = [&] {
             if (load_path) {
                 return openwar::CampaignState::load(*load_path);
