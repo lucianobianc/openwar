@@ -60,7 +60,7 @@ In version 2 the `end` marker follows the features, and the import configuration
 omits `sites`. A version 2 world may have zero road nodes and segments.
 The reader enforces the declared versions and the appropriate file layout.
 The geographic catalog belongs to the physical world and is also preserved
-in schema 4 checkpoints. Older supported checkpoints retain their resolved
+in checkpoints since schema 4. Older supported checkpoints retain their resolved
 journeys and load with the current movement rules.
 
 ### Site candidates

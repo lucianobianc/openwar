@@ -304,6 +304,6 @@ EOF
     printf 'X' | dd of="$scratch/corrupt.ows" bs=1 seek=50 conv=notrunc 2>/dev/null
     reject --load "$scratch/corrupt.ows" --ticks 0
     cp "$scratch/full.ows" "$scratch/version.ows"
-    printf '\005' | dd of="$scratch/version.ows" bs=1 seek=19 conv=notrunc 2>/dev/null
+    printf '\177' | dd of="$scratch/version.ows" bs=1 seek=19 conv=notrunc 2>/dev/null
     reject --load "$scratch/version.ows" --ticks 0
 )

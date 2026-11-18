@@ -1902,6 +1902,61 @@ void test_geographic_ground_operations()
     const auto refused = limited.issue_order(west, MissionKind::defend, target);
     require(!refused.mission && refused.reason == "ground route search limit exceeded",
             "Spatial search exhaustion was reported as a physical obstruction");
+
+    scenario.operations.installation_half_life_seconds = 60;
+    CampaignState unobstructed(scenario, 42), obstructed(scenario, 42);
+    obstructed.set_road_closed(1, true);
+    plan(unobstructed);
+    plan(obstructed);
+    require(unobstructed.faction_view(west).missions == obstructed.faction_view(west).missions &&
+            unobstructed.ground_movement(formation) == obstructed.ground_movement(formation) &&
+            obstructed.faction_view(west).roads.empty(),
+            "A hidden bridge closure leaked through the mission, route preview or ETA");
+    obstructed.advance_ticks(1);
+    const auto observed = obstructed.faction_view(west);
+    require(observed.missions.back().status == MissionStatus::failed &&
+            observed.roads.at(1) == RoadReport{true, 1} &&
+            std::ranges::any_of(observed.events, [](const auto& event) {
+                return event.reason == "road #1 reported closed";
+            }) &&
+            obstructed.faction_view(east).roads.empty() && obstructed.faction_view(east).events.empty(),
+            "Execution did not report the actual obstruction solely to the observing faction");
+    require(obstructed.combat_units().at(formation).position == map.nodes.front().position &&
+            obstructed.stockpiles().at(stores).quantity[fuel] == 19 &&
+            obstructed.combat_units().at(formation).movement_fuel_credit_ml == 600 &&
+            obstructed.equipment().at(EquipmentId{1}).status == EquipmentStatus::available,
+            "Bridge entry spent fuel, moved the unit or left a reservation after it was blocked");
+
+    const auto blocked_save = files.directory / "observed-closure.ows";
+    obstructed.save(blocked_save);
+    auto resumed_closure = CampaignState::load(blocked_save);
+    require(resumed_closure.closed_roads().contains(1) && resumed_closure.faction_view(west).roads == observed.roads &&
+            resumed_closure.faction_view(east).roads.empty(), "Checkpoint lost either truth or faction road knowledge");
+    const auto denied_closed = obstructed.issue_order(west, MissionKind::defend, target);
+    obstructed.set_road_closed(1, false);
+    const auto denied_reopened = obstructed.issue_order(west, MissionKind::defend, target);
+    require(!denied_closed.mission && !denied_reopened.mission && denied_reopened.reason == denied_closed.reason,
+            "The refusal exposed a reopening that had not been observed");
+
+    for (auto* campaign : {&obstructed, &resumed_closure}) {
+        campaign->set_road_closed(1, false);
+        campaign->advance_ticks(1);
+        const auto stale = campaign->faction_view(west).roads.at(1);
+        require(stale.closed && stale.confidence == 500 &&
+                campaign->issue_order(west, MissionKind::defend, target).mission.has_value(),
+                "Stale reports were erased or treated as certain road conditions");
+        campaign->advance_ticks(5);
+        require(campaign->combat_units().at(formation).position == destination &&
+                !campaign->faction_view(west).roads.at(1).closed,
+                "A renewed movement did not update its road report from direct passage");
+    }
+    require(obstructed.combat_units().at(formation).movement_fuel_credit_ml ==
+                resumed_closure.combat_units().at(formation).movement_fuel_credit_ml &&
+            obstructed.stockpiles().at(stores).quantity == resumed_closure.stockpiles().at(stores).quantity &&
+            obstructed.faction_view(west).missions == resumed_closure.faction_view(west).missions &&
+            obstructed.faction_view(west).roads == resumed_closure.faction_view(west).roads &&
+            std::ranges::equal(obstructed.observer_operations_log(), resumed_closure.observer_operations_log()),
+            "Retried ground movement diverged after resuming a checkpoint with observations");
 }
 
 ScenarioDefinition geographic_transport_scenario()
@@ -1943,6 +1998,7 @@ ScenarioDefinition geographic_transport_scenario()
 void test_geographic_transport()
 {
     using namespace geography;
+    constexpr auto west = FactionId::west;
     constexpr ShipmentId outgoing{1}, incoming{2};
     constexpr CarrierId vehicle{1}, other{2};
     constexpr StockpileId depot{1}, base{2};
@@ -2027,6 +2083,46 @@ void test_geographic_transport()
     reverse.position = roads.stockpiles[1].access_point;
     reverse.sector = SectorId{2};
     roads.carriers.push_back(reverse);
+    CampaignState hidden_bridge(roads, 42);
+    hidden_bridge.set_road_closed(1, true);
+    hidden_bridge.request_supply(request);
+    hidden_bridge.advance_ticks(2);
+    require(hidden_bridge.shipments().at(outgoing).cargo == 10 &&
+            hidden_bridge.faction_view(west).roads.empty(), "Dispatch or fuel planning leaked a hidden closure");
+    hidden_bridge.advance_ticks(1);
+    require(hidden_bridge.shipments().at(outgoing).delay == LogisticsDelay::closed &&
+            hidden_bridge.shipments().at(outgoing).cargo == 10 && !hidden_bridge.shipments().at(outgoing).road &&
+            hidden_bridge.carriers().at(vehicle).spent_ml == 0 && hidden_bridge.carriers().at(vehicle).fuel == 10 &&
+            hidden_bridge.faction_view(west).roads.at(1) == RoadReport{true, 3} &&
+            hidden_bridge.faction_view(FactionId::east).roads.empty(),
+            "A blocked carrier lost cargo, fuel or a road slot, or shared knowledge with its adversary");
+    hidden_bridge.request_supply({incoming, base, depot, Resource::supplies, 10});
+    hidden_bridge.advance_ticks(1);
+    require(hidden_bridge.shipments().at(incoming).status == ShipmentStatus::pending &&
+            !hidden_bridge.shipments().at(incoming).carrier,
+            "A later dispatch ignored its faction's observed bridge closure");
+
+    auto detour_map = roads;
+    auto alternate = detour_map.geographic_world->roads.front();
+    alternate.id = 2;
+    alternate.surface = Surface::gravel;
+    alternate.waypoints = {{600'000, 300'000, 40'000}};
+    detour_map.geographic_world->roads.push_back(alternate);
+    detour_map.carriers.front().mobility->roads[1] = {5000, 1000, 5000};
+    CampaignState detour(detour_map, 42);
+    detour.set_road_closed(1, true);
+    detour.request_supply(request);
+    detour.advance_ticks(3);
+    const auto& redirected = detour.shipments().at(outgoing);
+    require(redirected.road == 2 && redirected.cargo == 10 && detour.faction_view(west).roads.at(1).closed,
+            "A convoy did not choose an alternate after discovering an obstruction");
+    const auto detour_fuel = redirected.journey->route.fuel_ml;
+    detour.advance_ticks(40);
+    const auto& truck = detour.carriers().at(vehicle);
+    require(detour.shipments().at(outgoing).status == ShipmentStatus::delivered &&
+            detour.stockpiles().at(base).quantity[supplies] == 50 &&
+            10'000 - static_cast<std::int64_t>(truck.fuel * 1000) + truck.spent_ml == detour_fuel,
+            "Replanning debited a blocked leg or delivered the cargo more than once");
     CampaignState shared(roads, 42);
     shared.request_supply(request);
     shared.request_supply({incoming, base, depot, Resource::supplies, 10});
@@ -2043,6 +2139,14 @@ void test_geographic_transport()
             "Closing the bridge moved a carrier or debited fuel during the pause");
     shared.save(midway);
     auto restored_closure = CampaignState::load(midway);
+    auto repeated_closure = shared;
+    shared.advance_ticks(4);
+    for (int i = 0; i < 4; ++i) {
+        repeated_closure.advance_ticks(1);
+    }
+    require(shared.faction_view(west).roads == repeated_closure.faction_view(west).roads,
+            "Waiting convoy reports changed between batch and individual ticks");
+    shared = CampaignState::load(midway);
     restored_closure.advance_ticks(1);
     require(restored_closure.shipments().at(outgoing).delay == LogisticsDelay::closed &&
             restored_closure.carriers().at(vehicle).position == shared.carriers().at(vehicle).position,
@@ -2353,7 +2457,7 @@ void test_independent_geographic_scenarios()
         const auto node = [](const auto& n) { return std::tie(n.id, n.position, n.osm_node_id); };
         const auto road = [](const auto& r) {
             return std::tie(r.id, r.from, r.to, r.waypoints, r.surface, r.direction, r.crossing, r.speed_limit_mm_s,
-                            r.interior_access, r.closed, r.interior_access_points, r.slots, r.osm_way_id);
+                            r.interior_access, r.interior_access_points, r.slots, r.osm_way_id);
         };
         const auto tile = [](const auto& t) { return std::tie(t.first, t.second.cover, t.second.elevation); };
         const auto river = [](const auto& w) { return std::tie(w.from, w.to); };
@@ -2405,10 +2509,28 @@ void test_independent_geographic_scenarios()
     }
     const auto road = world.map.roads.front().id;
     autonomous.set_road_closed(road, true);
-    require(autonomous.geographic_world()->roads.front().closed &&
+    require(autonomous.closed_roads().contains(road) && demo.closed_roads().empty() &&
+            same_geography(world.map, *autonomous.geographic_world()) &&
             same_geography(world.map, *demo.geographic_world()) &&
             same_geography(world.map, read_geographic_world(directory / "valley-world.owgeo").map),
             "Campaign changes reached another scenario or its geographic source");
+}
+
+void test_legacy_road_checkpoint()
+{
+    // Written by bfa05eb from a 2x1 geographic campaign with one bridge closed at tick zero.
+    const auto* configured = std::getenv("LEGACY_ROAD_CHECKPOINT");
+    const auto path = configured ? configured : "tests/fixtures/closed-bridge-schema4.ows";
+    auto migrated = CampaignState::load(path);
+    require(migrated.clock().tick() == 3 && migrated.geographic_world()->roads.front().id == 17 &&
+            migrated.closed_roads().contains(17) && migrated.faction_view(FactionId::west).roads.empty() &&
+            migrated.faction_view(FactionId::east).roads.empty(),
+            "Schema 4 bridge flag did not migrate to campaign state without inventing observations");
+    const CheckpointFiles files;
+    const auto rewritten = files.directory / "rewritten.ows";
+    migrated.save(rewritten);
+    require(CampaignState::load(rewritten).closed_roads() == migrated.closed_roads(),
+            "Migrated closure did not survive a new-format checkpoint");
 }
 
 void test_checkpoints()
@@ -2549,6 +2671,7 @@ int main()
     test_geographic_transport_control_change();
     test_depleted_withdrawal();
     test_checkpoints();
+    test_legacy_road_checkpoint();
     test_independent_geographic_scenarios();
     test_long_geographic_dispatch();
 }

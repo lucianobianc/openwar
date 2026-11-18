@@ -71,6 +71,18 @@ mas deve existir como fonte explícita de informação.
 
 ## 5. Fusão e contradições
 
+### Geographic road reports
+
+Ground formations and carriers report the condition they observe when trying
+to use a road or bridge. Each report belongs to that faction and carries the
+segment ID, the last observed condition and observation tick. A newly
+discovered closure or a changed condition generates a faction operations event.
+Road confidence uses the existing installation half-life and decay. Below
+750/1000, planning treats the condition as unknown while the view retains
+the dated report. A missing report means the faction has never observed that
+segment. Changing actual availability updates campaign state, and later
+passage updates the observing faction's report.
+
 Observações com alvo comprovadamente idêntico atualizam mesmo contato;
 observações com identidade incerta podem permanecer separadas. Informações
 contraditórias mantêm timestamp, qualidade e trilha de fontes; não sobrescrever

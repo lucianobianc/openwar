@@ -75,6 +75,14 @@ struct InstallationReport {
     std::uint16_t confidence;
 };
 
+struct RoadReport {
+    bool closed;
+    std::uint64_t observed_tick;
+    std::uint16_t confidence = 1000;
+    bool confirmed() const { return confidence >= 750; }
+    bool operator==(const RoadReport&) const = default;
+};
+
 struct Mission {
     MissionId id;
     FactionId faction;
@@ -116,6 +124,7 @@ struct FactionView {
     std::vector<Mission> missions;
     std::vector<OperationsEvent> events;
     std::optional<StrategicPlan> strategy{};
+    std::map<std::uint32_t, RoadReport> roads;
 };
 
 // A complete sector survey supersedes contacts that it did not observe again.

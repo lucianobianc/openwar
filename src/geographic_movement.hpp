@@ -52,7 +52,6 @@ struct RoadSegment {
     Crossing crossing{Crossing::ground};
     std::int64_t speed_limit_mm_s{10'000};
     bool interior_access{true};
-    bool closed{false};
     // An empty list allows projected access anywhere on an open interior.
     std::vector<Point> interior_access_points{};
     std::uint32_t slots = 1;
@@ -135,10 +134,12 @@ struct Route {
 };
 
 using SectorAccess = std::function<bool(std::int64_t)>;
+// Access policies represent what the caller may use. An empty policy allows every road.
+using RoadAccess = std::function<bool(std::uint32_t)>;
 
 [[nodiscard]] Route find_route(const Map& map, const Profile& profile, Point origin,
     Point destination, QueryLimits limits = {}, RoutePriority priority = RoutePriority::time,
-    const SectorAccess& allowed = {});
+    const SectorAccess& allowed = {}, const RoadAccess& road_allowed = {});
 
 struct SectorCrossing {
     std::int64_t from, to, elapsed_us;
@@ -160,7 +161,7 @@ struct Progress {
 // An observer can stop the journey at the crossing it receives by returning false.
 using CrossingObserver = std::function<bool(const SectorCrossing&)>;
 std::int64_t advance(const Map& map, const Route& route, Progress& progress, std::int64_t duration_us,
-    const CrossingObserver& observer = {});
+    const CrossingObserver& observer = {}, const RoadAccess& road_allowed = {});
 [[nodiscard]] Point position_at(const Leg& leg, std::int64_t elapsed_us);
 [[nodiscard]] std::int64_t horizontal_distance(Point a, Point b);
 [[nodiscard]] bool allows_leg(const Map& map, const Leg& leg, const SectorAccess& allowed,

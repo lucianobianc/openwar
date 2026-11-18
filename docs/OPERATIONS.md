@@ -69,6 +69,12 @@ A fórmula da pontuação deve ser explícita, versionada e configurável.
 Na v0, um avaliador aditivo ponderado é suficiente. Não introduzir aprendizagem
 de máquina ou LLM de runtime.
 
+Ground and logistics route queries use confirmed closure reports from the
+acting faction, including in route estimates and refusal decisions. Movement
+checks actual availability at the route and reports the observed condition.
+Ground orders stopped at a closure end under the existing mission failure
+rules, so a subsequent order can use the new report.
+
 ## 5. Máquina de estados e reserva
 
 `PROPOSED -> PLANNED -> PREPARING -> READY -> EXECUTING -> COMPLETED`,

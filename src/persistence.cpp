@@ -12,8 +12,8 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 4;
-constexpr std::uint64_t rules_version = 5;
+constexpr std::uint64_t schema_version = 5;
+constexpr std::uint64_t rules_version = 6;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
 
@@ -118,7 +118,17 @@ template<class A> void fields(A& a, Field<A, geography::RoadNode>& v)
 template<class A> void fields(A& a, Field<A, geography::RoadSegment>& v)
 {
     a(v.id, v.from, v.to, v.waypoints, v.surface, v.direction, v.crossing, v.speed_limit_mm_s,
-      v.interior_access, v.closed, v.interior_access_points);
+      v.interior_access);
+    if constexpr (A::reading) {
+        if (a.version < 5) {
+            bool closed{};
+            a(closed);
+            if (closed) {
+                a.legacy_closed_roads.insert(v.id);
+            }
+        }
+    }
+    a(v.interior_access_points);
     if (a.version >= 3) {
         a(v.slots);
     }
@@ -216,6 +226,9 @@ template<class A> void fields(A& a, Field<A, ContactReport>& v)
 
 template<class A> void fields(A& a, Field<A, InstallationReport>& v)
 { a(v.sector, v.observed_tick, v.confidence); }
+
+template<class A> void fields(A& a, Field<A, RoadReport>& v)
+{ a(v.closed, v.observed_tick); }
 
 template<class A> void fields(A& a, Field<A, Mission>& v)
 {
@@ -367,6 +380,14 @@ private:
             write(value);
         }
     }
+
+    template<class T> void write(const std::set<T>& values)
+    {
+        number(values.size());
+        for (auto value : values) {
+            write(value);
+        }
+    }
 };
 
 class Reader {
@@ -378,6 +399,7 @@ public:
     const std::uint64_t version;
     std::map<std::pair<FactionId, MissionId>, std::pair<std::size_t, std::uint64_t>> legacy_missions;
     std::map<UnitId, std::uint64_t> legacy_withdrawals;
+    std::set<std::uint32_t> legacy_closed_roads;
 
     void operator()(auto&... values) { (read(values), ...); }
 
@@ -494,6 +516,19 @@ private:
             read(values.try_emplace(key).first->second);
         }
     }
+
+    template<class T> void read(std::set<T>& values)
+    {
+        const auto size = count();
+        for (std::size_t i = 0; i < size; ++i) {
+            T value{};
+            read(value);
+            if (!values.empty() && !(*values.rbegin() < value)) {
+                invalid_checkpoint();
+            }
+            values.insert(value);
+        }
+    }
 };
 
 void write_world(Writer& archive, const WorldDefinition& world)
@@ -556,6 +591,9 @@ struct CampaignArchive {
             a(v.authored_geography_, v.ground_destinations_);
             if (v.authored_geography_) {
                 a(v.movement_map_);
+                if (a.version >= 5) {
+                    a(v.closed_roads_);
+                }
             }
         }
 
@@ -567,6 +605,9 @@ struct CampaignArchive {
                 if (present) {
                     auto& store = v.intelligence_[faction];
                     a(store.sectors, store.contacts, store.installations);
+                    if (a.version >= 5) {
+                        a(store.roads);
+                    }
                 }
             }
         } else {
@@ -574,7 +615,7 @@ struct CampaignArchive {
                 const auto store = v.intelligence_.find(faction);
                 a(store != v.intelligence_.end());
                 if (store != v.intelligence_.end()) {
-                    a(store->second.sectors, store->second.contacts, store->second.installations);
+                    a(store->second.sectors, store->second.contacts, store->second.installations, store->second.roads);
                 }
             }
         }
@@ -692,6 +733,23 @@ struct CampaignArchive {
         if (map.columns != geometry.columns || map.rows != geometry.rows ||
             map.sector_mm != geometry.sector_mm || map.tile_mm <= 0) {
             invalid_checkpoint();
+        }
+        if (v.authored_geography_ && v.intelligence_.size() != 2) {
+            invalid_checkpoint();
+        }
+        std::set<std::uint32_t> road_ids;
+        for (const auto& road : map.roads) {
+            road_ids.insert(road.id);
+        }
+        if (!std::ranges::includes(road_ids, v.closed_roads_)) {
+            invalid_checkpoint();
+        }
+        for (const auto& [faction, store] : v.intelligence_) {
+            for (const auto& [road, report] : store.roads) {
+                if (!road_ids.contains(road) || report.observed_tick > v.clock_.tick()) {
+                    invalid_checkpoint();
+                }
+            }
         }
         for (const auto& line : map.waterways)
             if (!map.valid_position(line.from) || !map.valid_position(line.to) ||
@@ -982,6 +1040,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 4 || rules != 5) &&
         (schema != 3 || (rules != 3 && rules != 4)) &&
         (schema != 2 || rules != 2) && (schema != 1 || rules != 1)) {
         throw std::runtime_error("Unsupported campaign checkpoint schema or rules version");
@@ -1012,6 +1071,10 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     }
     if (!campaign.authored_geography_) {
         campaign.movement_map_ = campaign.movement_geometry();
+    } else if (schema < 5) {
+        campaign.closed_roads_ = std::move(data.legacy_closed_roads);
+        campaign.intelligence_.try_emplace(FactionId::west);
+        campaign.intelligence_.try_emplace(FactionId::east);
     }
     if (schema == 1) {
         CampaignArchive::restore_legacy_movement(campaign, data);

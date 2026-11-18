@@ -267,7 +267,11 @@ void CampaignState::set_road_closed(std::uint32_t id, bool closed)
     if (road == movement_map_.roads.end()) {
         throw std::out_of_range("Unknown geographic road");
     }
-    road->closed = closed;
+    if (closed) {
+        closed_roads_.insert(id);
+    } else {
+        closed_roads_.erase(id);
+    }
 }
 
 bool CampaignState::cancel_shipment(ShipmentId id)
@@ -498,8 +502,11 @@ CampaignState::TransportPlan CampaignState::transport_plan(const Carrier& carrie
             return transport_allowed(static_cast<SectorId>(sector), carrier.faction);
         };
         const auto profile = carrier.mobility.value_or(default_transport_profile());
+        const geography::RoadAccess road_allowed = [&](std::uint32_t road) {
+            return !road_known_closed(carrier.faction, road);
+        };
         auto route = geography::find_route(movement_map_, profile, from, to, {},
-            cheapest ? geography::RoutePriority::fuel : geography::RoutePriority::time, allowed);
+            cheapest ? geography::RoutePriority::fuel : geography::RoutePriority::time, allowed, road_allowed);
         if (!cheapest && route.status == geography::RouteStatus::found && route.fuel_ml > budget) {
             return transport_plan(carrier, from, to, budget, true);
         }
@@ -634,9 +641,7 @@ bool CampaignState::advance_transport(Shipment& shipment, Carrier& carrier, geog
             return delay_shipment(shipment, tick, reason) || changed;
         }
         if (authored_geography_) {
-            const auto road = leg.road ? std::ranges::find(movement_map_.roads, *leg.road,
-                &geography::RoadSegment::id) : movement_map_.roads.end();
-            const bool closed = road != movement_map_.roads.end() && road->closed;
+            const bool closed = leg.road && !observe_road(carrier.faction, *leg.road, carrier.sector, tick);
             if (closed || !geography::allows_leg(movement_map_, leg, allowed, progress.leg_elapsed_us)) {
                 const auto reason = closed ? LogisticsDelay::closed : LogisticsDelay::unsafe;
                 if (!cancelled) {
@@ -973,7 +978,22 @@ bool CampaignState::update_logistics(std::uint64_t tick)
             changed = true;
         }
     }
-    return changed;
+    // A remembered closure can expire while dispatch is pending. A carrier waiting at an
+    // obstruction can also refresh its observation even when the rest of the campaign is idle.
+    return changed || (authored_geography_ && std::ranges::any_of(shipments_, [&](const auto& entry) {
+        const auto& shipment = entry.second;
+        if (shipment.status == ShipmentStatus::cancelled) {
+            return shipment.journey && shipment.delay == LogisticsDelay::closed;
+        }
+        if (terminal(shipment.status)) {
+            return false;
+        }
+        const auto faction = stockpiles_.at(shipment.request.origin).owner;
+        const auto store = intelligence_.find(faction);
+        return store != intelligence_.end() && std::ranges::any_of(store->second.roads, [&](const auto& report) {
+            return report.second.closed && aged_road_report(report.second).confirmed();
+        });
+    }));
 }
 
 }  // namespace openwar

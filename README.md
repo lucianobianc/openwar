@@ -391,14 +391,17 @@ Loading does not need the original scenario file or the procedural
 generator. The save records the initial definition's fingerprint, the
 scenario seed, and the generator version for procedural campaigns.
 
-The binary format has independent schema and rules versions. Schema 4
-stores resolved geographic provenance, waterways and site features along
+The binary format has independent schema and rules versions. Schema 5 and
+rules 6 store actual road closures and separate faction road observations.
+Earlier saves migrate the actual closure flags from their resolved map and
+start with no road observations. Checkpoints store resolved geographic
+provenance, waterways and site features along
 with carrier and formation positions, active journeys, fuel accounting,
 road commitments, and loading or unloading progress. When loading a version 1
 or version 2 checkpoint, the carrier's former link and remaining travel ticks
 reconstruct its position along a straight corridor and retain the fuel already
 paid. Version 1 ground progress is converted along its former centre-to-centre
-path. These conversions can change derived sector membership. Rules version 5 supports imported waterways and land cover.
+path. These conversions can change derived sector membership.
 A loaded journey retains its saved geometry and costs.
 New route requests use the current routing rules. The loader checks file integrity
 and supported versions before restoring state. The writer stages the complete

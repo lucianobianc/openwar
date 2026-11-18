@@ -460,7 +460,7 @@ void draw_map(const Snapshot& snapshot, const ViewControls& controls, const Geog
     EndMode2D();
     draw_sectors(snapshot, controls, map);
     geography.draw_vectors(controls.camera, map, controls.layers[hydrography], controls.layers[roads],
-                           controls.layers[sites], !controls.perspective, selected_feature(controls));
+                           controls.layers[sites], snapshot.roads, selected_feature(controls));
     constexpr float margin = 15;
     const Rectangle marker_area{map.x - margin, map.y - margin, map.width + 2 * margin, map.height + 2 * margin};
     const auto* selection = selected_marker(snapshot, controls);
@@ -524,7 +524,7 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
         return;
     }
     if (const auto feature = selected_feature(controls)) {
-        const auto details = geography.inspect(*feature, !controls.perspective);
+        const auto details = geography.inspect(*feature, !controls.perspective, snapshot.roads);
         label(details.label, x, y, 21, ink, width);
         label(position_text(feature->position, feature->kind != FeatureKind::waterway), x, y + 32, 15, accent, width);
         y += 63;

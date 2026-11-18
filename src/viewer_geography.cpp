@@ -168,7 +168,7 @@ void GeographicLayers::build_overview()
         if (layer.id) {
             BeginTextureMode(layer);
             ClearBackground(BLANK);
-            draw_network(camera, extent_, !roads, roads, false, {}, NetworkMode::bake_overview);
+            draw_network(camera, extent_, !roads, roads, {}, {}, NetworkMode::bake_overview);
             EndTextureMode();
             GenTextureMipmaps(&layer.texture);
             SetTextureFilter(layer.texture, layer.texture.mipmaps > 1 ? TEXTURE_FILTER_TRILINEAR : TEXTURE_FILTER_BILINEAR);
@@ -274,7 +274,8 @@ void GeographicLayers::draw_terrain(bool hydrography) const
     }
 }
 
-void GeographicLayers::draw_network(Camera2D camera, Rectangle visible, bool hydrography, bool roads, bool observer,
+void GeographicLayers::draw_network(Camera2D camera, Rectangle visible, bool hydrography, bool roads,
+                                    const std::map<std::uint32_t, RoadReport>& reports,
                                     const std::optional<FeatureHit>& selected, NetworkMode mode) const
 {
     const bool baking = mode == NetworkMode::bake_overview;
@@ -303,7 +304,8 @@ void GeographicLayers::draw_network(Camera2D camera, Rectangle visible, bool hyd
             const auto& road = map_->roads[i];
             const bool bridge = road.crossing == geography::Crossing::bridge;
             const bool highlight = is_selected(FeatureKind::road, i);
-            const bool closed = observer && road.closed;
+            const auto report = reports.find(road.id);
+            const bool closed = report != reports.end() && report->second.closed && report->second.confirmed();
             if (cached_roads && !highlight && !closed) {
                 continue;
             }
@@ -332,7 +334,8 @@ void GeographicLayers::draw_network(Camera2D camera, Rectangle visible, bool hyd
 }
 
 void GeographicLayers::draw_vectors(Camera2D camera, Rectangle viewport, bool hydrography, bool roads, bool sites,
-                                    bool observer, const std::optional<FeatureHit>& selected) const
+                                    const std::map<std::uint32_t, RoadReport>& reports,
+                                    const std::optional<FeatureHit>& selected) const
 {
     if (!map_) {
         return;
@@ -357,7 +360,7 @@ void GeographicLayers::draw_vectors(Camera2D camera, Rectangle viewport, bool hy
             draw_overview(road_overview_);
         }
     }
-    draw_network(camera, visible, hydrography, roads, observer, selected,
+    draw_network(camera, visible, hydrography, roads, reports, selected,
                  cached ? NetworkMode::cached_details : NetworkMode::vectors);
     if (sites) {
         for (std::size_t i = 0; i < map_->site_features.size(); ++i) {
@@ -473,7 +476,8 @@ std::vector<FeatureHit> GeographicLayers::hits(Vector2 mouse, Camera2D camera, b
     return hits;
 }
 
-FeatureDetails GeographicLayers::inspect(const FeatureHit& hit, bool observer) const
+FeatureDetails GeographicLayers::inspect(const FeatureHit& hit, bool observer,
+                                          const std::map<std::uint32_t, RoadReport>& reports) const
 {
     switch (hit.kind) {
     case FeatureKind::road: {
@@ -487,8 +491,16 @@ FeatureDetails GeographicLayers::inspect(const FeatureHit& hit, bool observer) c
         if (road.osm_way_id) {
             details.lines.push_back("OSM way/" + std::to_string(road.osm_way_id));
         }
+        const auto report = reports.find(road.id);
         if (observer) {
-            details.lines.emplace_back(road.closed ? "Closed" : "Open");
+            details.lines.emplace_back(report == reports.end() ? "Open" : "Closed");
+        } else if (report != reports.end()) {
+            const auto& condition = report->second;
+            details.lines.emplace_back(condition.closed ? "Last reported closed" : "Last reported open");
+            details.lines.emplace_back(std::string(confidence_name(condition.confidence)) +
+                " / tick " + std::to_string(condition.observed_tick));
+        } else {
+            details.lines.emplace_back("Road condition unknown");
         }
         return details;
     }

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -391,6 +392,7 @@ public:
     void request_supply(SupplyRequest request);
     void set_route_passable(RouteId id, bool passable);
     void set_road_closed(std::uint32_t id, bool closed);
+    const auto& closed_roads() const { return closed_roads_; }
     geography::Point stockpile_position(StockpileId id) const;
     bool cancel_shipment(ShipmentId id);
     bool lose_carrier(CarrierId id);
@@ -499,6 +501,9 @@ private:
     void release_unspent_mission_stock(Mission& mission);
     void release_air_mission_equipment(const Mission& mission, EquipmentStatus standby);
     std::uint32_t observe(FactionId faction, SectorId sector);
+    bool observe_road(FactionId faction, std::uint32_t road, SectorId sector, std::uint64_t tick);
+    RoadReport aged_road_report(RoadReport report) const;
+    bool road_known_closed(FactionId faction, std::uint32_t road) const;
     MissionId next_mission_id(FactionId faction) const;
     void initialize_combat(const ScenarioDefinition& scenario);
     OrderResult schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
@@ -533,6 +538,7 @@ private:
         std::map<SectorId, SectorReport> sectors;
         std::map<EquipmentId, ContactReport> contacts;  // True IDs remain internal to observation.
         std::map<SectorId, InstallationReport> installations;
+        std::map<std::uint32_t, RoadReport> roads;
     };
 
     std::uint64_t seed_ = 0;
@@ -573,6 +579,7 @@ private:
     std::vector<OperationsEvent> operations_log_;
     CombatSettings combat_;
     geography::Map movement_map_{};
+    std::set<std::uint32_t> closed_roads_;
     bool authored_geography_ = false;
     std::map<SectorId, geography::Point> ground_destinations_;
     std::map<UnitId, CombatUnit> combat_units_;

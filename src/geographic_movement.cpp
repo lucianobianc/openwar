@@ -185,6 +185,7 @@ struct Search {
     QueryLimits limits;
     Route route;
     const SectorAccess& allowed;
+    const RoadAccess& road_allowed;
     const WaterwayIndex& waterways;
     std::int64_t left, top, width, height, tile_columns, tile_rows;
     std::int64_t spacing, offset_east, offset_south;
@@ -395,7 +396,7 @@ bool Search::add_roads()
         const auto from = nodes.at(road.from);
         const auto to = nodes.at(road.to);
         const auto rate = profile.roads.at(static_cast<std::size_t>(road.surface));
-        if (road.closed || rate.speed_mm_s <= 0)
+        if ((road_allowed && !road_allowed(road.id)) || rate.speed_mm_s <= 0)
             continue;
         std::vector<std::size_t> shape{from};
         for (const auto point : road.waypoints) {
@@ -547,7 +548,7 @@ void Search::solve(RoutePriority priority)
     for (const auto& rate : profile.terrain)
         include(rate);
     for (const auto& road : map.roads)
-        if (!road.closed)
+        if (!road_allowed || road_allowed(road.id))
             include(profile.roads.at(static_cast<std::size_t>(road.surface)));
     const auto heuristic = [&](std::size_t vertex) {
         if (!coarse && width * height < 4096)
@@ -688,7 +689,7 @@ std::vector<const SiteFeature*> Map::site_candidates(SiteKind kind) const
 }
 
 Route find_route(const Map& map, const Profile& profile, Point origin, Point destination,
-    QueryLimits limits, RoutePriority priority, const SectorAccess& allowed)
+    QueryLimits limits, RoutePriority priority, const SectorAccess& allowed, const RoadAccess& road_allowed)
 {
     if (map.tile_mm <= 0 || map.tile_mm > coordinate_limit || limits.margin_tiles < 0
         || limits.margin_tiles > coordinate_limit)
@@ -755,7 +756,7 @@ Route find_route(const Map& map, const Profile& profile, Point origin, Point des
 
         Route result{};
         result.origin = origin;
-        Search search{map, profile, allowance, std::move(result), allowed, waterways, left, top,
+        Search search{map, profile, allowance, std::move(result), allowed, road_allowed, waterways, left, top,
             width, height, columns, rows, spacing, offset_east, offset_south, {}, 0, coarse};
         search.add(origin);
         search.add(destination);
@@ -856,18 +857,15 @@ bool allows_leg(const Map& map, const Leg& leg, const SectorAccess& allowed, std
 }
 
 std::int64_t advance(const Map& map, const Route& route, Progress& progress, std::int64_t duration_us,
-    const CrossingObserver& observer)
+    const CrossingObserver& observer, const RoadAccess& road_allowed)
 {
     if (duration_us < 0)
         throw std::invalid_argument("negative movement time");
     while (duration_us > 0 && progress.leg < route.legs.size()) {
         const auto& leg = route.legs[progress.leg];
         if (!progress.entry_paid) {
-            const auto closed = [&leg](const RoadSegment& road) {
-                return leg.road == road.id && road.closed;
-            };
             if (leg.fuel_ml > progress.fuel_ml
-                || (leg.road && std::any_of(map.roads.begin(), map.roads.end(), closed)))
+                || (leg.road && road_allowed && !road_allowed(*leg.road)))
                 break;
             progress.fuel_ml -= leg.fuel_ml;
             progress.entry_paid = true;

@@ -52,6 +52,7 @@ struct Snapshot {
     std::vector<Tile> tiles;
     std::vector<Marker> markers;
     std::vector<Event> events;
+    std::map<std::uint32_t, RoadReport> roads{};
 
     geography::Point sector_center(SectorId sector) const;
 };

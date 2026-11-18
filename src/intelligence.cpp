@@ -35,6 +35,11 @@ std::string_view confidence_name(std::uint16_t confidence)
 void CampaignState::initialize_operations(const ScenarioDefinition& scenario)
 {
     operations_ = scenario.operations;
+    // Carriers can report road conditions in geographic scenarios without military operations.
+    if (authored_geography_) {
+        intelligence_.try_emplace(FactionId::west);
+        intelligence_.try_emplace(FactionId::east);
+    }
     if (!operations_.enabled) {
         return;
     }
@@ -104,6 +109,9 @@ FactionView CampaignState::faction_view(FactionId faction, bool include_events) 
                                   operations_.installation_half_life_seconds);
         view.installations.push_back(result);
     }
+    for (const auto& [road, report] : store.roads) {
+        view.roads.emplace(road, aged_road_report(report));
+    }
     for (const auto& objective : objectives_) {
         if (objective.faction == faction) {
             view.objectives.push_back(objective);
@@ -123,6 +131,39 @@ FactionView CampaignState::faction_view(FactionId faction, bool include_events) 
         }
     }
     return view;
+}
+
+RoadReport CampaignState::aged_road_report(RoadReport report) const
+{
+    // Logistics can report during the next tick, before the campaign clock advances.
+    const auto tick = std::max(clock_.tick(), report.observed_tick);
+    const auto half_life = operations_.installation_half_life_seconds;
+    report.confidence = decay(1000, (tick - report.observed_tick) * clock_.tick_seconds(),
+        half_life ? half_life : OperationsSettings{}.installation_half_life_seconds);
+    return report;
+}
+
+bool CampaignState::road_known_closed(FactionId faction, std::uint32_t road) const
+{
+    const auto store = intelligence_.find(faction);
+    if (store == intelligence_.end()) {
+        return false;
+    }
+    const auto report = store->second.roads.find(road);
+    return report != store->second.roads.end() && report->second.closed && aged_road_report(report->second).confirmed();
+}
+
+bool CampaignState::observe_road(FactionId faction, std::uint32_t road, SectorId sector, std::uint64_t tick)
+{
+    const bool closed = closed_roads_.contains(road);
+    auto& reports = intelligence_.at(faction).roads;
+    const auto prior = reports.find(road);
+    if (prior == reports.end() ? closed : prior->second.closed != closed) {
+        record_event(operations_log_, {tick, faction, sector, {},
+            "road #" + std::to_string(road) + (closed ? " reported closed" : " reported open")});
+    }
+    reports.insert_or_assign(road, RoadReport{closed, tick});
+    return !closed;
 }
 
 std::uint32_t CampaignState::observe(FactionId faction, SectorId sector)

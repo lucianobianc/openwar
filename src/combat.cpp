@@ -448,12 +448,16 @@ geography::Route CampaignState::ground_route(const CombatUnit& combat, geography
             return id == unit.sector || id == target || (report != view.sectors.end() &&
                 report->second.confidence >= 750 && report->second.estimated_controller == unit.faction);
         };
+        const geography::RoadAccess road_allowed = [&](std::uint32_t road) {
+            const auto report = view.roads.find(road);
+            return report == view.roads.end() || !report->second.confirmed() || !report->second.closed;
+        };
         const auto profile = ground_profile(combat.unit);
         auto route = geography::find_route(movement_map_, profile, *combat.position, destination,
-            {}, geography::RoutePriority::time, allowed);
+            {}, geography::RoutePriority::time, allowed, road_allowed);
         if (route.status == geography::RouteStatus::found && route.fuel_ml > budget) {
             route = geography::find_route(movement_map_, profile, *combat.position, destination,
-                {}, geography::RoutePriority::fuel, allowed);
+                {}, geography::RoutePriority::fuel, allowed, road_allowed);
         }
         if (route.status == geography::RouteStatus::found) {
             auto trace = geography::begin(route, route.fuel_ml);
@@ -550,9 +554,7 @@ std::optional<GroundMovement> CampaignState::ground_movement(UnitId id) const
         for (auto i = progress.leg + progress.entry_paid; i < journey->route.legs.size(); ++i) {
             const auto& remaining = journey->route.legs[i];
             unpaid += remaining.fuel_ml;
-            closed |= remaining.road && std::ranges::any_of(movement_map_.roads, [&](const auto& road) {
-                return road.id == *remaining.road && road.closed;
-            });
+            closed |= remaining.road && road_known_closed(unit.faction, *remaining.road);
         }
         if (!closed && unpaid <= fuel_balance(stockpiles_.at(combat.stores), combat)) {
             const auto remaining = journey->route.duration_us - progress.elapsed_us;
@@ -591,6 +593,9 @@ CampaignState::GroundStep CampaignState::advance_ground(CombatUnit& combat, Grou
             const auto sector = static_cast<SectorId>(crossing.to);
             opposed = ground_opposition(sector, unit.faction);
             return !opposed;
+        }, [&](std::uint32_t road) {
+            const auto sector = static_cast<SectorId>(*movement_map_.sector(progress.position));
+            return observe_road(unit.faction, road, sector, clock_.tick());
         });
     const auto spent = starting_fuel - progress.fuel_ml;
     auto credit = std::int64_t{combat.movement_fuel_credit_ml} - spent;

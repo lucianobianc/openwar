@@ -55,9 +55,9 @@ available through the legacy path.
 
 Uma ponte pertence à geometria do mundo; seu estado *intacta/destruída/bloqueada* pertence à campanha. O mesmo vale para condição de uma estrada, disponibilidade de um aeroporto e posições de unidades móveis.
 
-The current engine stores road conditions in its private resolved map copy.
-Separate campaigns can load the same source and change their own conditions
-independently. The source world file remains reusable.
+The engine keeps physical road geometry and capacity in the resolved world.
+Each campaign stores its own closed road and bridge IDs separately. A closure
+changes passage in that campaign and leaves the reusable world intact.
 
 ## 3. Sistema de coordenadas e precisão
 
@@ -130,7 +130,7 @@ RoadNode: id, MapPoint, tipo de conexão
 RoadSegment: id, node_a, node_b, polyline ordenada,
              categoria/superfície, limite de velocidade,
              sentido permitido, restrições de acesso,
-             estado físico e capacidade por travessia
+             capacidade por travessia
 ```
 
 - Um segmento é percorrido geometricamente pela sua polilinha, não pela distância entre os centros de setores.
@@ -182,6 +182,10 @@ Uma rota pode ter `off-road connector → estrada → ponte → estrada → off-
 
 - Cada consulta fornece origem e destino reais, perfil, restrições de facção e visão de inteligência, além de orçamento aplicável.
 - Conhecimento limitado afeta **planejamento**; obstáculos verdadeiros afetam **execução**. O planejador não pode se beneficiar de unidades ou estradas ocultas ao operador.
+- Ground routes, convoy routes and ground ETAs use the requesting faction's
+  confirmed road reports. Unknown and outdated conditions are treated as
+  potentially passable, subject to the usual physical geography and movement
+  restrictions. Confirmed closures exclude the segment from the query.
 - `PathResult` retorna sequência geométrica, segmentos, tempos, combustível, setorização atravessada, motivo de recusa e dados necessários ao replanejamento.
 - Indexar espacialmente nós/segmentos e tiles para evitar percorrer todo o mundo em cada consulta.
 - Limitar regiões de busca quando justificável; uma heurística de limite **não pode** declarar rota inexistente sem distinguir 'não encontrada no orçamento de busca' de 'comprovadamente impossível'.
@@ -208,6 +212,11 @@ O estado acima é conceitual. **A posição atual é única**: pode ser computad
 - Um tick pode atravessar mais de uma perna, usando o tempo restante após o waypoint; não perder frações de progresso em trocas de segmento.
 - Política inicial de combustível: débito por perna em entrada, no máximo uma vez; salvar explicitamente débitos comprometidos. Limitações e alternativas (consumo progressivo) devem ser documentadas, não misturadas silenciosamente.
 - O fechamento de uma rota antes de entrar nela interrompe ou força replanejamento desde a **posição atual**, sem teletransporte.
+- Ground movement checks the actual segment when entering a leg. A blocked
+  mission reports its obstruction and ends under the existing failure rules.
+  A later order uses the report. A convoy encountering a closure can replan
+  from its current position or wait on its existing journey. A waiting convoy
+  keeps any fuel debit and capacity commitment it already acquired.
 - Em deslocamento, unidades e transportadores atravessam setores e podem gerar eventos ordenados de passagem com tempos dentro do tick.
 - O caminho, custos e estado devem sobreviver a save/load sem execução novamente do gerador nem pagamento duplo.
 - O mapa 2D pode interpolar para desenhar fluidez, mas nunca determinar a posição real da simulação.

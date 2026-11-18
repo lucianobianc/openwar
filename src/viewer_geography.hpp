@@ -33,9 +33,9 @@ public:
     bool has_source_attribution() const { return map_ && !map_->provenance.empty(); }
     void draw_terrain(bool hydrography) const;  // Inside the map camera.
     void draw_vectors(Camera2D camera, Rectangle viewport, bool hydrography, bool roads, bool sites,
-                      bool observer, const std::optional<FeatureHit>& selected) const;
+                      const std::map<std::uint32_t, RoadReport>& reports, const std::optional<FeatureHit>& selected) const;
     std::vector<FeatureHit> hits(Vector2 mouse, Camera2D camera, bool hydrography, bool roads, bool sites) const;
-    FeatureDetails inspect(const FeatureHit& hit, bool observer) const;
+    FeatureDetails inspect(const FeatureHit& hit, bool observer, const std::map<std::uint32_t, RoadReport>& reports) const;
     std::optional<geography::Tile> tile_at(Vector2 position) const;
 
 private:
@@ -48,7 +48,8 @@ private:
 
     void build_terrain(const WorldDefinition& world);
     void build_overview();
-    void draw_network(Camera2D camera, Rectangle visible, bool hydrography, bool roads, bool observer,
+    void draw_network(Camera2D camera, Rectangle visible, bool hydrography, bool roads,
+                      const std::map<std::uint32_t, RoadReport>& reports,
                       const std::optional<FeatureHit>& selected, NetworkMode mode) const;
     const geography::Map* map_;
     Rectangle extent_{};

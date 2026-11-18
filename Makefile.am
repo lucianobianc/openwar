@@ -19,7 +19,8 @@ geographic_movement_tests_LDADD = libcampaign.a
 
 AM_TESTS_ENVIRONMENT = OPENWAR=./openwar$(EXEEXT); export OPENWAR; \
 	OWGEO_FIXTURE="$(srcdir)/examples/connecticut-valley/connecticut-valley.owgeo"; export OWGEO_FIXTURE; \
-	VALLEY_FIXTURES="$(srcdir)/examples/connecticut-valley"; export VALLEY_FIXTURES;
+	VALLEY_FIXTURES="$(srcdir)/examples/connecticut-valley"; export VALLEY_FIXTURES; \
+	LEGACY_ROAD_CHECKPOINT="$(srcdir)/tests/fixtures/closed-bridge-schema4.ows"; export LEGACY_ROAD_CHECKPOINT;
 TESTS = campaign-tests$(EXEEXT) tests/cli.sh geographic-movement-tests$(EXEEXT)
 
 if BUILD_VIEWER
@@ -37,7 +38,7 @@ else
 AM_DISTCHECK_CONFIGURE_FLAGS = --disable-viewer
 endif
 
-EXTRA_DIST = tests/cli.sh AGENTS.md LICENSE \
+EXTRA_DIST = tests/cli.sh tests/fixtures/closed-bridge-schema4.ows AGENTS.md LICENSE \
 	docs/DESIGN.md docs/TERRITORY.md docs/ANNEXES_README.md \
 	docs/ECONOMY.md docs/LOGISTICS.md docs/MAINTENANCE.md \
 	docs/MILITARY_FORCES.md docs/INTELLIGENCE.md docs/OPERATIONS.md \

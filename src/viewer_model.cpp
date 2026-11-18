@@ -108,8 +108,15 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
     Snapshot snapshot{world.width(), world.height(), world.sector_size_m(), clock.tick(),
                       clock.elapsed_seconds(), campaign.war_result(), {}, {}, {}};
     snapshot.tiles.reserve(world.sectors().size());
-    const auto view = perspective && campaign.has_operational_view() ?
+    const auto view = perspective && (campaign.has_operational_view() || campaign.geographic_world()) ?
         campaign.faction_view(*perspective) : FactionView{};
+    if (perspective) {
+        snapshot.roads = view.roads;
+    } else {
+        for (const auto road : campaign.closed_roads()) {
+            snapshot.roads.emplace(road, RoadReport{true, clock.tick()});
+        }
+    }
     for (const auto& sector : world.sectors()) {
         Tile tile{sector.properties.terrain};
         if (perspective) {

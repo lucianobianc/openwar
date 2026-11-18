@@ -46,6 +46,11 @@ void test_geographic_snapshot()
     const auto target = std::ranges::find(scenario.objectives, west, &Objective::faction)->sector;
     scenario.operations.player = west;
     CampaignState campaign(scenario, 0);
+    const auto road = campaign.geographic_world()->roads.front().id;
+    campaign.set_road_closed(road, true);
+    require(read_snapshot(campaign, {}).roads.at(road).closed && read_snapshot(campaign, west).roads.empty() &&
+            read_snapshot(campaign, east).roads.empty(), "Viewer displayed a hidden closure in a faction perspective");
+    campaign.set_road_closed(road, false);
     const auto initial = read_snapshot(campaign, west);
     const auto start = marker_at(initial, formation).position;
     const auto depot = marker_at(initial, installation);

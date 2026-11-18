@@ -120,13 +120,15 @@ void bridge_fixture()
     map.roads.front().direction = Direction::forward;
     require(find_route(map, profile, destination, origin, entire_map).status == RouteStatus::unreachable,
         "one-way bridge denies reverse travel");
-    map.roads.front().closed = true;
-    require(find_route(map, profile, origin, destination, entire_map).status == RouteStatus::unreachable,
+    const RoadAccess closed_bridge = [](std::uint32_t road) { return road != 100; };
+    require(find_route(map, profile, origin, destination, entire_map, RoutePriority::time, {}, closed_bridge).status ==
+        RouteStatus::unreachable,
         "closed bridge disconnects the map");
-    require(find_route(map, profile, origin, destination).status == RouteStatus::limit_exceeded,
+    require(find_route(map, profile, origin, destination, {}, RoutePriority::time, {}, closed_bridge).status ==
+        RouteStatus::limit_exceeded,
         "a cropped search cannot prove a route physically impossible");
     auto interrupted = begin(route, 30'000);
-    require(advance(map, route, interrupted, 60 * second) == 20 * second
+    require(advance(map, route, interrupted, 60 * second, {}, closed_bridge) == 20 * second
         && interrupted.position == point(1300, 800) && interrupted.fuel_ml == 26'000,
         "closure before road entry stops at the standing point");
     auto empty = begin(route, 0);
@@ -312,8 +314,8 @@ void long_distance_routing()
     const SectorAccess denied = [](std::int64_t sector) { return sector % 128 != 64; };
     require(find_route(map, road_only, start, end, {}, RoutePriority::time, denied).status ==
         RouteStatus::unreachable, "a long road cannot bypass intermediate sector permissions");
-    map.roads[1].closed = true;
-    require(find_route(map, road_only, start, end).status == RouteStatus::unreachable,
+    require(find_route(map, road_only, start, end, {}, RoutePriority::time, {},
+        [](std::uint32_t road) { return road != 2; }).status == RouteStatus::unreachable,
         "closing the only remote bridge disconnects the directed network");
     auto drainage = plain(128, 128);
     drainage.default_tile.cover = Cover::water;
