@@ -90,6 +90,7 @@ struct Stockpile {
     ResourceAmounts capacity{};
     ResourceAmounts quantity{};
     ResourceAmounts reserved{};
+    std::optional<geography::Point> access_point{};  // Fixed stores only.
 };
 
 struct ProductionRecipe {
@@ -152,6 +153,10 @@ struct Carrier {
     bool lost = false;
     // Zero uses the starting fuel as the tank capacity.
     std::uint64_t tank_capacity = 0;
+    std::optional<geography::Point> position{};
+    std::optional<geography::Profile> mobility{};
+    // Fraction of a litre already spent from the rounded-up fuel balance.
+    std::uint16_t spent_ml = 0;
 };
 
 struct SupplyRequest {
@@ -176,6 +181,16 @@ struct ResupplyPolicy {
 enum class ShipmentStatus { pending, loading, en_route, delayed, unloading, delivered, cancelled, lost };
 std::string_view shipment_status_name(ShipmentStatus status);
 
+enum class LogisticsDelay {
+    none, unreachable, search_limit, fuel, unsafe, capacity, recipient_unavailable, destination_full, closed
+};
+
+struct TransportJourney {
+    geography::Route route;
+    geography::Progress progress;
+    geography::Point destination;
+};
+
 struct Shipment {
     SupplyRequest request;
     ShipmentStatus status = ShipmentStatus::pending;
@@ -184,10 +199,13 @@ struct Shipment {
     std::uint32_t remaining_ticks = 0;
     std::uint64_t cargo = 0;
     std::uint64_t pickup_fuel = 0;
+    std::optional<TransportJourney> journey{};
+    std::optional<std::uint32_t> road{};  // Authored segment capacity commitment.
+    LogisticsDelay delay = LogisticsDelay::none;
 };
 
 enum class LogisticsEventKind {
-    requested, assigned, loaded, delayed, unloaded, delivered, cancelled, lost, arrived, collecting, refuelled
+    requested, assigned, loaded, delayed, unloaded, delivered, cancelled, lost, arrived, collecting, refuelled, crossed
 };
 std::string_view logistics_event_name(LogisticsEventKind kind);
 
@@ -231,6 +249,7 @@ struct EquipmentType {
     std::uint32_t combat_power = 0;
     bool can_occupy = false;
     std::uint32_t ground_speed_kph = 0;
+    std::optional<geography::Profile> mobility{};
 };
 
 struct MaintenanceFacility {
@@ -326,6 +345,8 @@ struct ScenarioDefinition {
     std::vector<CommandObjectives> command_objectives{};
     std::vector<ResupplyPolicy> resupply{};
     std::vector<SupplyRequest> initial_supply_requests{};
+    std::optional<geography::Map> geographic_world{};
+    std::map<SectorId, geography::Point> ground_destinations{};
 };
 
 class SimulationClock {
@@ -356,6 +377,7 @@ public:
     std::optional<FactionId> player_faction() const { return operations_.player; }
 
     const WorldDefinition& world() const { return world_; }
+    const geography::Map* geographic_world() const { return authored_geography_ ? &movement_map_ : nullptr; }
     const SimulationClock& clock() const { return clock_; }
     const SectorState& sector_state(SectorId sector) const;
     void advance_ticks(std::uint64_t ticks);
@@ -368,6 +390,8 @@ public:
                                   std::uint32_t integrity);
     void request_supply(SupplyRequest request);
     void set_route_passable(RouteId id, bool passable);
+    void set_road_closed(std::uint32_t id, bool closed);
+    geography::Point stockpile_position(StockpileId id) const;
     bool cancel_shipment(ShipmentId id);
     bool lose_carrier(CarrierId id);
     const auto& shipments() const { return shipments_; }
@@ -390,6 +414,7 @@ public:
     FactionView faction_view(FactionId faction, bool include_events = true) const;
     std::span<const OperationsEvent> observer_operations_log() const { return operations_log_; }
     OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target);
+    OrderResult issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination);
     bool cancel_order(FactionId actor, MissionId id);
     bool combat_enabled() const { return combat_.enabled; }
     bool war_ended() const;
@@ -423,21 +448,41 @@ private:
     void queue_supply(SupplyRequest request, std::uint64_t tick);
     void request_replenishment(std::uint64_t tick);
     void release_pickup_stock(Shipment& shipment);
+    bool cancel_shipment_at(Shipment& shipment, std::uint64_t tick);
     bool update_logistics(std::uint64_t tick);
     bool advance_shipment(Shipment& shipment, std::uint64_t tick,
-                          std::map<RouteId, std::uint32_t>& available_slots);
+                          std::map<RouteId, std::uint32_t>& available_slots,
+                          std::map<std::uint32_t, std::uint32_t>& road_slots);
+    bool advance_transport(Shipment& shipment, Carrier& carrier, geography::Point target,
+                           std::uint64_t tick, std::map<RouteId, std::uint32_t>& available_slots,
+                           std::map<std::uint32_t, std::uint32_t>& road_slots);
+    bool delay_shipment(Shipment& shipment, std::uint64_t tick, LogisticsDelay reason);
     bool route_usable(const TransportRoute& route, FactionId faction) const;
+    bool transport_allowed(SectorId sector, FactionId faction) const;
+    void initialize_logistics_positions();
+    geography::Point logistics_anchor(SectorId sector) const;
+    geography::Route legacy_transport_leg(const TransportRoute& route) const;
+    geography::Route local_transport_leg(const Carrier& carrier, geography::Point from,
+                                         geography::Point to) const;
+    GroundStatus recipient_status(StockpileId stock) const;
     struct TransportPath {
         std::optional<RouteId> first{};
         std::uint64_t ticks = 0;
         std::uint64_t fuel = 0;
     };
     std::optional<TransportPath> transport_path(SectorId from, SectorId to, FactionId faction,
-                                                bool cheapest = false) const;
-    std::optional<TransportPath> reachable_transport_path(SectorId from, SectorId to, FactionId faction,
-                                                          std::uint64_t fuel) const;
-    std::optional<std::uint64_t> delivery_fuel(SectorId origin, SectorId destination, FactionId faction,
-                                              std::uint64_t budget) const;
+                                                bool cheapest = false, bool* limited = nullptr) const;
+    struct TransportPlan {
+        LogisticsDelay failure = LogisticsDelay::unreachable;
+        std::int64_t duration_us{};
+        std::int64_t fuel_ml{};
+        std::optional<RouteId> edge{};
+        geography::Route journey{};
+    };
+    TransportPlan transport_plan(const Carrier& carrier, geography::Point from, geography::Point to,
+                                 std::int64_t budget, bool cheapest = false) const;
+    TransportPlan delivery_plan(const Carrier& carrier, geography::Point from, geography::Point to,
+                                geography::Point depot, std::int64_t budget) const;
     void initialize_forces(const ScenarioDefinition& scenario);
     bool update_forces(std::uint64_t tick);
     void set_equipment_status(Equipment& equipment, EquipmentStatus status, std::uint64_t tick);
@@ -456,18 +501,28 @@ private:
     std::uint32_t observe(FactionId faction, SectorId sector);
     MissionId next_mission_id(FactionId faction) const;
     void initialize_combat(const ScenarioDefinition& scenario);
-    OrderResult schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
+    OrderResult schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
+                                       std::optional<geography::Point> destination = {});
     std::string_view ground_target_refusal(const FactionView& view, FactionId faction,
                                            MissionKind kind, SectorId target) const;
     std::optional<Mission> plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,
-                                              const FactionView& view, std::span<const UnitId> excluded) const;
+                                              const FactionView& view, std::span<const UnitId> excluded,
+                                              std::optional<geography::Point> destination = {},
+                                              std::string_view* refusal = nullptr) const;
     MissionId commit_ground_mission(Mission mission);
     void update_combat();
-    void move_combat_unit(CombatUnit& unit, SectorId sector);
+    void move_combat_unit(CombatUnit& unit, geography::Point position);
+    geography::Point ground_anchor(SectorId sector) const;
+    geography::Profile ground_profile(UnitId id) const;
+    geography::Route ground_route(const CombatUnit& combat, geography::Point destination, const FactionView& view,
+                                  std::vector<SectorId>& path) const;
+    geography::Map movement_geometry() const;
+    geography::Route legacy_ground_route(geography::Point origin, std::span<const SectorId> steps,
+                                         geography::Point destination, std::uint32_t speed) const;
     std::uint32_t ground_speed(UnitId id) const;
     bool ground_opposition(SectorId sector, FactionId faction) const;
-    enum class GroundStep { no_fuel, travelling, arrived };
-    GroundStep advance_ground_leg(CombatUnit& unit, SectorId to, std::uint64_t& progress, std::uint64_t& budget);
+    enum class GroundStep { no_fuel, blocked, travelling, arrived };
+    GroundStep advance_ground(CombatUnit& unit, GroundJourney& journey, bool withdrawing);
     void release_ground_equipment(EquipmentId id);
     void resolve_engagements();
     void update_territory();
@@ -497,7 +552,9 @@ private:
     std::vector<EconomyEntry> economy_ledger_;
     std::map<RouteId, TransportRoute> routes_;
     std::map<SectorId, std::vector<RouteId>> incoming_routes_;
+    std::map<RouteId, std::vector<SectorId>> transport_footprints_;
     std::map<CarrierId, Carrier> carriers_;
+    std::map<StockpileId, UnitId> mobile_stocks_;  // Derived from combat unit assignments.
     std::map<ShipmentId, Shipment> shipments_;
     std::vector<LogisticsEvent> logistics_log_;
     std::vector<ResupplyPolicy> resupply_;
@@ -515,6 +572,9 @@ private:
     std::map<std::pair<FactionId, MissionId>, Mission> missions_;
     std::vector<OperationsEvent> operations_log_;
     CombatSettings combat_;
+    geography::Map movement_map_{};
+    bool authored_geography_ = false;
+    std::map<SectorId, geography::Point> ground_destinations_;
     std::map<UnitId, CombatUnit> combat_units_;
     std::vector<BattleEvent> battle_log_;
     std::vector<VictoryObjective> victory_objectives_;

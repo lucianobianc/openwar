@@ -1,6 +1,8 @@
 #ifndef OPENWAR_OPERATIONS_HPP
 #define OPENWAR_OPERATIONS_HPP
 
+#include "combat.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -89,10 +91,10 @@ struct Mission {
     std::optional<FacilityId> relocation{};
     std::optional<UnitId> ground_unit{};
     std::vector<SectorId> ground_path{};
-    std::size_t ground_leg = 0;
     bool preparation_reserved = false;
-    std::uint64_t ground_progress = 0;
     std::uint64_t earliest_launch_tick = 0;
+    std::optional<geography::Point> ground_destination{};
+    std::optional<GroundJourney> ground_journey{};
     bool operator==(const Mission&) const = default;
 };
 

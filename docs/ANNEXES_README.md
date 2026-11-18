@@ -16,6 +16,8 @@ contra os documentos originais antes de serem integrados ao repositório.
 | 07 | `OPERATIONS.md` | Comando, planejamento, missão e ordens do jogador |
 | 08 | `COMBAT.md` | Resolução abstrata, moral, retirada e perdas |
 | 09 | `TACTICAL.md` | Voo arcade 3D e transição de níveis |
+| 10 | [`GEOGRAPHIC_WORLD.md`](GEOGRAPHIC_WORLD.md) | Geographic coordinates, routing, mobility, and map import |
+| 11 | [`COMMAND_INTERFACE.md`](COMMAND_INTERFACE.md) | Operational map, order validation, mission planning, and APP-6 symbology |
 
 ## Responsabilidade de cada estado
 

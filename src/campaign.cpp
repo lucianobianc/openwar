@@ -122,11 +122,19 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed,
             ControlState::neutral : ControlState::secure;
         sector_states_[index] = {entry.state.controller, entry.state.objective_points, control};
     }
+    authored_geography_ = scenario.geographic_world.has_value();
+    const auto geometry = movement_geometry();
+    movement_map_ = scenario.geographic_world.value_or(geometry);
+    if (movement_map_.columns != geometry.columns || movement_map_.rows != geometry.rows ||
+        movement_map_.sector_mm != geometry.sector_mm || movement_map_.tile_mm <= 0) {
+        throw std::invalid_argument("Geographic map must match the campaign sector grid");
+    }
     initialize_economy(scenario);
     initialize_logistics(scenario);
     initialize_forces(scenario);
     initialize_operations(scenario);
     initialize_combat(scenario);
+    initialize_logistics_positions();
     for (const auto& request : scenario.initial_supply_requests) {
         request_supply(request);
     }

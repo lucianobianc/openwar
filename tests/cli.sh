@@ -225,6 +225,15 @@ EOF
     grep -F 'Campaign summary | seed 18446744073709551615' "$scratch/resumed.txt"
     cmp "$scratch/resumed.ows" "$scratch/full.ows"
 
+    geographic=${OWGEO_FIXTURE:-examples/connecticut-valley/connecticut-valley.owgeo}
+    "$openwar" --scenario "$geographic" --faction WEST --order defend:122 --ticks 2 --save "$scratch/mid.ows"
+    "$openwar" --load "$scratch/mid.ows" --ticks 38 --save "$scratch/resumed.ows" --events >"$scratch/resumed.txt"
+    "$openwar" --scenario "$geographic" --faction WEST --order defend:122 --ticks 40 --save "$scratch/full.ows"
+    cmp "$scratch/resumed.ows" "$scratch/full.ows"
+    grep -F 'Imported geographic world: 16x16 sectors' "$scratch/resumed.txt"
+    grep -F 'ground objective secured' "$scratch/resumed.txt"
+    grep -Fx 'Shipments delivered: 2/2' "$scratch/resumed.txt"
+
     reject --load "$scratch/absent.ows" --ticks 0
     reject --load "$scratch/full.ows" --demo campaign
     reject --load "$scratch/full.ows" --scenario "$scratch/world.toml"
@@ -237,6 +246,6 @@ EOF
     printf 'X' | dd of="$scratch/corrupt.ows" bs=1 seek=50 conv=notrunc 2>/dev/null
     reject --load "$scratch/corrupt.ows" --ticks 0
     cp "$scratch/full.ows" "$scratch/version.ows"
-    printf '\002' | dd of="$scratch/version.ows" bs=1 seek=19 conv=notrunc 2>/dev/null
+    printf '\005' | dd of="$scratch/version.ows" bs=1 seek=19 conv=notrunc 2>/dev/null
     reject --load "$scratch/version.ows" --ticks 0
 )

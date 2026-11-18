@@ -30,6 +30,9 @@ struct ProceduralSettings {
     std::uint32_t capitulation = 1;
 };
 
+ScenarioDefinition read_geographic_scenario(const std::filesystem::path& path,
+    std::optional<FactionId> player = {});
+
 ProceduralSettings read_procedural_settings(const std::filesystem::path& path);
 ScenarioDefinition resolve_procedural_scenario(const ProceduralSettings& settings);
 CampaignState procedural_campaign(const ProceduralSettings& settings);

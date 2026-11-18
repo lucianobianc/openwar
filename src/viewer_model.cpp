@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -24,7 +25,8 @@ void add_missions(Snapshot& snapshot, const FactionView& view)
             continue;
         }
         snapshot.markers.push_back({
-            mission.target, MarkerKind::mission, mission.faction,
+            mission.target, MarkerKind::mission, mission.faction, static_cast<std::uint32_t>(mission.id),
+            mission.ground_destination.value_or(snapshot.sector_center(mission.target)), !mission.ground_destination,
             std::string(mission_name(mission.kind)) + " #" + std::to_string(static_cast<std::uint32_t>(mission.id)),
             std::string(mission_status_name(mission.status))
         });
@@ -41,7 +43,63 @@ Event operation_event(const OperationsEvent& event)
     return {event.tick, std::string(event.reason) + " / " + label, event.sequence};
 }
 
+void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optional<FactionId> perspective)
+{
+    for (const auto& [id, carrier] : campaign.carriers()) {
+        if (carrier.lost || (perspective && carrier.faction != *perspective)) {
+            continue;
+        }
+        const auto number = static_cast<std::uint32_t>(id);
+        std::string detail = "Idle";
+        std::string movement;
+        if (carrier.shipment) {
+            const auto& shipment = campaign.shipments().at(*carrier.shipment);
+            detail = std::string(shipment_status_name(shipment.status)) + " / Shipment #" +
+                std::to_string(static_cast<std::uint32_t>(*carrier.shipment));
+            movement = std::to_string(shipment.cargo) + " " + std::string(resource_name(shipment.request.resource));
+            if (shipment.journey) {
+                movement += " / " + std::to_string(shipment.journey->progress.elapsed_us / 1'000'000) +
+                    " s in journey";
+            }
+        }
+        detail += " / " + std::to_string(carrier.fuel) + " L fuel";
+        snapshot.markers.push_back({carrier.sector, MarkerKind::carrier, carrier.faction, number,
+            carrier.position.value(), false, "Carrier #" + std::to_string(number), std::move(detail),
+            std::move(movement)});
+    }
+
+    std::set<StockpileId> installation_stocks;
+    for (const auto& state : campaign.installations()) {
+        const auto& installation = state.installation;
+        const auto& stock = campaign.stockpiles().at(installation.stockpile);
+        installation_stocks.insert(stock.id);
+        if (perspective && (installation.operator_faction != *perspective || stock.owner != *perspective)) {
+            continue;
+        }
+        snapshot.markers.push_back({stock.sector, MarkerKind::installation, installation.operator_faction,
+            static_cast<std::uint32_t>(installation.id), campaign.stockpile_position(stock.id), false,
+            installation.name, std::string(faction_name(installation.operator_faction)) + " / " +
+                std::to_string(installation.integrity) + "% integrity / " +
+                (installation.has_power ? "power on" : "power off")});
+    }
+    for (const auto& [id, stock] : campaign.stockpiles()) {
+        if (!stock.access_point || installation_stocks.contains(id) || (perspective && stock.owner != *perspective)) {
+            continue;
+        }
+        const auto number = static_cast<std::uint32_t>(id);
+        snapshot.markers.push_back({stock.sector, MarkerKind::depot, stock.owner, number, *stock.access_point,
+            false, "Stockpile #" + std::to_string(number), std::string(faction_name(stock.owner))});
+    }
+}
+
 }  // namespace
+
+geography::Point Snapshot::sector_center(SectorId sector) const
+{
+    const auto id = static_cast<std::uint32_t>(sector);
+    const auto size = static_cast<std::int64_t>(sector_size_m) * 1000;
+    return {(id % width) * size + size / 2, (id / width) * size + size / 2, 0};
+}
 
 Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> perspective)
 {
@@ -81,9 +139,11 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
             detail += " / " + std::to_string(readiness.lost) + " lost";
         }
         const auto combat = campaign.combat_units().find(id);
+        std::optional<geography::Point> position;
         if (combat != campaign.combat_units().end()) {
             detail += " / ";
             detail += ground_status_name(combat->second.status);
+            position = combat->second.position;
         }
         std::string movement_detail;
         if (const auto movement = campaign.ground_movement(id)) {
@@ -92,14 +152,18 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
             movement_detail += movement->eta_seconds ? std::to_string(*movement->eta_seconds) + "s" : "unavailable";
         }
         snapshot.markers.push_back({
-            unit.sector, MarkerKind::unit, unit.faction, unit.name, std::move(detail), std::move(movement_detail)
+            unit.sector, MarkerKind::unit, unit.faction, static_cast<std::uint32_t>(id),
+            position.value_or(snapshot.sector_center(unit.sector)), !position, unit.name,
+            std::move(detail), std::move(movement_detail)
         });
     }
+    add_logistics(snapshot, campaign, perspective);
 
     if (perspective) {
         for (const auto& contact : view.contacts) {
             snapshot.markers.push_back({
-                contact.estimated_sector, MarkerKind::contact, {},
+                contact.estimated_sector, MarkerKind::contact, {}, static_cast<std::uint32_t>(contact.id),
+                snapshot.sector_center(contact.estimated_sector), true,
                 "Contact #" + std::to_string(static_cast<std::uint32_t>(contact.id)),
                 std::string(contact.classification) + " / " + std::string(confidence_name(contact.confidence)) +
                     " / tick " + std::to_string(contact.observed_tick)
@@ -107,7 +171,8 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
         }
         for (const auto& site : view.installations) {
             snapshot.markers.push_back({
-                site.sector, MarkerKind::installation, {}, "Reported installation",
+                site.sector, MarkerKind::installation, {}, static_cast<std::uint32_t>(site.sector),
+                snapshot.sector_center(site.sector), true, "Reported installation",
                 std::string(confidence_name(site.confidence)) + " / tick " + std::to_string(site.observed_tick)
             });
         }
@@ -118,16 +183,6 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
         return snapshot;
     }
 
-    for (const auto& state : campaign.installations()) {
-        const auto& installation = state.installation;
-        const auto& stock = campaign.stockpiles().at(installation.stockpile);
-        snapshot.markers.push_back({
-            stock.sector, MarkerKind::installation, installation.operator_faction, installation.name,
-            std::string(faction_name(installation.operator_faction)) + " / " +
-                std::to_string(installation.integrity) + "% integrity / " +
-                (installation.has_power ? "power on" : "power off")
-        });
-    }
     if (campaign.has_operational_view()) {
         for (auto faction : {FactionId::west, FactionId::east}) {
             add_missions(snapshot, campaign.faction_view(faction, false));

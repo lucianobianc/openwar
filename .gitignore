@@ -25,6 +25,8 @@
 /openwar-gui.exe
 /campaign-tests
 /campaign-tests.exe
+/geographic-movement-tests
+/geographic-movement-tests.exe
 /viewer-model-tests
 /viewer-model-tests.exe
 *.a

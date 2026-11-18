@@ -1,6 +1,8 @@
 #ifndef OPENWAR_COMBAT_HPP
 #define OPENWAR_COMBAT_HPP
 
+#include "geographic_movement.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -19,6 +21,13 @@ enum class ControlState { neutral, secure, contested, unstable };
 enum class GroundStatus { holding, withdrawing, broken, surrendered, destroyed };
 enum class WarStatus { ongoing, ceasefire_pending, west_victory, east_victory, draw };
 
+struct GroundJourney {
+    geography::Route route;
+    geography::Progress progress;
+    std::uint32_t planned_speed_kph{};
+    bool operator==(const GroundJourney&) const = default;
+};
+
 struct CombatUnit {
     UnitId unit;
     StockpileId stores;
@@ -29,7 +38,11 @@ struct CombatUnit {
     GroundStatus status = GroundStatus::holding;
     std::optional<SectorId> withdrawal{};
     std::uint32_t suppression = 0;
-    std::uint64_t withdrawal_progress = 0;
+    // Always set for deployed formations. Unit and stockpile sector indexes follow this point.
+    std::optional<geography::Point> position{};
+    std::optional<GroundJourney> withdrawal_journey{};
+    // Millilitres already drawn from the formation's whole-litre stock.
+    std::uint16_t movement_fuel_credit_ml = 0;
 };
 
 struct GroundMovement {
@@ -70,6 +83,7 @@ struct BattleEvent {
     std::uint32_t amount = 0;
     std::uint64_t sequence = 0;
     std::optional<FactionId> previous_controller{};
+    std::optional<std::int64_t> movement_offset_us{};  // From the start of the tick.
     bool operator==(const BattleEvent&) const = default;
 };
 

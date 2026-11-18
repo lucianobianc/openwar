@@ -1574,7 +1574,6 @@ void test_ground_movement()
     constexpr auto west = FactionId::west;
     constexpr UnitId unit{1};
     constexpr StockpileId stores{10};
-    constexpr SectorId home{0};
     constexpr SectorId target{3};
     constexpr std::size_t fuel = static_cast<std::size_t>(Resource::fuel);
     auto scenario = combat_example_scenario(west);
@@ -1586,8 +1585,9 @@ void test_ground_movement()
             "Initial movement estimate did not account for sector size and equipment speed");
     plains.advance_ticks(3);
     require(plains.ground_movement(unit) == GroundMovement{target, 75, 60} &&
-            plains.units().at(unit).sector == home &&
-            plains.stockpiles().at(stores).sector == home && plains.stockpiles().at(stores).quantity[fuel] == 19,
+            plains.units().at(unit).sector == target &&
+            plains.combat_units().at(unit).position == geography::Point{1'000'000, 2'500'000, 0} &&
+            plains.stockpiles().at(stores).sector == target && plains.stockpiles().at(stores).quantity[fuel] == 19,
             "Plains traversal failed to retain progress or charged for the leg twice");
     plains.advance_ticks(1);
     require(!plains.ground_movement(unit) && plains.units().at(unit).sector == target &&
@@ -1600,7 +1600,9 @@ void test_ground_movement()
     require(half_step.issue_order(west, MissionKind::defend, target).mission.has_value(),
             "Could not schedule movement with a different simulated tick duration");
     half_step.advance_ticks(7);
-    require(half_step.units().at(unit).sector == home, "Short ticks accelerated movement");
+    require(half_step.ground_movement(unit).has_value() &&
+            half_step.combat_units().at(unit).position == geography::Point{1'000'000, 2'750'000, 0},
+            "Short ticks accelerated movement");
     half_step.advance_ticks(1);
     require(half_step.units().at(unit).sector == target &&
             half_step.clock().elapsed_seconds() == plains.clock().elapsed_seconds(),
@@ -1621,7 +1623,7 @@ void test_ground_movement()
             "Exact forest fuel allocation was rejected");
     wooded.advance_ticks(4);
     require(wooded.ground_movement(unit) == GroundMovement{target, 50, 240} &&
-            wooded.stockpiles().at(stores).quantity[fuel] == 0 && wooded.units().at(unit).sector == home,
+            wooded.stockpiles().at(stores).quantity[fuel] == 0 && wooded.units().at(unit).sector == target,
             "Forest movement did not use twice the plains travel time and fuel");
     wooded.advance_ticks(4);
     require(wooded.units().at(unit).sector == target, "A paid leg stalled after using its last fuel");
@@ -1706,6 +1708,635 @@ struct CheckpointFiles {
         std::filesystem::remove_all(directory, ignored);
     }
 };
+
+void test_geographic_ground_operations()
+{
+    using namespace geography;
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr UnitId formation{1};
+    constexpr StockpileId stores{10};
+    constexpr SectorId target{3};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr Point origin{200'000, 400'000, 0};
+    constexpr Point destination{1'700'000, 400'000, 60'000};
+
+    auto scenario = combat_example_scenario(west);
+    scenario.world = WorldDefinition(5, 2, 500, std::vector<SectorProperties>(10));
+    scenario.initial_sectors.clear();
+    for (std::uint32_t id = 0; id < 5; ++id) {
+        scenario.initial_sectors.push_back({SectorId{id}, {west}});
+    }
+    scenario.initial_sectors.push_back({SectorId{9}, {east}});
+    scenario.units[1].sector = SectorId{9};
+    scenario.units[1].facility.reset();
+    std::ranges::find(scenario.stockpiles, StockpileId{11}, &Stockpile::id)->sector = SectorId{9};
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.victory_objectives.clear();
+    scenario.command_objectives.clear();
+    scenario.combat_units[0].position = origin;
+    scenario.ground_destinations.emplace(target, destination);
+    auto& type = scenario.equipment_types.front();
+    type.ground_speed_kph = 36;
+    Profile profile{};
+    profile.terrain = {Rate{5000, 2000}, Rate{2500, 4000}, {}};
+    profile.roads = {Rate{10'000, 1000, 5000}, {}};
+    type.mobility = profile;
+    Map map{5, 2, 500'000, 100'000, {}, {}, {}, {}, {}};
+    for (std::int64_t row = 0; row < 10; ++row) {
+        for (std::int64_t column = 11; column < 25; ++column) {
+            map.tiles[{column, row}] = {Cover::plain, 60'000};
+        }
+    }
+    map.barriers = {{900'000, 0, 1'100'000, 1'000'000}};
+    map.nodes = {{1, {200'000, 200'000, 0}}, {2, {1'700'000, 200'000, 60'000}}};
+    map.roads = {{1, 1, 2, {{800'000, 200'000, 60'000}}, Surface::paved, Direction::both,
+        Crossing::bridge, 10'000, false}};
+    scenario.geographic_world = map;
+
+    const auto plan = [&](CampaignState& campaign) {
+        require(campaign.issue_order(west, MissionKind::defend, target).mission.has_value(),
+                "Sector objective did not resolve to an authored geographic point");
+        const auto mission = campaign.faction_view(west).missions.back();
+        require(mission.ground_destination == destination && mission.ground_journey &&
+                mission.ground_journey->route.duration_us == 290'000'000 &&
+                mission.ground_journey->route.fuel_ml == 2300 &&
+                mission.ground_path == std::vector<SectorId>{SectorId{0}, SectorId{1}, SectorId{2}, target},
+                "Ground planner did not select the uphill mixed journey");
+        return mission.id;
+    };
+    CampaignState batched(scenario, 42);
+    plan(batched);
+    batched.advance_ticks(5);
+    require(batched.combat_units().at(formation).position == destination &&
+            batched.stockpiles().at(stores).sector == target &&
+            batched.stockpiles().at(stores).quantity[fuel] == 17 &&
+            batched.combat_units().at(formation).movement_fuel_credit_ml == 700 &&
+            batched.faction_view(west).missions.back().status == MissionStatus::completed,
+            "Arrival, mobile stock, or sub-litre fuel accounting was incorrect");
+
+    CampaignState stepped(scenario, 42);
+    plan(stepped);
+    stepped.advance_ticks(1);
+    require(stepped.combat_units().at(formation).position == Point{300'000, 200'000, 10'000} &&
+            stepped.faction_view(west).missions.back().ground_journey->progress.entry_paid,
+            "An uphill leg did not preserve partial geographic progress and debit");
+    const CheckpointFiles files;
+    const auto partial = files.directory / "partial.ows";
+    stepped.save(partial);
+    auto restored = CampaignState::load(partial);
+    for (int n = 0; n < 4; ++n) {
+        stepped.advance_ticks(1);
+        restored.advance_ticks(1);
+    }
+    const auto bytes = [&](auto& campaign, const char* name) {
+        const auto path = files.directory / name;
+        campaign.save(path);
+        std::ifstream input(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(input), {});
+    };
+    const auto continuous = bytes(batched, "batched.ows");
+    require(bytes(stepped, "stepped.ows") == continuous && bytes(restored, "restored.ows") == continuous,
+            "The geographic journey changed across batching or a checkpoint");
+
+    require(restored.issue_ground_order(west, MissionKind::defend, origin).mission.has_value() &&
+            restored.faction_view(west).missions.back().ground_journey->route.duration_us == 230'000'000,
+            "The same journey did not cost less downhill");
+    restored.advance_ticks(4);
+    require(restored.combat_units().at(formation).position == origin &&
+            restored.stockpiles().at(stores).quantity[fuel] == 15 &&
+            restored.combat_units().at(formation).movement_fuel_credit_ml == 400,
+            "A second order did not reuse fuel already drawn from the mobile stock");
+
+    CampaignState interrupted(scenario, 42);
+    const auto mission = plan(interrupted);
+    interrupted.advance_ticks(1);
+    const auto stopped = interrupted.combat_units().at(formation).position;
+    require(interrupted.cancel_order(west, mission), "Cannot interrupt a manual geographic order");
+    interrupted.advance_ticks(5);
+    require(interrupted.combat_units().at(formation).position == stopped &&
+            interrupted.stockpiles().at(stores).quantity[fuel] == 19,
+            "Cancelling a journey changed its position or refunded fuel");
+
+    CampaignState empty(scenario, 42);
+    plan(empty);
+    empty.advance_ticks(1);
+    ResourceAmounts drained{};
+    drained[fuel] = 19;
+    require(empty.consume(stores, drained), "Could not drain the movement fixture stock");
+    empty.advance_ticks(3);
+    require(empty.combat_units().at(formation).position == Point{800'000, 200'000, 60'000} &&
+            empty.faction_view(west).missions.back().status == MissionStatus::failed,
+            "An already-paid leg could not finish, or the next leg moved without fuel");
+    CampaignState underfunded(scenario, 42);
+    drained[fuel] = 18;
+    require(underfunded.consume(stores, drained) && !underfunded.issue_order(west, MissionKind::defend, target).mission,
+            "Mission planning accepted an unaffordable geographic journey");
+
+    auto mixed_equipment = scenario;
+    auto road_vehicle = type;
+    road_vehicle.id = EquipmentTypeId{10};
+    road_vehicle.can_occupy = false;
+    road_vehicle.mobility->terrain = {};
+    mixed_equipment.equipment_types.push_back(road_vehicle);
+    mixed_equipment.equipment.push_back({EquipmentId{10}, road_vehicle.id, formation});
+    CampaignState restricted(mixed_equipment, 42);
+    require(!restricted.issue_order(west, MissionKind::defend, target).mission,
+            "A mixed formation ignored a ready vehicle's off-road restriction");
+
+    auto fast_clock = scenario;
+    fast_clock.tick_seconds = 300;
+    fast_clock.initial_sectors[3].state.controller = FactionId::neutral;
+    fast_clock.public_sectors.push_back(target);
+    CampaignState occupation(fast_clock, 42);
+    require(occupation.issue_order(west, MissionKind::attack, target).mission.has_value(),
+            "Could not order occupation of the geographic objective");
+    occupation.advance_ticks(1);
+    std::vector<std::pair<SectorId, std::int64_t>> crossings;
+    for (const auto& event : occupation.observer_battle_log()) {
+        if (event.unit == formation && event.movement_offset_us) {
+            require(event.tick == 1, "A single tick lost a sector crossing");
+            crossings.emplace_back(event.sector, *event.movement_offset_us);
+        }
+    }
+    require(crossings == std::vector<std::pair<SectorId, std::int64_t>>{
+                {SectorId{1}, 100'000'000}, {SectorId{2}, 180'000'000}, {target, 230'000'000}} &&
+            occupation.combat_units().at(formation).position == destination &&
+            occupation.sector_state(target).controller == FactionId::neutral &&
+            occupation.sector_state(target).occupier == west,
+            "Multiple crossings or occupation timing did not follow the actual positions");
+    occupation.advance_ticks(1);
+    require(occupation.sector_state(target).controller == west,
+            "Existing occupation rules did not capture a geographic objective");
+
+    auto threatened = scenario;
+    threatened.units[1].sector = SectorId{1};
+    threatened.combat_units[1].position = Point{750'000, 400'000, 0};
+    auto& enemy_stores = *std::ranges::find(threatened.stockpiles, StockpileId{11}, &Stockpile::id);
+    enemy_stores.sector = SectorId{1};
+    enemy_stores.quantity[static_cast<std::size_t>(Resource::ammunition)] = 0;
+    threatened.initial_sectors.push_back({SectorId{6}, {east}});
+    CampaignState fighting(threatened, 42);
+    plan(fighting);
+    fighting.advance_ticks(2);
+    require(fighting.combat_units().at(formation).position == Point{500'000, 200'000, 30'000} &&
+            fighting.combat_units().at(UnitId{2}).status == GroundStatus::withdrawing,
+            "A hidden opposing formation did not stop movement on actual sector entry");
+    fighting.advance_ticks(1);
+    require(fighting.combat_units().at(UnitId{2}).position == Point{750'000, 750'000, 0} &&
+            fighting.units().at(UnitId{2}).sector == SectorId{6} &&
+            fighting.stockpiles().at(StockpileId{11}).sector == SectorId{6},
+            "Withdrawal did not use the geographic journey to the adjacent friendly sector");
+
+    auto unknown_middle = scenario;
+    unknown_middle.initial_sectors[2].state.controller = east;
+    CampaignState denied(unknown_middle, 42);
+    require(!denied.issue_order(west, MissionKind::defend, target).mission,
+            "A geographic road bypassed the restriction on unconfirmed intermediate sectors");
+
+    auto coarse_window = scenario;
+    coarse_window.geographic_world->tile_mm = 1000;
+    coarse_window.geographic_world->tiles.clear();
+    CampaignState limited(coarse_window, 42);
+    const auto refused = limited.issue_order(west, MissionKind::defend, target);
+    require(!refused.mission && refused.reason == "ground route search limit exceeded",
+            "Spatial search exhaustion was reported as a physical obstruction");
+}
+
+ScenarioDefinition geographic_transport_scenario()
+{
+    using namespace geography;
+    constexpr auto west = FactionId::west;
+    constexpr auto supplies = static_cast<std::size_t>(Resource::supplies);
+    ResourceAmounts capacity{};
+    capacity[supplies] = 100;
+    auto stock = capacity;
+    stock[supplies] = 40;
+    ScenarioDefinition scenario{WorldDefinition(3, 2, 500, std::vector<SectorProperties>(6)),
+        {{SectorId{0}, {west}}, {SectorId{1}, {west}}, {SectorId{2}, {west}}}};
+    scenario.tick_seconds = 10;
+    scenario.stockpiles = {{StockpileId{1}, SectorId{0}, west, capacity, stock},
+                           {StockpileId{2}, SectorId{2}, west, capacity, stock}};
+    scenario.stockpiles[0].access_point = Point{200'000, 350'000, 0};
+    scenario.stockpiles[1].access_point = Point{1'200'000, 350'000, 40'000};
+    scenario.carriers = {{CarrierId{1}, west, SectorId{0}, 50, 10}};
+    scenario.carriers[0].position = Point{100'000, 350'000, 0};
+    Profile profile{};
+    profile.terrain = {Rate{5000, 2000}, Rate{2500, 4000}, {}};
+    profile.roads[0] = {10'000, 1000, 5000};
+    scenario.carriers[0].mobility = profile;
+    Map map{3, 2, 500'000, 50'000, {}, {}, {}, {}, {}};
+    for (std::int64_t y = 0; y < 20; ++y) {
+        for (std::int64_t x = 12; x < 30; ++x) {
+            map.tiles[{x, y}] = {Cover::plain, 40'000};
+        }
+    }
+    map.barriers = {{450'000, 0, 550'000, 1'000'000}};
+    map.nodes = {{1, {200'000, 200'000, 0}}, {2, {1'200'000, 200'000, 40'000}}};
+    map.roads = {{1, 1, 2, {{600'000, 200'000, 40'000}}, Surface::paved,
+        Direction::both, Crossing::bridge, 10'000, false}};
+    scenario.geographic_world = std::move(map);
+    return scenario;
+}
+
+void test_geographic_transport()
+{
+    using namespace geography;
+    constexpr ShipmentId outgoing{1}, incoming{2};
+    constexpr CarrierId vehicle{1}, other{2};
+    constexpr StockpileId depot{1}, base{2};
+    constexpr auto supplies = static_cast<std::size_t>(Resource::supplies);
+    const SupplyRequest request{outgoing, depot, base, Resource::supplies, 10};
+    auto scenario = geographic_transport_scenario();
+    scenario.loading_ticks = scenario.unloading_ticks = 2;
+    CampaignState mixed(scenario, 42), batched(scenario, 42);
+    mixed.request_supply(request);
+    batched.request_supply(request);
+    mixed.advance_ticks(2);
+    require(mixed.carriers().at(vehicle).position == Point{150'000, 350'000, 0} &&
+            mixed.carriers().at(vehicle).sector == SectorId{0} &&
+            mixed.shipments().at(outgoing).cargo == 0 && mixed.stockpiles().at(depot).quantity[supplies] == 40,
+            "A carrier on the depot sector loaded away from its access point");
+    auto cancelled_empty = mixed;
+    require(cancelled_empty.cancel_shipment(outgoing) &&
+            cancelled_empty.stockpiles().at(depot).reserved[supplies] == 0,
+            "Cancelling on the way to pickup did not release stock");
+    cancelled_empty.advance_ticks(3);
+    require(!cancelled_empty.carriers().at(vehicle).shipment &&
+            cancelled_empty.stockpiles().at(depot).quantity[supplies] == 40 &&
+            cancelled_empty.carriers().at(vehicle).spent_ml == 100,
+            "Empty cancellation skipped paid movement or changed cargo stock");
+    mixed.advance_ticks(3);
+    require(mixed.shipments().at(outgoing).cargo == 10 &&
+            mixed.carriers().at(vehicle).position == mixed.stockpile_position(depot),
+            "Pickup did not occur at the access point after the loading time");
+    mixed.advance_ticks(12);
+    require(mixed.shipments().at(outgoing).road == 1 &&
+            mixed.shipments().at(outgoing).journey->progress.entry_paid,
+            "The mixed journey did not hold bridge capacity during transit");
+
+    const CheckpointFiles files;
+    const auto midway = files.directory / "geographic-logistics.ows";
+    mixed.save(midway);
+    auto restored = CampaignState::load(midway);
+    auto cancelled_loaded = restored;
+    const auto stopped = cancelled_loaded.carriers().at(vehicle).position;
+    require(cancelled_loaded.cancel_shipment(outgoing), "Could not cancel a loaded geographic shipment");
+    cancelled_loaded.advance_ticks(5);
+    require(cancelled_loaded.carriers().at(vehicle).position == stopped &&
+            cancelled_loaded.shipments().at(outgoing).cargo == 10 &&
+            cancelled_loaded.stockpiles().at(base).quantity[supplies] == 40,
+            "A loaded cancellation moved the vehicle or credited the recipient");
+
+    mixed.advance_ticks(7);
+    require(mixed.carriers().at(vehicle).sector == SectorId{2} &&
+            mixed.carriers().at(vehicle).position != mixed.stockpile_position(base) &&
+            mixed.stockpiles().at(base).quantity[supplies] == 40,
+            "The carrier unloaded on sector entry");
+    mixed.advance_ticks(3);
+    for (int i = 0; i < 10; ++i) {
+        restored.advance_ticks(1);
+    }
+    batched.advance_ticks(27);
+    const auto save_bytes = [&](const CampaignState& state) {
+        state.save(midway);
+        std::ifstream stream(midway, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(stream), {});
+    };
+    const auto expected = save_bytes(mixed);
+    require(save_bytes(restored) == expected && save_bytes(batched) == expected,
+            "Road commitments or movement progress changed across batching or save/load");
+    require(mixed.shipments().at(outgoing).status == ShipmentStatus::delivered &&
+            mixed.carriers().at(vehicle).position == mixed.stockpile_position(base) &&
+            mixed.stockpiles().at(depot).quantity[supplies] == 30 &&
+            mixed.stockpiles().at(base).quantity[supplies] == 50 &&
+            mixed.carriers().at(vehicle).fuel == 9 && mixed.carriers().at(vehicle).spent_ml == 800,
+            "The completed mixed journey violated stock or fuel conservation");
+
+    auto roads = geographic_transport_scenario();
+    auto& map = *roads.geographic_world;
+    map.tile_mm = 100'000;
+    map.tiles.clear();
+    roads.stockpiles[0].access_point = map.nodes.front().position;
+    roads.stockpiles[1].access_point = map.nodes.back().position;
+    roads.carriers[0].position = roads.stockpiles[0].access_point;
+    roads.carriers[0].mobility->terrain = {};
+    auto reverse = roads.carriers.front();
+    reverse.id = other;
+    reverse.position = roads.stockpiles[1].access_point;
+    reverse.sector = SectorId{2};
+    roads.carriers.push_back(reverse);
+    CampaignState shared(roads, 42);
+    shared.request_supply(request);
+    shared.request_supply({incoming, base, depot, Resource::supplies, 10});
+    shared.advance_ticks(8);
+    require(shared.carriers().at(vehicle).position == Point{500'000, 200'000, 30'000} &&
+            shared.shipments().at(incoming).delay == LogisticsDelay::capacity &&
+            shared.carriers().at(other).position == shared.stockpile_position(base),
+            "Opposite-direction carriers did not share a physical road slot");
+    shared.set_road_closed(1, true);
+    shared.advance_ticks(3);
+    require(shared.carriers().at(vehicle).position == Point{500'000, 200'000, 30'000} &&
+            shared.shipments().at(outgoing).delay == LogisticsDelay::closed &&
+            shared.shipments().at(outgoing).cargo == 10 && shared.carriers().at(vehicle).spent_ml == 400,
+            "Closing the bridge moved a carrier or debited fuel during the pause");
+    shared.save(midway);
+    auto restored_closure = CampaignState::load(midway);
+    restored_closure.advance_ticks(1);
+    require(restored_closure.shipments().at(outgoing).delay == LogisticsDelay::closed &&
+            restored_closure.carriers().at(vehicle).position == shared.carriers().at(vehicle).position,
+            "The bridge closure or capacity commitment did not survive save/load");
+    shared.set_road_closed(1, false);
+    shared.advance_ticks(19);
+    require(shared.shipments().at(outgoing).status == ShipmentStatus::delivered &&
+            shared.shipments().at(incoming).status == ShipmentStatus::delivered &&
+            shared.carriers().at(vehicle).fuel == 9 && shared.carriers().at(other).fuel == 9,
+            "Bridge reopening did not resume both shipments with one fuel debit per leg");
+    std::vector<std::uint64_t> arrivals;
+    for (const auto& event : shared.logistics_log()) {
+        if (event.kind == LogisticsEventKind::arrived) {
+            arrivals.push_back(event.tick);
+        }
+    }
+    require(arrivals == std::vector<std::uint64_t>{19, 29},
+            "Directional road grade or slot release timing changed");
+
+    roads.carriers.resize(1);
+    roads.carriers[0].fuel = 0;
+    CampaignState no_fuel(roads, 42);
+    no_fuel.request_supply(request);
+    no_fuel.advance_ticks(10);
+    require(no_fuel.shipments().at(outgoing).delay == LogisticsDelay::fuel &&
+            no_fuel.stockpiles().at(depot).reserved[supplies] == 0,
+            "An unaffordable shipment reserved supplies or departed");
+
+    roads.carriers[0].fuel = 10;
+    roads.geographic_world->roads.front().direction = Direction::reverse;
+    CampaignState one_way(roads, 42);
+    one_way.request_supply(request);
+    one_way.advance_ticks(1);
+    require(one_way.shipments().at(outgoing).delay == LogisticsDelay::unreachable,
+            "A road-only carrier drove against the road direction");
+    roads.geographic_world->roads.front().direction = Direction::both;
+    roads.geographic_world->tile_mm = 500;
+    CampaignState fine_raster(roads, 42);
+    fine_raster.request_supply(request);
+    fine_raster.advance_ticks(1);
+    require(fine_raster.shipments().at(outgoing).status == ShipmentStatus::loading,
+            "Fine terrain resolution prevented a road-only dispatch");
+
+    scenario.tick_seconds = 300;
+    scenario.loading_ticks = scenario.unloading_ticks = 1;
+    scenario.carriers.front().position = scenario.stockpiles.front().access_point;
+    CampaignState fast(scenario, 42);
+    fast.request_supply(request);
+    fast.advance_ticks(3);
+    require(fast.shipments().at(outgoing).status == ShipmentStatus::unloading &&
+            fast.carriers().at(vehicle).position == fast.stockpile_position(base) &&
+            std::ranges::count(fast.logistics_log(), LogisticsEventKind::crossed, &LogisticsEvent::kind) == 2,
+            "A long tick could not advance through multiple route legs and sector crossings");
+}
+
+void test_geographic_mobile_delivery()
+{
+    using namespace geography;
+    constexpr auto west = FactionId::west;
+    constexpr UnitId formation{1};
+    constexpr CarrierId carrier{1};
+    constexpr ShipmentId delivery{1};
+    constexpr StockpileId depot{1}, deployed{10};
+    constexpr auto supplies = static_cast<std::size_t>(Resource::supplies);
+    constexpr auto ammunition = static_cast<std::size_t>(Resource::ammunition);
+    constexpr Point pickup{100'000, 100'000, 0};
+    constexpr Point start{350'000, 100'000, 0};
+    constexpr Point objective{350'000, 850'000, 0};
+    const SupplyRequest request{delivery, depot, deployed, Resource::supplies, 5};
+    auto scenario = combat_example_scenario(west);
+    scenario.tick_seconds = 10;
+    scenario.combat_units.front().position = start;
+    scenario.equipment_types.front().ground_speed_kph = 5;
+    scenario.installations.clear();
+    scenario.objectives.clear();
+    scenario.victory_objectives.clear();
+    scenario.command_objectives.clear();
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.geographic_world = Map{3, 2, 500'000, 100'000, {}, {}, {}, {}, {}};
+    auto& stock = *std::ranges::find(scenario.stockpiles, depot, &Stockpile::id);
+    stock.capacity[supplies] = stock.quantity[supplies] = 10;
+    stock.access_point = pickup;
+    auto& recipient = *std::ranges::find(scenario.stockpiles, deployed, &Stockpile::id);
+    recipient.capacity[supplies] = 30;
+    scenario.carriers = {{carrier, west, SectorId{0}, 10, 10}};
+    scenario.carriers.front().position = pickup;
+
+    CampaignState initial(scenario, 42);
+    initial.request_supply(request);
+    initial.advance_ticks(2);
+    require(initial.shipments().at(delivery).cargo == 5 &&
+            initial.stockpile_position(deployed) == start &&
+            !initial.stockpiles().at(deployed).access_point,
+            "A deployed stockpile did not resolve through its formation");
+    auto pursuing = initial;
+    pursuing.advance_ticks(1);
+    require(pursuing.shipments().at(delivery).journey->destination == start &&
+            pursuing.issue_ground_order(west, MissionKind::defend, objective).mission.has_value(),
+            "Could not redirect the recipient after dispatch");
+    pursuing.advance_ticks(2);
+    require(pursuing.stockpile_position(deployed) != start &&
+            pursuing.stockpiles().at(deployed).quantity[supplies] == 20 &&
+            pursuing.shipments().at(delivery).cargo == 5,
+            "Carrier unloaded at the recipient's stale same-sector destination");
+    pursuing.advance_ticks(100);
+    require(pursuing.shipments().at(delivery).status == ShipmentStatus::delivered &&
+            pursuing.carriers().at(carrier).position == objective &&
+            pursuing.stockpile_position(deployed) == objective &&
+            pursuing.stockpiles().at(deployed).quantity[supplies] == 25 &&
+            std::ranges::count(pursuing.logistics_log(), LogisticsEventKind::unloaded, &LogisticsEvent::kind) == 1,
+            "Replanning to a moving formation lost or duplicated a delivery");
+
+    auto short_range = scenario;
+    short_range.stockpiles.front().access_point = Point{250'000, 100'000, 0};
+    short_range.carriers.front().position = short_range.stockpiles.front().access_point;
+    short_range.carriers.front().fuel = 1;
+    Profile expensive{};
+    expensive.terrain[0] = {10'000, 7000};
+    short_range.carriers.front().mobility = expensive;
+    CampaignState exhausted(short_range, 42);
+    exhausted.request_supply(request);
+    exhausted.advance_ticks(2);
+    require(exhausted.shipments().at(delivery).cargo == 5 &&
+            exhausted.issue_ground_order(west, MissionKind::defend, objective).mission.has_value(),
+            "Fuel-exhaustion fixture could not start the loaded run");
+    exhausted.advance_ticks(100);
+    require(exhausted.shipments().at(delivery).delay == LogisticsDelay::fuel &&
+            exhausted.shipments().at(delivery).cargo == 5 &&
+            exhausted.stockpiles().at(deployed).quantity[supplies] == 20 &&
+            exhausted.carriers().at(carrier).position != objective,
+            "A carrier without enough fuel followed a new destination or unloaded cargo");
+
+    auto destroyed = initial;
+    require(destroyed.lose_equipment(EquipmentId{1}), "Could not destroy the recipient fixture");
+    destroyed.advance_ticks(2);
+    require(destroyed.combat_units().at(formation).status == GroundStatus::destroyed &&
+            destroyed.shipments().at(delivery).status == ShipmentStatus::cancelled &&
+            destroyed.shipments().at(delivery).cargo == 5 &&
+            destroyed.stockpiles().at(deployed).quantity[supplies] == 20,
+            "Destruction discarded loaded cargo or unloaded it to the destroyed recipient");
+
+    scenario.equipment_types.front().ground_speed_kph = 30;
+    scenario.equipment.push_back({EquipmentId{10}, EquipmentTypeId{1}, formation});
+    scenario.units[1].sector = SectorId{0};
+    scenario.units[1].facility.reset();
+    scenario.combat_units[1].position = Point{350'000, 400'000, 0};
+    std::ranges::find(scenario.stockpiles, StockpileId{11}, &Stockpile::id)->sector = SectorId{0};
+    recipient.quantity[ammunition] = 0;
+    CampaignState withdrawing(scenario, 42);
+    withdrawing.request_supply(request);
+    withdrawing.advance_ticks(2);
+    require(withdrawing.combat_units().at(formation).status == GroundStatus::withdrawing &&
+            withdrawing.shipments().at(delivery).delay == LogisticsDelay::recipient_unavailable &&
+            withdrawing.stockpiles().at(depot).reserved[supplies] == 5 &&
+            withdrawing.shipments().at(delivery).cargo == 0,
+            "Recipient withdrawal did not suspend service and preserve pickup reservations");
+    withdrawing.advance_ticks(40);
+    require(withdrawing.shipments().at(delivery).status == ShipmentStatus::delivered &&
+            withdrawing.carriers().at(carrier).position == withdrawing.stockpile_position(deployed) &&
+            withdrawing.stockpiles().at(depot).reserved[supplies] == 0,
+            "Shipment did not resume at the formation's withdrawal position");
+}
+
+void test_geographic_transport_control_change()
+{
+    using namespace geography;
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr ShipmentId delivery{1};
+    constexpr CarrierId carrier{1};
+    constexpr StockpileId depot{1}, recipient{20};
+    constexpr SectorId middle{1}, destination{2};
+    constexpr Point pickup{200'000, 200'000, 0};
+    constexpr Point dropoff{1'200'000, 200'000, 0};
+
+    auto scenario = combat_example_scenario(east);
+    scenario.tick_seconds = 10;
+    scenario.combat.critical_occupation_seconds = 40;
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.objectives.clear();
+    scenario.installations.clear();
+    scenario.victory_objectives.clear();
+    scenario.command_objectives.clear();
+    std::ranges::find(scenario.initial_sectors, destination, &InitialSectorState::sector)->state.controller = west;
+    scenario.units[1].sector = middle;
+    scenario.units[1].facility.reset();
+    std::ranges::find(scenario.stockpiles, StockpileId{11}, &Stockpile::id)->sector = middle;
+    scenario.stockpiles.front().access_point = pickup;
+    scenario.stockpiles.push_back({recipient, destination, west, {0, 0, 20}, {}, {}, dropoff});
+    scenario.carriers = {{carrier, west, SectorId{0}, 10, 10}};
+    scenario.carriers.front().position = pickup;
+    Profile road_only{};
+    road_only.roads[0] = {5000, 1000};
+    scenario.carriers.front().mobility = road_only;
+    Map map{3, 2, 500'000, 100'000, {}, {}, {}, {}, {}};
+    map.nodes = {{1, pickup}, {2, dropoff}};
+    map.roads = {{1, 1, 2, {}}};
+    scenario.geographic_world = std::move(map);
+
+    CampaignState campaign(scenario, 42);
+    require(campaign.issue_order(east, MissionKind::attack, middle).mission.has_value(),
+            "Could not prepare the contested transport corridor");
+    campaign.request_supply({delivery, depot, recipient, Resource::fuel, 5});
+    campaign.advance_ticks(5);
+    const auto stopped = campaign.carriers().at(carrier).position;
+    require(campaign.sector_state(middle).controller == east &&
+            stopped == Point{350'000, 200'000, 0} &&
+            campaign.shipments().at(delivery).cargo == 5,
+            "The corridor did not change control during the loaded journey");
+    campaign.advance_ticks(2);
+    const auto safe_waypoint = campaign.carriers().at(carrier).position;
+    require(safe_waypoint == Point{400'000, 200'000, 0} &&
+            campaign.carriers().at(carrier).sector == SectorId{0} &&
+            campaign.shipments().at(delivery).delay == LogisticsDelay::unsafe &&
+            campaign.shipments().at(delivery).cargo == 5,
+            "A carrier continued into a newly hostile intermediate sector");
+    campaign.advance_ticks(2);
+    require(campaign.carriers().at(carrier).position == safe_waypoint,
+            "A carrier did not stay at the safe waypoint while the route was blocked");
+}
+
+void test_long_geographic_dispatch()
+{
+    using namespace geography;
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr StockpileId depot{1}, destination{20}, mobile{10};
+    constexpr SectorId first{0}, last{127}, eastern_base{16'383};
+    constexpr CarrierId carrier{1};
+    constexpr UnitId formation{1};
+    constexpr ShipmentId shipment{1};
+    constexpr Point departure{1'000'000, 1'000'000, 0};
+    constexpr Point arrival{255'000'000, 1'000'000, 0};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+
+    auto scenario = combat_example_scenario(west);
+    scenario.world = WorldDefinition(128, 128, 2000, std::vector<SectorProperties>(128 * 128));
+    scenario.initial_sectors.clear();
+    for (std::uint32_t id = 0; id < 128; ++id) {
+        scenario.initial_sectors.push_back({SectorId{id}, {west}});
+    }
+    scenario.initial_sectors.push_back({eastern_base, {east}});
+    scenario.tick_seconds = 3600;
+    scenario.combat.time_limit_seconds.reset();
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.objectives.clear();
+    scenario.installations.clear();
+    scenario.victory_objectives.clear();
+    scenario.command_objectives.clear();
+    scenario.units[1].sector = eastern_base;
+    scenario.units[1].facility.reset();
+    std::ranges::find(scenario.stockpiles, StockpileId{11}, &Stockpile::id)->sector = eastern_base;
+    scenario.stockpiles.push_back({destination, last, west, {0, 0, 40}});
+    auto& deployed = *std::ranges::find(scenario.stockpiles, mobile, &Stockpile::id);
+    deployed.quantity[fuel] = deployed.capacity[fuel] = 300;
+
+    Profile road_only{};
+    road_only.roads[0] = {10'000, 500};
+    scenario.equipment_types.front().ground_speed_kph = 36;
+    scenario.equipment_types.front().mobility = road_only;
+    scenario.carriers = {{carrier, west, first, 10, 300}};
+    scenario.carriers.front().mobility = road_only;
+    Map map{128, 128, 2'000'000, 100'000, {}, {}, {}, {}, {}};
+    map.nodes = {{1, departure}, {2, arrival}};
+    map.roads = {{1, 1, 2, {}}};
+    scenario.geographic_world = std::move(map);
+
+    CampaignState campaign(scenario, 42);
+    require(campaign.issue_order(west, MissionKind::defend, last).mission.has_value(),
+            "A distant friendly objective could not schedule a ground journey");
+    campaign.request_supply({shipment, depot, destination, Resource::fuel, 5});
+    campaign.advance_ticks(4);
+    require(campaign.shipments().at(shipment).journey && campaign.shipments().at(shipment).cargo == 5 &&
+            campaign.carriers().at(carrier).position != departure && campaign.carriers().at(carrier).position != arrival,
+            "A distant delivery route could not dispatch and make partial progress");
+    const CheckpointFiles files;
+    const auto checkpoint = files.directory / "regional.ows";
+    campaign.save(checkpoint);
+    auto restored = CampaignState::load(checkpoint);
+    const auto verify = [&](CampaignState& state) {
+        state.advance_ticks(10);
+        require(state.shipments().at(shipment).status == ShipmentStatus::delivered &&
+                state.stockpiles().at(destination).quantity[fuel] == 5 &&
+                state.carriers().at(carrier).position == arrival &&
+                state.carriers().at(carrier).fuel == 173 &&
+                state.combat_units().at(formation).position == arrival &&
+                state.stockpiles().at(mobile).quantity[fuel] == 173,
+                "Regional journeys did not reach the exact destination with their planned fuel costs");
+    };
+    verify(campaign);
+    verify(restored);
+    require(std::ranges::equal(campaign.logistics_log(), restored.logistics_log()) &&
+            std::ranges::equal(campaign.observer_battle_log(), restored.observer_battle_log()),
+            "Resuming regional routes changed their ordered events");
+}
 
 void test_checkpoints()
 {
@@ -1839,6 +2470,11 @@ int main()
     test_procedural_campaign();
     test_large_procedural_campaigns();
     test_ground_movement();
+    test_geographic_ground_operations();
+    test_geographic_transport();
+    test_geographic_mobile_delivery();
+    test_geographic_transport_control_change();
     test_depleted_withdrawal();
     test_checkpoints();
+    test_long_geographic_dispatch();
 }

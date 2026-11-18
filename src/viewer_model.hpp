@@ -13,15 +13,27 @@ struct Tile {
     std::optional<std::uint64_t> observed_tick{};
 };
 
-enum class MarkerKind { unit, contact, installation, mission };
+enum class MarkerKind { unit, contact, carrier, installation, depot, mission };
+
+struct MarkerKey {
+    MarkerKind kind;
+    std::optional<FactionId> faction;
+    std::uint32_t id;
+    bool operator==(const MarkerKey&) const = default;
+};
 
 struct Marker {
     SectorId sector;
     MarkerKind kind;
     std::optional<FactionId> faction;
+    std::uint32_t id;
+    geography::Point position;
+    bool estimated;
     std::string label;
     std::string detail;
     std::string movement{};
+
+    MarkerKey key() const { return {kind, faction, id}; }
 };
 
 struct Event {
@@ -40,6 +52,8 @@ struct Snapshot {
     std::vector<Tile> tiles;
     std::vector<Marker> markers;
     std::vector<Event> events;
+
+    geography::Point sector_center(SectorId sector) const;
 };
 
 // A null perspective is the explicit observer mode.

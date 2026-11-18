@@ -154,7 +154,8 @@ OrderResult CampaignState::schedule_air_mission(FactionId faction, MissionKind k
             return facility.supported_types.empty() ||
                    std::ranges::find(facility.supported_types, type.id) != facility.supported_types.end();
         };
-        if (relocation && (unit.sector == target || !supports(facilities_.at(*relocation)) ||
+        if (relocation && (combat_units_.contains(unit.id) || unit.sector == target ||
+            !supports(facilities_.at(*relocation)) ||
             std::ranges::count_if(equipment_, [&](const auto& entry) {
                 return entry.second.assignment.unit == unit.id &&
                        entry.second.status != EquipmentStatus::lost;
@@ -257,12 +258,18 @@ bool CampaignState::cancel_order(FactionId actor, MissionId id)
 {
     const auto found = missions_.find({actor, id});
     if (war_ended() || operations_.player != actor || found == missions_.end() ||
-        found->second.status != MissionStatus::scheduled) {
+        (found->second.status != MissionStatus::scheduled &&
+         !(found->second.ground_unit && found->second.manual &&
+           found->second.status == MissionStatus::in_progress))) {
         return false;
     }
     auto& mission = found->second;
-    cancel_equipment_reservation(mission.equipment);
-    release_unspent_mission_stock(mission);
+    if (mission.ground_unit) {
+        release_ground_equipment(mission.equipment);
+    } else {
+        cancel_equipment_reservation(mission.equipment);
+        release_unspent_mission_stock(mission);
+    }
     mission.status = MissionStatus::cancelled;
     record_event(operations_log_, {clock_.tick(), actor, mission.target, id, "player order cancelled"});
     return true;

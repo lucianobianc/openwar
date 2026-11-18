@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "name": "Connecticut Valley",
+  "epsg": 32618,
+  "origin_m": [682000, 4762000],
+  "columns": 16,
+  "rows": 16,
+  "sector_m": 2000,
+  "tile_m": 200,
+  "vertical_datum": "EGM2008 orthometric heights, metres",
+  "sites": {
+    "west_base": 205021598,
+    "west_outpost": 194577623,
+    "east_base": 194587564,
+    "east_outpost": 194561470
+  },
+  "sources": {
+    "osm": {
+      "url": "https://api.openstreetmap.org/api/0.6/map",
+      "license": "ODbL 1.0",
+      "attribution": "© OpenStreetMap contributors",
+      "snapshot": "2026-11-18",
+      "wgs84_query_bounds": [-72.79, 42.68, -72.36, 42.999]
+    },
+    "dem": {
+      "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N42_00_W073_00_DEM/Copernicus_DSM_COG_10_N42_00_W073_00_DEM.tif",
+      "license": "Copernicus DEM GLO-30 public licence",
+      "attribution": "Copernicus DEM © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+      "preprocessing": "WGS84 crop then 2× downsampling by averaging"
+    }
+  }
+}

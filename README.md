@@ -85,24 +85,35 @@ an in-memory ledger in application order.
 Run `./openwar --demo logistics --ticks 6` to deliver 80 liters of fuel to
 a second depot. Run `./openwar --demo logistics --ticks 16 --events` to see
 another 40 liters delivered after the refinery replenishes the origin.
-The scenario defines directed transport links separately from the sector grid.
-Carriers use travel time to choose among usable routes and can take a cheaper
-route when fuel is limited. Every leg costs fuel and uses a route slot.
-Requests compete by descending priority, earliest deadline, then request ID.
+Carriers travel between metric access points. On authored maps, the geographic
+router uses the carrier's mobility profile, road directions, grades, bridges,
+and permitted off-road terrain. Road slots are shared by both directions and
+remain committed for the tick in which a carrier exits. Requests compete by
+descending priority, earliest deadline, then request ID.
 
 An idle carrier can travel empty to a new pickup, including a return to its
 previous pickup. Dispatch prefers a carrier already at the origin, then the
 shortest feasible pickup trip. Carriers refuel from unreserved fuel at the
-pickup depot when needed. Delivery leaves the vehicle at its arrival sector
-until it has another assignment.
+pickup depot when needed. Loading and unloading use their configured service
+times and require the carrier to be at the exact access point. A formation's
+mobile stockpile follows its current position. If its destination changes
+during travel, the carrier updates the plan after its paid leg. Withdrawal
+suspends service. If the formation is destroyed or surrenders, cancellation
+releases any pickup reservation and leaves loaded cargo with its carrier.
 
 Loading reserves stock before moving it into a carrier. The destination
-accepts only what fits and the carrier keeps the remainder. A blockage
-pauses carriers on the affected link. Carriers at a sector can choose a
-different route. Cancelling loaded cargo leaves it with the carrier.
-The campaign records reservations, cargo movements, delays, and losses in
-memory. Carrier availability, blockages, and losses use explicit inputs.
-Produced supplies become available for dispatch on the following tick.
+accepts only what fits and the carrier keeps the remainder. At leg entry the
+carrier pays fuel once, including any fractional litre. A closed road or
+bridge can trigger an alternate route from the current position. A carrier
+with no usable route waits with its cargo and progress. Shipments distinguish
+route search limits, unreachable routes, fuel shortages, closures, hostile
+territory, and full roads or destinations. Produced supplies become available
+for dispatch on the following tick.
+
+Legacy scenarios use their existing directed transport links as straight
+geographic corridors, retaining each link's travel time, fuel cost, and slots.
+Fixed stockpiles and starting carriers default to sector centres. Local
+approaches connect these corridors to exact pickup and delivery points.
 
 ## Forces and maintenance
 
@@ -173,19 +184,36 @@ sector owners. A faction view shows its own units and reports. Ground attacks
 require confirmed territorial intelligence. Hostile sectors also require a
 reported contact or a recent complete survey. Ground defense requires
 confirmed friendly territory.
-Ground routes use orthogonal sectors and known friendly intermediate sectors.
-Plains have a movement cost of one, forests have twice the travel time and
-fuel cost, and water blocks ground units. A formation moves at the speed of
-its slowest ready mobile ground equipment. Prototype rates are 30 km/h for
-armor and mobile air defense, 45 km/h for ground transports, and 5 km/h for
-teams on foot.
+Ground formations and their mobile stockpiles change sectors when the
+formation's geographic position crosses a boundary. Movement and withdrawal
+advance along a journey in simulated time. Ground missions reach their exact
+destination before completing. Sector presence continues to drive abstract
+combat and occupation.
 
-Movement and withdrawal accumulate distance from simulated time. Entering a
-leg spends one fuel unit per 2 km of sector width, rounded up, multiplied by
-the destination terrain cost. A unit and its deployed stockpile stay in the
-current sector until the leg is complete. The CLI and viewer report progress
-on the current leg and an estimated time to the destination when available.
-Convoys still use the configured travel times and fuel costs of transport links.
+The C++ scenario definition accepts a geographic movement map, formation
+positions, sector objective points, and equipment mobility profiles. On
+these maps, routes can use roads, off-road terrain, or both. Planning uses
+confirmed friendly reports for intermediate sectors and reports when a
+bounded search cannot establish a route. Sector orders use a configured
+objective point or the centre with sampled elevation. Use a configured
+point for objectives with an inaccessible centre.
+
+Geographic routing uses the fine grid for nearby endpoints. Long searches
+and detours beyond the local window use the directed road graph and a
+terrain lattice sampled at approximately sector resolution. Terrain edges
+are checked against fine terrain, grades, barriers, and sector access before
+they become executable legs. One budget applies across local and regional
+attempts. A regional search can miss a passage between samples, in which
+case it reports a search limit.
+
+Existing demos and procedural scenarios derive straight geographic
+corridors from their orthogonal sector links. The adapter preserves forest
+travel and fuel multipliers, water restrictions, and the charge of one
+fuel unit per 2 km of sector width, rounded up, times the terrain cost.
+Ground movement pays fuel once at leg entry. Authored routes account for
+millilitres, drawing whole litres from the formation's stores and carrying
+forward the surplus. Convoys use the configured travel times and fuel
+costs of transport links.
 
 Co-located opponents exchange abstract effects using ready equipment,
 condition, experience, morale, cohesion, fatigue, suppression, terrain,
@@ -316,6 +344,18 @@ The same 128×128 configuration ran 2,880 ticks in 20.7 seconds with
 8.0 MiB peak RSS. These measurements describe the tested workload on this
 machine. Campaigns with more equipment or more active fronts can cost more.
 
+## Geographic scenarios
+
+```sh
+./openwar --scenario examples/connecticut-valley/connecticut-valley.owgeo --ticks 120 --events
+```
+
+The bundled 32×32 km Connecticut Valley scenario uses a fixed OpenStreetMap
+extract and a Copernicus DEM. The terrain and roads are resolved offline. The
+geographic catalog preserves typed site candidates independently of the
+scenario's fictional installations. See the [import guide](docs/GEOGRAPHIC_IMPORT.md)
+and [source attribution](examples/connecticut-valley/README.md).
+
 ## Saving and resuming campaigns
 
 ```sh
@@ -339,10 +379,19 @@ Loading does not need the original scenario file or the procedural
 generator. The save records the initial definition's fingerprint, the
 scenario seed, and the generator version for procedural campaigns.
 
-The binary format has independent schema and rules versions. The loader
-rejects unsupported versions and checks file integrity before restoring
-state. The writer stages the complete file beside the destination before
-replacing it. Checkpoints describe simulation state at a tick boundary.
+The binary format has independent schema and rules versions. Schema 4
+stores resolved geographic provenance, waterways and site features along
+with carrier and formation positions, active journeys, fuel accounting,
+road commitments, and loading or unloading progress. When loading a version 1
+or version 2 checkpoint, the carrier's former link and remaining travel ticks
+reconstruct its position along a straight corridor and retain the fuel already
+paid. Version 1 ground progress is converted along its former centre-to-centre
+path. These conversions can change derived sector membership. Rules version 5 supports imported waterways and land cover.
+A loaded journey retains its saved geometry and costs.
+New route requests use the current routing rules. The loader checks file integrity
+and supported versions before restoring state. The writer stages the complete
+file beside the destination before replacing it. Checkpoints describe
+simulation state at a tick boundary.
 Viewer settings such as camera position, playback speed, and perspective
 are local to each session.
 
@@ -356,16 +405,30 @@ On Windows, the executable is named `openwar-gui.exe`.
 For a raylib installation outside `pkg-config`, pass its include and link
 flags through `RAYLIB_CFLAGS` and `RAYLIB_LIBS` when running `configure`.
 
-The viewer starts paused for inspection. Click a sector for details, use
-Space to pause or resume, and use `[` and `]` to change speed. Scroll over the
-map to zoom or over a panel to see more sector markers or events. Pan with
-the middle or right mouse button or the arrow keys. Press R to fit the map.
+Open the bundled geographic scenario with
+`./openwar-gui --scenario examples/connecticut-valley/connecticut-valley.owgeo`.
+The map shows shaded elevation, roads and bridges, surface water, and
+geographic sites. The layer buttons also control sector boundaries,
+territory, formations, and carriers. Zoom in to see smaller geographic sites.
+Legacy scenarios use their sector terrain and available campaign positions.
+
+The viewer starts paused for inspection. Click a marker, road, or other
+feature for details. Click again to cycle overlapping items, or click open
+ground for sector reports. Space pauses or resumes and `[` and `]` change
+playback speed. The wheel zooms around the cursor on the map and scrolls
+reports in the side panels. Pan with the middle or right mouse button or
+the arrow keys. Press R or click Fit to reset the view. Cursor coordinates
+are metres east and south of the map's northwest origin. On imported maps,
+the cursor's elevation is sampled from the terrain grid.
 
 Use the perspective buttons or keys 1–3 to switch between Observer, WEST,
 and EAST. Observer shows authoritative ownership, contested sectors, and
-events. Faction views show their own units and the territory, contacts,
-installations, and orders in their reports. The viewer runs the same
-campaign engine in its own process and advances it in whole simulated ticks.
+events. Faction views show their own formations, carriers and facilities,
+along with the territory, contacts, installations, and orders in their
+reports. Sector-level reports use approximate positions. Markers are simple
+viewer glyphs pending the official APP-6 renderer. The viewer advances the
+same campaign engine in whole simulated ticks and supports the CLI's
+checkpoint format with `--load` and `--save`.
 
 ## Roadmap
 
@@ -402,3 +465,5 @@ The roadmap above is the current milestone sequence for the technical annexes.
 - [`COMBAT.md`](docs/COMBAT.md) covers abstract engagements, losses, and withdrawal.
 - [`SCENARIOS.md`](docs/SCENARIOS.md) covers predefined, geographic, and procedural scenarios.
 - [`CAMPAIGN_SETUP.md`](docs/CAMPAIGN_SETUP.md) describes campaign creation and configuration.
+- [`GEOGRAPHIC_WORLD.md`](docs/GEOGRAPHIC_WORLD.md) specifies geographic coordinates, movement, and offline map import.
+- [`COMMAND_INTERFACE.md`](docs/COMMAND_INTERFACE.md) specifies the 2D command interface, mission planning, and APP-6 symbology.

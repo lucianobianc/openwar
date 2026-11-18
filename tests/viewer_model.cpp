@@ -26,10 +26,65 @@ bool has_marker(const Snapshot& snapshot, MarkerKind kind, std::string_view name
     });
 }
 
+const Marker& marker_at(const Snapshot& snapshot, MarkerKey key)
+{
+    const auto marker = std::ranges::find(snapshot.markers, key, &Marker::key);
+    require(marker != snapshot.markers.end(), "Expected geographic marker is missing");
+    return *marker;
+}
+
+void test_geographic_snapshot()
+{
+    const auto path = std::getenv("OWGEO_FIXTURE");
+    require(path != nullptr, "Geographic viewer test requires OWGEO_FIXTURE");
+    auto scenario = read_geographic_scenario(path);
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr MarkerKey formation{MarkerKind::unit, west, 1};
+    constexpr MarkerKey carrier{MarkerKind::carrier, west, 1};
+    constexpr MarkerKey installation{MarkerKind::installation, west, 1};
+    const auto target = std::ranges::find(scenario.objectives, west, &Objective::faction)->sector;
+    scenario.operations.player = west;
+    CampaignState campaign(scenario, 0);
+    const auto initial = read_snapshot(campaign, west);
+    const auto start = marker_at(initial, formation).position;
+    const auto depot = marker_at(initial, installation);
+    require(start == campaign.combat_units().at(UnitId{1}).position &&
+            marker_at(initial, carrier).position == campaign.carriers().at(CarrierId{1}).position &&
+            depot.position == campaign.stockpile_position(StockpileId{3}) && !depot.estimated &&
+            start != initial.sector_center(marker_at(initial, formation).sector),
+            "Geographic markers were placed at sector centres instead of authoritative positions");
+    const auto order = campaign.issue_order(west, MissionKind::defend, target);
+    require(order.mission.has_value(), "Could not start geographic viewer fixture movement");
+    const auto scheduled = read_snapshot(campaign, west);
+    require(marker_at(scheduled, {MarkerKind::mission, west, static_cast<std::uint32_t>(*order.mission)}).position ==
+                scenario.ground_destinations.at(target), "Mission marker did not use its geographic objective");
+    campaign.advance_ticks(5);
+    const auto moving = read_snapshot(campaign, {});
+    const auto& moving_unit = marker_at(moving, formation);
+    const auto& moving_carrier = marker_at(moving, carrier);
+    require(moving_unit.position != start && moving_unit.position == campaign.combat_units().at(UnitId{1}).position &&
+            moving_carrier.position != start && moving_carrier.position == campaign.carriers().at(CarrierId{1}).position &&
+            !moving_unit.movement.empty() && !moving_carrier.movement.empty(),
+            "Viewer missed in-transit coordinates or movement status");
+    for (const auto perspective : {west, east}) {
+        const auto restricted = read_snapshot(campaign, perspective);
+        for (const auto& marker : restricted.markers) {
+            require(!marker.faction || marker.faction == perspective,
+                    "Faction viewer exposed opposing carrier, installation or formation details");
+            if (marker.kind == MarkerKind::contact || (marker.kind == MarkerKind::installation && !marker.faction)) {
+                require(marker.estimated && marker.position == restricted.sector_center(marker.sector),
+                        "An intelligence report exposed an authoritative geographic position");
+            }
+        }
+    }
+}
+
 }  // namespace
 
 int main()
 {
+    test_geographic_snapshot();
     CampaignState economy(example_scenario(), 42);
     economy.advance_ticks(5);
     const auto economy_observer = read_snapshot(economy, {});
@@ -76,8 +131,9 @@ int main()
                 }), "A recorded equipment loss was missing from the unit details");
     }
     require(has_marker(contested, MarkerKind::mission, "attack #1") &&
-            std::ranges::any_of(west_battle.markers, [](const Marker& marker) {
-                return marker.kind == MarkerKind::contact && marker.sector == SectorId{1};
+            std::ranges::any_of(west_battle.markers, [&](const Marker& marker) {
+                return marker.kind == MarkerKind::contact && marker.sector == SectorId{1} && marker.estimated &&
+                       marker.position == west_battle.sector_center(marker.sector);
             }) && !has_marker(west_battle, MarkerKind::unit, "East field group"),
             "Viewer lost a mission or rendered a reported contact as a true unit");
     require(!west_battle.events.empty() && std::ranges::all_of(west_battle.events, [](const Event& event) {

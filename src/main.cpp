@@ -16,7 +16,7 @@ Without a tick limit, the dashboard runs in real time until Ctrl+C.
 
 Options
   --demo NAME  Select economy (default), logistics, maintenance, operations, combat, campaign, or procedural.
-  --scenario FILE  Load a procedural scenario configuration.
+  --scenario FILE  Load a procedural configuration or an imported .owgeo scenario.
   --load FILE      Resume a saved campaign.
   --save FILE      Write a checkpoint at the end of the run.
   --speed N    Pace the run at N simulated seconds per real second (default 60).
@@ -306,9 +306,17 @@ int main(int argc, char* argv[])
         if (load_path && (demo || seed_override)) {
             throw std::invalid_argument("--load cannot be combined with --demo, --scenario or --seed");
         }
+        const bool geographic = scenario_path && scenario_path->extension() == ".owgeo";
         const auto initialize = [&] {
             if (load_path) {
                 return openwar::CampaignState::load(*load_path);
+            }
+            if (geographic) {
+                const auto seed = seed_override.value_or(0);
+                if (seed > UINT32_MAX)
+                    throw std::out_of_range("Seed must fit in 32 bits");
+                return openwar::CampaignState(openwar::read_geographic_scenario(*scenario_path, faction),
+                    static_cast<std::uint32_t>(seed));
             }
             auto settings = scenario_path ? openwar::read_procedural_settings(*scenario_path) : openwar::ProceduralSettings{};
             settings.seed = seed_override.value_or(settings.seed);
@@ -319,14 +327,20 @@ int main(int argc, char* argv[])
         };
         auto campaign = initialize();
         const bool generated = campaign.generator_version() != 0;
-        const bool campaign_view = (generated || campaign.strategic_command_enabled()) && !faction;
+        const auto* map = campaign.geographic_world();
+        const bool imported = map && !map->provenance.empty();
+        const bool campaign_view = (generated || imported || campaign.strategic_command_enabled()) && !faction;
         const bool operations_view = campaign.has_operational_view();
         if ((faction || !commands.empty()) &&
-            (!operations_view || (!load_path && demo != Demo::operations && demo != Demo::combat))) {
-            throw std::invalid_argument("Faction controls require an operational checkpoint or --demo operations or combat");
+            (!operations_view || (!load_path && !geographic && demo != Demo::operations && demo != Demo::combat))) {
+            throw std::invalid_argument("Faction controls require a geographic scenario, operational checkpoint, or an operations or combat demo");
         }
         if (!commands.empty() && !faction) {
             throw std::invalid_argument("Orders require --faction WEST or EAST");
+        }
+        if (imported) {
+            std::cout << "Imported geographic world: " << campaign.world().width() << 'x' << campaign.world().height()
+                      << " sectors, " << map->roads.size() << " road segments\n";
         }
         if (generated) {
             report_procedural_world(campaign, ticks == 0);
