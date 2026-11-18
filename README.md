@@ -261,8 +261,18 @@ campaign engine in its own process and advances it in whole simulated ticks.
 4. M3 — Forces and maintenance. Units, equipment, wear, and repairs.
 5. M4 — Operations and intelligence. Reconnaissance, commands, and planning.
 6. M5 — Combat and territory. Engagements, morale, capture, and campaign progression.
-7. M6 — Strategic map. 2D visualization and player intervention.
-8. M7 — Flight. 3D helicopters and tactical integration.
+7. M6 — Advanced strategic command. Coordinate the war through long-term planning,
+   strategic priorities, coordinated offensives, military reserves, defense,
+   and adaptation to losses.
+8. M7 — Scenarios and procedural campaigns. Generate maps and configure initial
+   force deployments, infrastructure, resources, objectives, and victory conditions.
+9. M8 — Persistence. Save and resume the full simulation state, including forces,
+   economy, logistics, intelligence, and operations in progress.
+10. M9 — Strategic interface. Replace the temporary viewer with an interactive
+    map, military information, operation tracking, reports, and order issuance.
+11. M10 — Integration and validation. Consolidate the strategic simulator through
+    full-campaign tests, performance and determinism checks, scenario balancing,
+    and integration fixes.
 
 The roadmap above is the current milestone sequence for the technical annexes.
 
