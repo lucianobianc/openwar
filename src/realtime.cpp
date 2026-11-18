@@ -99,20 +99,16 @@ private:
     bool ansi_;
 };
 
-std::string_view logistics_event_name(LogisticsEventKind kind)
+std::string format_logistics_event(const LogisticsEvent& entry, std::uint32_t tick_seconds)
 {
-    switch (kind) {
-    case LogisticsEventKind::requested: return "requested";
-    case LogisticsEventKind::assigned: return "assigned";
-    case LogisticsEventKind::loaded: return "loaded";
-    case LogisticsEventKind::delayed: return "delayed";
-    case LogisticsEventKind::unloaded: return "unloaded";
-    case LogisticsEventKind::delivered: return "delivered";
-    case LogisticsEventKind::cancelled: return "cancelled";
-    case LogisticsEventKind::lost: return "lost";
-    case LogisticsEventKind::arrived: return "arrived";
+    std::ostringstream event;
+    event << "Event tick " << entry.tick << " (" << entry.tick * tick_seconds
+          << "s): shipment " << static_cast<std::uint32_t>(entry.shipment)
+          << ' ' << logistics_event_name(entry.kind) << " [" << entry.quantity << ']';
+    if (entry.sector) {
+        event << " in sector " << static_cast<std::uint32_t>(*entry.sector);
     }
-    throw std::logic_error("Unknown logistics event");
+    return event.str();
 }
 
 struct EventCursor {
@@ -152,13 +148,8 @@ struct EventCursor {
                 }
             } else if (logistics < transport.size() &&
                 (economy == transactions.size() || transport[logistics].sequence < transactions[economy].sequence)) {
-                const auto& entry = transport[logistics++];
-                event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
-                      << "s): shipment " << static_cast<std::uint32_t>(entry.shipment)
-                      << ' ' << logistics_event_name(entry.kind) << " [" << entry.quantity << ']';
-                if (entry.sector) {
-                    event << " in sector " << static_cast<std::uint32_t>(*entry.sector);
-                }
+                output(format_logistics_event(transport[logistics++], campaign.clock().tick_seconds()));
+                continue;
             } else {
                 const auto& entry = transactions[economy++];
                 event << "Event tick " << entry.tick << " (" << entry.tick * campaign.clock().tick_seconds()
@@ -272,7 +263,7 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
 
 template<class Output>
 void drain_operations(const CampaignState& campaign, FactionId perspective, std::size_t& next,
-                      std::size_t& next_battle, Output output)
+                      std::size_t& next_battle, std::size_t& next_shipment, bool logistics, Output output)
 {
     FactionView view;
     auto events = campaign.observer_operations_log();
@@ -282,9 +273,18 @@ void drain_operations(const CampaignState& campaign, FactionId perspective, std:
     }
     const auto battles = perspective == FactionId::neutral ?
         campaign.observer_battle_log() : std::span<const BattleEvent>{};
-    while (next < events.size() || next_battle < battles.size()) {
+    const auto shipments = logistics && perspective == FactionId::neutral ?
+        campaign.logistics_log() : std::span<const LogisticsEvent>{};
+    while (next < events.size() || next_battle < battles.size() || next_shipment < shipments.size()) {
+        if (next_shipment < shipments.size() &&
+            (next == events.size() || shipments[next_shipment].sequence < events[next].sequence) &&
+            (next_battle == battles.size() || shipments[next_shipment].sequence < battles[next_battle].sequence)) {
+            output(format_logistics_event(shipments[next_shipment++], campaign.clock().tick_seconds()));
+            continue;
+        }
         if (next_battle < battles.size() &&
-            (next == events.size() || battles[next_battle].sequence < events[next].sequence)) {
+            (next == events.size() || battles[next_battle].sequence < events[next].sequence) &&
+            (next_shipment == shipments.size() || battles[next_battle].sequence < shipments[next_shipment].sequence)) {
             const auto& battle = battles[next_battle++];
             std::ostringstream line;
             line << "Event tick " << battle.tick << " (" << battle.tick * campaign.clock().tick_seconds()
@@ -411,11 +411,12 @@ void print_events(const CampaignState& campaign)
     EventCursor{}.drain(campaign, [](const std::string& event) { std::cout << event << '\n'; });
 }
 
-void print_operations_events(const CampaignState& campaign, FactionId perspective)
+void print_operations_events(const CampaignState& campaign, FactionId perspective, bool logistics)
 {
     std::size_t next = 0;
     std::size_t next_battle = 0;
-    drain_operations(campaign, perspective, next, next_battle,
+    std::size_t next_shipment = 0;
+    drain_operations(campaign, perspective, next, next_battle, next_shipment, logistics,
                      [](const std::string& event) { std::cout << event << '\n'; });
 }
 
@@ -513,7 +514,8 @@ void print_campaign_summary(std::ostream& out, const CampaignState& campaign, st
 }
 
 void run_realtime(CampaignState& campaign, std::uint32_t speed,
-                  std::optional<std::uint64_t> tick_limit, bool events, std::optional<FactionId> perspective)
+                  std::optional<std::uint64_t> tick_limit, bool events, std::optional<FactionId> perspective,
+                  bool logistics)
 {
     using Clock = std::chrono::steady_clock;
     using namespace std::chrono_literals;
@@ -533,6 +535,7 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
         EventCursor cursor;
         std::size_t next_operation = 0;
         std::size_t next_battle = 0;
+        std::size_t next_shipment = 0;
         std::deque<std::string> recent_events;
         const auto draw = [&] {
             if (events) {
@@ -547,7 +550,8 @@ void run_realtime(CampaignState& campaign, std::uint32_t speed,
                     recent_events.push_back(std::move(event));
                 };
                 if (perspective) {
-                    drain_operations(campaign, *perspective, next_operation, next_battle, output);
+                    drain_operations(campaign, *perspective, next_operation, next_battle, next_shipment,
+                                     logistics, output);
                 } else {
                     cursor.drain(campaign, output);
                 }

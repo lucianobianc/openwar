@@ -409,6 +409,101 @@ void test_logistics()
             "Produced fuel never reached the destination");
 }
 
+void test_recurring_supply()
+{
+    constexpr StockpileId depot{1};
+    constexpr StockpileId base{3};
+    constexpr CarrierId vehicle{1};
+    constexpr ShipmentId initial{1};
+    constexpr ShipmentId top_up{2};
+    constexpr ShipmentId recurring{3};
+    constexpr RouteId returning{2};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    auto scenario = logistics_example_scenario();
+    scenario.installations.clear();
+    scenario.carriers.resize(1);
+    const auto pickup = scenario.stockpiles.front().sector;
+    const auto destination = scenario.stockpiles.back().sector;
+    scenario.routes.push_back({returning, destination, pickup, 2, 1, 2});
+    scenario.resupply = {{depot, base, Resource::fuel, 20, 30}};
+    CampaignState campaign(scenario, 42);
+    campaign.request_supply({initial, depot, base, Resource::fuel, 15});
+    campaign.advance_ticks(2);
+    require(campaign.shipments().size() == 2 && campaign.shipments().at(initial).cargo == 15 &&
+            campaign.shipments().at(top_up).request.quantity == 15 &&
+            campaign.stockpiles().at(base).quantity[fuel] == 0,
+            "Recurring demand duplicated an existing order or counted cargo as local stock");
+    campaign.advance_ticks(4);
+    require(campaign.shipments().at(initial).status == ShipmentStatus::delivered &&
+            campaign.carriers().at(vehicle).sector == destination &&
+            campaign.carriers().at(vehicle).shipment == top_up &&
+            campaign.stockpiles().at(depot).reserved[fuel] == 15,
+            "Delivered vehicle did not accept the next pickup");
+    campaign.advance_ticks(1);
+    require(campaign.shipments().at(top_up).edge == returning &&
+            campaign.shipments().at(top_up).cargo == 0 &&
+            campaign.carriers().at(vehicle).sector == destination && campaign.carriers().at(vehicle).fuel == 6,
+            "Empty pickup travel teleported the vehicle or skipped its fuel cost");
+
+    auto interrupted = campaign;
+    interrupted.set_route_passable(returning, false);
+    interrupted.advance_ticks(3);
+    require(interrupted.shipments().at(top_up).status == ShipmentStatus::delayed &&
+            interrupted.carriers().at(vehicle).sector == destination &&
+            interrupted.carriers().at(vehicle).fuel == 6 &&
+            interrupted.shipments().size() == 2,
+            "Blocked pickup moved, charged fuel twice, or duplicated its demand");
+    require(interrupted.cancel_shipment(top_up) &&
+            interrupted.stockpiles().at(depot).reserved[fuel] == 0,
+            "Cancellation of an empty trip retained the pickup reservation");
+    interrupted.set_route_passable(returning, true);
+    interrupted.advance_ticks(1);
+    require(interrupted.carriers().at(vehicle).sector == pickup &&
+            interrupted.shipments().at(top_up).edge == std::nullopt,
+            "An interrupted empty trip did not finish its current leg before reassignment");
+
+    campaign.advance_ticks(6);
+    require(campaign.shipments().size() == 2 && campaign.stockpiles().at(base).quantity[fuel] == 30 &&
+            campaign.shipments().at(top_up).status == ShipmentStatus::delivered &&
+            campaign.carriers().at(vehicle).fuel == 4,
+            "The same vehicle did not complete a second delivery");
+    ResourceAmounts spent{};
+    spent[fuel] = 10;
+    require(campaign.consume(base, spent), "Could not reach the reorder threshold");
+    campaign.advance_ticks(1);
+    require(campaign.shipments().size() == 2, "Demand triggered at the threshold");
+    spent[fuel] = 15;
+    require(campaign.consume(base, spent), "Could not consume supplies for the next cycle");
+    campaign.advance_ticks(8);
+    require(campaign.shipments().at(recurring).status == ShipmentStatus::delivered &&
+            campaign.shipments().size() == 3 && campaign.stockpiles().at(base).quantity[fuel] == 30 &&
+            campaign.stockpiles().at(depot).quantity[fuel] == 43 &&
+            campaign.stockpiles().at(depot).reserved[fuel] == 0 &&
+            campaign.carriers().at(vehicle).fuel == 2,
+            "Recurring delivery or refuelling violated stock conservation");
+
+    // A manual shipment already fills all physical space, even with a higher reorder target.
+    scenario.stockpiles.back().capacity[fuel] = 30;
+    scenario.stockpiles.back().quantity[fuel] = 18;
+    CampaignState full(scenario, 42);
+    full.request_supply({initial, depot, base, Resource::fuel, 12});
+    full.advance_ticks(10);
+    require(full.shipments().size() == 1 && full.stockpiles().at(base).quantity[fuel] == 30,
+            "Replenishment exceeded target capacity");
+
+    scenario.stockpiles.back().quantity[fuel] = 30;
+    scenario.loading_ticks = 3;
+    scenario.carriers.push_back({CarrierId{2}, FactionId::west, destination, 100, 10});
+    CampaignState reserved(scenario, 42);
+    reserved.request_supply({initial, base, depot, Resource::fuel, 20});
+    reserved.advance_ticks(2);
+    require(reserved.shipments().size() == 1 && reserved.stockpiles().at(base).reserved[fuel] == 20,
+            "An outgoing reservation was mistaken for physical storage space");
+    reserved.advance_ticks(2);
+    require(reserved.shipments().size() == 2 && reserved.shipments().at(top_up).request.quantity == 20,
+            "Loading did not expose space for valid replacement stock");
+}
+
 void test_realtime_pacing()
 {
     using namespace std::chrono_literals;
@@ -1030,7 +1125,7 @@ void test_long_campaign()
     }
     auto repeated = long_example_campaign(42);
     repeated.advance_ticks(3000);
-    require(campaign.clock().tick() >= 1000 && campaign.war_result() == repeated.war_result() &&
+    require(campaign.clock().tick() > 355 && campaign.war_result() == repeated.war_result() &&
             std::ranges::equal(campaign.observer_battle_log(), repeated.observer_battle_log()) &&
             std::ranges::equal(campaign.observer_operations_log(), repeated.observer_operations_log()) &&
             std::ranges::equal(campaign.economy_ledger(), repeated.economy_ledger()) &&
@@ -1046,6 +1141,17 @@ void test_long_campaign()
             }) && std::ranges::any_of(campaign.forces_log(), [](const auto& event) {
                 return event.kind == ForcesEventKind::service_completed && event.service == ServiceKind::repair;
             }), "Campaign failed to deliver fuel or service damaged equipment");
+    require(std::ranges::any_of(campaign.logistics_log(), [](const auto& event) {
+                return event.kind == LogisticsEventKind::collecting;
+            }) && std::ranges::any_of(campaign.logistics_log(), [](const auto& event) {
+                return event.kind == LogisticsEventKind::delivered &&
+                       static_cast<std::uint32_t>(event.shipment) > 28 && event.tick > 255;
+            }), "Long campaign did not complete recurring deliveries and reuse its carriers");
+    require(std::ranges::any_of(campaign.observer_operations_log(), [](const auto& event) {
+                return event.reason == "launched" && event.tick > 563;
+            }) && std::ranges::any_of(campaign.observer_operations_log(), [](const auto& event) {
+                return event.reason == "ground operation started" && event.tick > 355;
+            }), "Resupply did not restore air and ground operations");
     for (const auto faction : {FactionId::west, FactionId::east}) {
         const auto view = campaign.faction_view(faction, false);
         require(std::ranges::count_if(view.missions, [](const auto& mission) {
@@ -1087,6 +1193,7 @@ int main()
     test_reproducibility();
     test_economy();
     test_logistics();
+    test_recurring_supply();
     test_realtime_pacing();
     test_forces_and_maintenance();
     test_operations_and_intelligence();

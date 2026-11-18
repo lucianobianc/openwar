@@ -150,6 +150,8 @@ struct Carrier {
     std::uint64_t fuel;
     std::optional<ShipmentId> shipment{};
     bool lost = false;
+    // Zero uses the starting fuel as the tank capacity.
+    std::uint64_t tank_capacity = 0;
 };
 
 struct SupplyRequest {
@@ -162,6 +164,15 @@ struct SupplyRequest {
     std::optional<std::uint64_t> deadline{};
 };
 
+struct ResupplyPolicy {
+    StockpileId origin;
+    StockpileId destination;
+    Resource resource;
+    std::uint64_t threshold;
+    std::uint64_t target;
+    int priority = 0;
+};
+
 enum class ShipmentStatus { pending, loading, en_route, delayed, unloading, delivered, cancelled, lost };
 std::string_view shipment_status_name(ShipmentStatus status);
 
@@ -172,11 +183,13 @@ struct Shipment {
     std::optional<RouteId> edge{};
     std::uint32_t remaining_ticks = 0;
     std::uint64_t cargo = 0;
+    std::uint64_t pickup_fuel = 0;
 };
 
 enum class LogisticsEventKind {
-    requested, assigned, loaded, delayed, unloaded, delivered, cancelled, lost, arrived
+    requested, assigned, loaded, delayed, unloaded, delivered, cancelled, lost, arrived, collecting, refuelled
 };
+std::string_view logistics_event_name(LogisticsEventKind kind);
 
 struct LogisticsEvent {
     std::uint64_t tick;
@@ -310,6 +323,7 @@ struct ScenarioDefinition {
     std::vector<SectorId> public_sectors{};
     std::vector<VictoryObjective> victory_objectives{};
     std::vector<CommandObjectives> command_objectives{};
+    std::vector<ResupplyPolicy> resupply{};
 };
 
 class SimulationClock {
@@ -388,11 +402,24 @@ private:
     bool consume_at(StockpileId id, const ResourceAmounts& amounts, std::uint64_t tick,
                     std::optional<EquipmentId> equipment = {}, bool from_reservation = false);
     void initialize_logistics(const ScenarioDefinition& scenario);
+    void queue_supply(SupplyRequest request, std::uint64_t tick);
+    void request_replenishment(std::uint64_t tick);
+    void release_pickup_stock(Shipment& shipment);
     bool update_logistics(std::uint64_t tick);
     bool advance_shipment(Shipment& shipment, std::uint64_t tick,
                           std::map<RouteId, std::uint32_t>& available_slots);
     bool route_usable(const TransportRoute& route, FactionId faction) const;
-    std::optional<RouteId> next_route(SectorId from, SectorId to, FactionId faction) const;
+    struct TransportPath {
+        std::optional<RouteId> first{};
+        std::uint64_t ticks = 0;
+        std::uint64_t fuel = 0;
+    };
+    std::optional<TransportPath> transport_path(SectorId from, SectorId to, FactionId faction,
+                                                bool cheapest = false) const;
+    std::optional<TransportPath> reachable_transport_path(SectorId from, SectorId to, FactionId faction,
+                                                          std::uint64_t fuel) const;
+    std::optional<std::uint64_t> delivery_fuel(SectorId origin, SectorId destination, FactionId faction,
+                                              std::uint64_t budget) const;
     void initialize_forces(const ScenarioDefinition& scenario);
     bool update_forces(std::uint64_t tick);
     void set_equipment_status(Equipment& equipment, EquipmentStatus status, std::uint64_t tick);
@@ -433,6 +460,7 @@ private:
     std::map<CarrierId, Carrier> carriers_;
     std::map<ShipmentId, Shipment> shipments_;
     std::vector<LogisticsEvent> logistics_log_;
+    std::vector<ResupplyPolicy> resupply_;
     std::uint32_t loading_ticks_;
     std::uint32_t unloading_ticks_;
     std::map<EquipmentTypeId, EquipmentType> equipment_types_;

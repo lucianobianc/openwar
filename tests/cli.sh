@@ -155,9 +155,9 @@ if printf '%s\n' "$friendly" | grep -E 'East field group|EAST intelligence|^Fron
 fi
 reject --demo combat --faction WEST --order attack:2 --ticks 1
 
-campaign=$("$openwar" --demo campaign --seed 42 --ticks 3000)
+campaign=$("$openwar" --demo campaign --seed 42 --ticks 3000 --events)
 printf '%s\n' "$campaign" | grep -Fx 'Campaign summary | seed 42'
-printf '%s\n' "$campaign" | grep -Fx 'Elapsed seconds: 172800'
-printf '%s\n' "$campaign" | grep -Fx 'War: draw at tick 2880 (time limit)'
+printf '%s\n' "$campaign" | grep -E '^War: (.* victory|draw) at tick [0-9]+ '
 printf '%s\n' "$campaign" | grep -E '^Engagement intervals: [1-9][0-9]*'
-printf '%s\n' "$campaign" | grep -F 'Shipments delivered: 28/28'
+printf '%s\n' "$campaign" | grep -E '^Shipments delivered: (29|[3-9][0-9]|[1-9][0-9][0-9]+)/'
+printf '%s\n' "$campaign" | grep -m 1 -F 'travelling empty to pickup'

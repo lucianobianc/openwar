@@ -135,7 +135,7 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
     target.advance(ticks);
 
     bool economy_awake = !installations_.empty();
-    bool logistics_awake = !shipments_.empty();
+    bool logistics_awake = !shipments_.empty() || !resupply_.empty();
     bool forces_awake = !equipment_.empty();
     while (clock_.tick() < target.tick()) {
         const auto boundary_step = economy_interval_ticks_ - clock_.tick() % economy_interval_ticks_;
@@ -160,7 +160,8 @@ void CampaignState::advance_ticks(std::uint64_t ticks)
         }
         const auto step = next - clock_.tick();
         // Dispatch can use newly produced supplies starting on the following tick.
-        logistics_awake = logistics_awake && update_logistics(next);
+        logistics_awake = (logistics_awake || !resupply_.empty()) && update_logistics(next);
+        logistics_awake = logistics_awake || !resupply_.empty();
         economy_awake = economy_awake || (logistics_awake && !installations_.empty());
         bool produced_or_worked = false;
         if ((economy_awake || (combat_.enabled && !installations_.empty())) && step == boundary_step) {

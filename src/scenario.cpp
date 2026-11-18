@@ -270,6 +270,8 @@ CampaignState long_example_campaign(std::uint32_t seed)
         };
         shipment(air_stock, Resource::fuel, 80);
         shipment(air_stock, Resource::spare_parts, 18);
+        scenario.resupply.push_back({industry_stock, air_stock, Resource::fuel, 30, 80, 3});
+        scenario.resupply.push_back({industry_stock, air_stock, Resource::spare_parts, 4, 12, 2});
 
         const EquipmentTypeId armor{base + 1};
         const EquipmentTypeId scout{base + 2};
@@ -311,6 +313,12 @@ CampaignState long_example_campaign(std::uint32_t seed)
             shipment(stores, Resource::supplies, 8);
             shipment(stores, Resource::ammunition, 8);
             shipment(stores, Resource::fuel, 18);
+            scenario.resupply.insert(scenario.resupply.end(), {
+                {industry_stock, shop_stock, Resource::spare_parts, 2, 8, 2},
+                {industry_stock, stores, Resource::fuel, 10, 28, 3},
+                {industry_stock, stores, Resource::supplies, 8, 20, 3},
+                {industry_stock, stores, Resource::ammunition, 8, 20, 3}
+            });
             scenario.objectives.push_back({faction, crossings[lane], y == 3 ? 5u : 4u});
             scenario.objectives.push_back({faction, forward, 2});
         }

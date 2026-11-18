@@ -85,11 +85,16 @@ an in-memory ledger in application order.
 Run `./openwar --demo logistics --ticks 6` to deliver 80 liters of fuel to
 a second depot. Run `./openwar --demo logistics --ticks 16 --events` to see
 another 40 liters delivered after the refinery replenishes the origin.
-The scenario defines directed transport links separately
-from the sector grid. Carriers take the shortest usable route, spend fuel
-on each leg, and wait when all slots on a link are occupied. Requests compete
-for local stock and carriers by descending
-priority, earliest deadline, then request ID. Deadlines rank requests.
+The scenario defines directed transport links separately from the sector grid.
+Carriers use travel time to choose among usable routes and can take a cheaper
+route when fuel is limited. Every leg costs fuel and uses a route slot.
+Requests compete by descending priority, earliest deadline, then request ID.
+
+An idle carrier can travel empty to a new pickup, including a return to its
+previous pickup. Dispatch prefers a carrier already at the origin, then the
+shortest feasible pickup trip. Carriers refuel from unreserved fuel at the
+pickup depot when needed. Delivery leaves the vehicle at its arrival sector
+until it has another assignment.
 
 Loading reserves stock before moving it into a carrier. The destination
 accepts only what fits and the carrier keeps the remainder. A blockage
@@ -201,7 +206,12 @@ campaign at its terminal tick.
 The 9×7 scenario has three river crossings, rear industrial sites, forward
 workshops, and opposing armor and reconnaissance formations. Opening supply
 orders let the logistics system move factory output, ammunition, and fuel
-to the formations. The campaign holds additional vehicles in reserve.
+to the formations. Local resupply policies configure a threshold, target and
+priority by resource. A policy triggers when unreserved stock plus outstanding
+deliveries falls below the threshold. The new order is limited by physical
+free capacity after accounting for those deliveries. Ground stores stop
+generating demand when their formation is destroyed or surrenders. The
+campaign holds additional vehicles in reserve.
 
 Victory by objective requires holding all three crossings and an operational
 enemy relay for two simulated hours. The normal capitulation rules also

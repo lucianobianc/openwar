@@ -274,12 +274,13 @@ int main(int argc, char* argv[])
         const auto perspective = operations_view || demo == Demo::campaign ?
             std::optional{faction.value_or(openwar::FactionId::neutral)} : std::nullopt;
         if (!ticks || speed || legacy_realtime) {
-            openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events, perspective);
+            openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events, perspective,
+                                       demo == Demo::campaign);
         } else {
             campaign.advance_ticks(*ticks);
             if (demo == Demo::campaign) {
                 if (events) {
-                    openwar::cli::print_operations_events(campaign, openwar::FactionId::neutral);
+                    openwar::cli::print_operations_events(campaign, openwar::FactionId::neutral, true);
                 }
             } else if (perspective) {
                 openwar::cli::print_operations(campaign, *perspective, events);

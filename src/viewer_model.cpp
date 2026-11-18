@@ -41,22 +41,6 @@ Event operation_event(const OperationsEvent& event)
     return {event.tick, std::string(event.reason) + " / " + label, event.sequence};
 }
 
-std::string_view shipment_event_name(LogisticsEventKind kind)
-{
-    switch (kind) {
-    case LogisticsEventKind::requested: return "requested";
-    case LogisticsEventKind::assigned: return "assigned";
-    case LogisticsEventKind::loaded: return "loaded";
-    case LogisticsEventKind::delayed: return "delayed";
-    case LogisticsEventKind::unloaded: return "unloaded";
-    case LogisticsEventKind::delivered: return "delivered";
-    case LogisticsEventKind::cancelled: return "cancelled";
-    case LogisticsEventKind::lost: return "lost";
-    case LogisticsEventKind::arrived: return "arrived";
-    }
-    return {};
-}
-
 }  // namespace
 
 Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> perspective)
@@ -141,7 +125,7 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
     for (const auto& event : recent(campaign.logistics_log())) {
         snapshot.events.push_back({
             event.tick, "Shipment " + std::to_string(static_cast<std::uint32_t>(event.shipment)) +
-                " / " + std::string(shipment_event_name(event.kind)), event.sequence
+                " / " + std::string(logistics_event_name(event.kind)), event.sequence
         });
     }
     for (const auto& event : recent(campaign.economy_ledger())) {
