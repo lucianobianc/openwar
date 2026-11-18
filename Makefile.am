@@ -5,7 +5,8 @@ noinst_LIBRARIES = libcampaign.a
 libcampaign_a_SOURCES = src/campaign.cpp src/campaign.hpp src/economy.cpp \
 	src/logistics.cpp src/forces.cpp src/scenario.cpp src/scenario.hpp src/scenario_config.cpp src/geographic_scenario.cpp src/intelligence.cpp \
 	src/operations.cpp src/operations.hpp src/strategy.cpp src/combat.cpp src/combat.hpp src/territory.cpp src/persistence.cpp \
-	src/geographic_movement.cpp src/geographic_movement.hpp
+	src/geographic_movement.cpp src/geographic_movement.hpp \
+	src/command.cpp src/command.hpp src/viewer_model.cpp src/viewer_model.hpp
 
 bin_PROGRAMS = openwar
 openwar_SOURCES = src/main.cpp src/realtime.cpp src/realtime.hpp
@@ -25,13 +26,12 @@ TESTS = campaign-tests$(EXEEXT) tests/cli.sh geographic-movement-tests$(EXEEXT)
 
 if BUILD_VIEWER
 bin_PROGRAMS += openwar-gui
-openwar_gui_SOURCES = src/viewer.cpp src/viewer_model.cpp src/viewer_model.hpp \
-	src/viewer_geography.cpp src/viewer_geography.hpp
+openwar_gui_SOURCES = src/viewer.cpp src/viewer_geography.cpp src/viewer_geography.hpp
 openwar_gui_CPPFLAGS = $(AM_CPPFLAGS) $(RAYLIB_CFLAGS)
 openwar_gui_LDADD = libcampaign.a $(RAYLIB_LIBS)
 
 check_PROGRAMS += viewer-model-tests
-viewer_model_tests_SOURCES = tests/viewer_model.cpp src/viewer_model.cpp src/viewer_model.hpp
+viewer_model_tests_SOURCES = tests/viewer_model.cpp
 viewer_model_tests_LDADD = libcampaign.a
 TESTS += viewer-model-tests$(EXEEXT)
 else

@@ -1,3 +1,4 @@
+#include "command.hpp"
 #include "viewer_geography.hpp"
 #include "viewer_model.hpp"
 #include "realtime.hpp"
@@ -66,10 +67,25 @@ Layout layout()
     return screen;
 }
 
+struct OrderDraft {
+    OrderAction action;
+    std::optional<OrderTarget> target{};
+    geography::Point pin{};
+    SectorId sector{};
+};
+
+struct CommandFeedback {
+    std::string message;
+    bool accepted;
+};
+
 struct ViewControls {
     std::optional<FactionId> perspective;
     std::optional<SectorId> selected;
     std::optional<Selection> object;
+    std::optional<OrderDraft> draft;
+    std::optional<MarkerKey> cancel_prompt;
+    std::optional<CommandFeedback> feedback;
     std::array<bool, layer_count> layers{false, true, true, true, true, true, true};
     Camera2D camera{};
     bool panning = false;
@@ -222,11 +238,11 @@ void select_at(ViewControls& controls, const Snapshot& snapshot, const Geographi
     controls.object = (current == hits.end() || std::next(current) == hits.end()) ? hits.front() : *std::next(current);
 }
 
-void handle_playback(ViewControls& controls, const Layout& screen, bool ended)
+void handle_playback(ViewControls& controls, const Layout& screen, bool ended, bool observer)
 {
     constexpr std::array<std::optional<FactionId>, 3> perspectives{{{}, FactionId::west, FactionId::east}};
     constexpr std::array keys{KEY_ONE, KEY_TWO, KEY_THREE};
-    for (std::size_t i = 0; i < perspectives.size(); ++i) {
+    for (std::size_t i = 0; observer && i < perspectives.size(); ++i) {
         if ((clicked(screen.perspective[i]) || IsKeyPressed(keys[i])) && controls.perspective != perspectives[i]) {
             controls.perspective = perspectives[i];
             controls.object.reset();
@@ -243,6 +259,33 @@ void handle_playback(ViewControls& controls, const Layout& screen, bool ended)
     if (clicked(screen.faster) || IsKeyPressed(KEY_RIGHT_BRACKET)) {
         controls.speed = std::min(3840u, controls.speed * 2);
     }
+}
+
+void choose_destination(ViewControls& controls, const Snapshot& snapshot, const GeographicLayers& geography,
+                        Vector2 mouse)
+{
+    const auto point = GetScreenToWorld2D(mouse, controls.camera);
+    if (!sector_at(snapshot, point)) {
+        return;
+    }
+    const auto sector_mm = std::int64_t{snapshot.sector_size_m} * 1000;
+    const auto east = std::min(std::llround(point.x * 1000.0),
+                              static_cast<long long>(snapshot.width * sector_mm - 1));
+    const auto south = std::min(std::llround(point.y * 1000.0),
+                               static_cast<long long>(snapshot.height * sector_mm - 1));
+    const auto sector = SectorId{static_cast<std::uint32_t>(south / sector_mm) * snapshot.width +
+                                 static_cast<std::uint32_t>(east / sector_mm)};
+    auto& draft = *controls.draft;
+    draft.sector = sector;
+    if (draft.action.geographic_destination) {
+        const auto tile = geography.tile_at(point);
+        draft.pin = {east, south, tile ? tile->elevation : 0};
+        draft.target = draft.pin;
+    } else {
+        draft.pin = snapshot.sector_center(sector);
+        draft.target = sector;
+    }
+    controls.feedback.reset();
 }
 
 void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const GeographicLayers& geography,
@@ -286,7 +329,12 @@ void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const Ge
             controls.panning = true;
         }
         if (clicked(screen.map)) {
-            select_at(controls, snapshot, geography, mouse);
+            if (controls.draft) {
+                choose_destination(controls, snapshot, geography, mouse);
+            } else {
+                controls.cancel_prompt.reset();
+                select_at(controls, snapshot, geography, mouse);
+            }
         }
     }
     if (controls.panning) {
@@ -298,6 +346,92 @@ void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const Ge
     const float step = 450 * GetFrameTime() / controls.camera.zoom;
     controls.camera.target.x += step * (IsKeyDown(KEY_RIGHT) - IsKeyDown(KEY_LEFT));
     controls.camera.target.y += step * (IsKeyDown(KEY_DOWN) - IsKeyDown(KEY_UP));
+}
+
+Rectangle action_button(Rectangle panel, std::size_t index)
+{
+    return {panel.x + 15 + static_cast<float>(index % 3) * 107,
+            panel.y + 159 + static_cast<float>(index / 3) * 32, 103, 29};
+}
+
+Rectangle review_button(Rectangle panel, bool confirm)
+{
+    return {panel.x + (confirm ? 148 : 15), panel.y + 192, confirm ? 184.f : 123.f, 32};
+}
+
+Rectangle cancel_mission_button(Rectangle area)
+{
+    return {area.x + 15, area.y + 159, 146, 29};
+}
+
+std::string action_label(MissionKind kind)
+{
+    switch (kind) {
+    case MissionKind::recon: return "Recon";
+    case MissionKind::patrol: return "Patrol";
+    case MissionKind::defend: return "Defend";
+    case MissionKind::reposition: return "Reposition";
+    case MissionKind::attack: return "Attack";
+    }
+    return {};
+}
+
+bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rectangle panel,
+                          CommandSession& session)
+{
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        return false;
+    }
+    if (controls.draft || controls.cancel_prompt) {
+        if (clicked(review_button(panel, false))) {
+            controls.draft.reset();
+            controls.cancel_prompt.reset();
+            controls.feedback.reset();
+            return false;
+        }
+        if (!clicked(review_button(panel, true))) {
+            return false;
+        }
+        if (controls.cancel_prompt) {
+            const auto key = *controls.cancel_prompt;
+            const auto result = session.cancel(*key.faction, MissionId{key.id});
+            controls.cancel_prompt.reset();
+            controls.feedback = CommandFeedback{std::string(result.reason), result.cancelled};
+            return result.cancelled;
+        }
+        if (!controls.draft->target) {
+            return false;
+        }
+        const auto result = session.submit(controls.draft->action.kind, *controls.draft->target);
+        if (!result.mission) {
+            controls.feedback = CommandFeedback{std::string(result.reason), false};
+            return false;
+        }
+        const auto id = static_cast<std::uint32_t>(*result.mission);
+        controls.feedback = CommandFeedback{"Order #" + std::to_string(id) + " scheduled", true};
+        controls.selected = controls.draft->sector;
+        controls.object = MarkerKey{MarkerKind::mission, session.permissions().faction, id};
+        controls.draft.reset();
+        return true;
+    }
+    if (const auto* marker = selected_marker(snapshot, controls)) {
+        if (marker->kind == MarkerKind::unit) {
+            const auto actions = session.actions_for(UnitId{marker->id});
+            for (std::size_t i = 0; i < actions.size(); ++i) {
+                if (clicked(action_button(panel, i))) {
+                    controls.draft = OrderDraft{actions[i]};
+                    controls.feedback.reset();
+                    break;
+                }
+            }
+        } else if (marker->kind == MarkerKind::mission && marker->faction &&
+                   session.can_cancel(*marker->faction, MissionId{marker->id}) &&
+                   clicked(cancel_mission_button(panel))) {
+            controls.cancel_prompt = marker->key();
+            controls.feedback.reset();
+        }
+    }
+    return false;
 }
 
 Color faction_color(std::optional<FactionId> faction)
@@ -472,6 +606,12 @@ void draw_map(const Snapshot& snapshot, const ViewControls& controls, const Geog
             }
         }
     }
+    if (controls.draft && controls.draft->target) {
+        const auto pin = GetWorldToScreen2D(map_position(controls.draft->pin), controls.camera);
+        DrawCircleLines(std::lround(pin.x), std::lround(pin.y), 10, accent);
+        DrawLineV({pin.x - 14, pin.y}, {pin.x + 14, pin.y}, accent);
+        DrawLineV({pin.x, pin.y - 14}, {pin.x, pin.y + 14}, accent);
+    }
     EndScissorMode();
     DrawRectangleLinesEx(map, 1, border);
 
@@ -504,12 +644,40 @@ std::string position_text(geography::Point point, bool include_elevation)
 }
 
 void draw_details(const Snapshot& snapshot, const ViewControls& controls, const GeographicLayers& geography,
-                  Rectangle area)
+                  const CommandSession& session, Rectangle area)
 {
     DrawRectangleRec(area, panel);
     const float x = area.x + 15;
     float y = area.y + 14;
     const float width = area.width - 30;
+    if (controls.draft) {
+        const auto& draft = *controls.draft;
+        label(action_label(draft.action.kind) + " order draft", x, y, 21, ink, width);
+        label("The engine assigns an eligible formation.", x, y + 34, 14, muted, width);
+        if (draft.target) {
+            const auto id = static_cast<std::uint32_t>(draft.sector);
+            const auto& tile = snapshot.tiles.at(id);
+            const auto owner = tile.controller ? std::string(faction_name(*tile.controller)) : "Unknown";
+            label("Target sector " + std::to_string(id) + " / " + owner, x, y + 71, 17, accent, width);
+            if (draft.action.geographic_destination) {
+                label(position_text(draft.pin, geography.has_source_attribution()), x, y + 99, 15, ink, width);
+            }
+            label("Click the map to change the destination.", x, y + 132, 14, muted, width);
+            button(review_button(area, true), "Confirm order", true);
+        } else {
+            label(draft.action.geographic_destination ? "Click a destination on the map." :
+                  "Click the target sector on the map.", x, y + 71, 16, accent, width);
+        }
+        button(review_button(area, false), "Discard draft");
+        return;
+    }
+    if (controls.cancel_prompt) {
+        label("Cancel mission #" + std::to_string(controls.cancel_prompt->id) + "?", x, y, 21, ink, width);
+        label("Resources already used remain spent.", x, y + 39, 15, muted, width);
+        button(review_button(area, false), "Back");
+        button(review_button(area, true), "Confirm cancellation", true);
+        return;
+    }
     if (const auto* marker = selected_marker(snapshot, controls)) {
         constexpr std::array kinds{"Formation", "Contact", "Carrier", "Installation", "Stockpile", "Mission"};
         label(marker->label, x, y, 21, ink, width);
@@ -521,6 +689,18 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
         label(position_text(marker->position, !marker->estimated), x, y + 78, 15, ink, width);
         label(marker->detail, x, y + 112, 15, ink, width);
         label(marker->movement, x, y + 135, 15, muted, width);
+        if (marker->kind == MarkerKind::unit && session.permissions().faction == marker->faction) {
+            const auto actions = session.actions_for(UnitId{marker->id});
+            for (std::size_t i = 0; i < actions.size(); ++i) {
+                button(action_button(area, i), action_label(actions[i].kind).c_str());
+            }
+            if (session.permissions().may_issue_orders && actions.empty()) {
+                label("No orders available from this formation.", x, y + 159, 14, muted, width);
+            }
+        } else if (marker->kind == MarkerKind::mission && marker->faction &&
+                   session.can_cancel(*marker->faction, MissionId{marker->id})) {
+            button(cancel_mission_button(area), "Cancel mission");
+        }
         return;
     }
     if (const auto feature = selected_feature(controls)) {
@@ -594,6 +774,21 @@ void draw_events(const Snapshot& snapshot, const ViewControls& controls, Rectang
     DrawRectangleRec(area, panel);
     label("Campaign events", area.x + 15, area.y + 14, 21, ink, area.width - 30);
     float y = area.y + 48;
+    if (controls.feedback) {
+        const auto color = controls.feedback->accepted ? accent : Color{255, 157, 164, 255};
+        std::istringstream words(controls.feedback->message);
+        std::string word, line;
+        while (words >> word) {
+            if (!line.empty() && MeasureText((line + " " + word).c_str(), 14) > area.width - 30) {
+                label(line, area.x + 15, y, 14, color, area.width - 30);
+                y += 19;
+                line.clear();
+            }
+            line += line.empty() ? word : " " + word;
+        }
+        label(line, area.x + 15, y, 14, color, area.width - 30);
+        y += 26;
+    }
     if (snapshot.events.empty()) {
         label("No events reported", area.x + 15, y, 16, muted, area.width - 30);
         return;
@@ -608,15 +803,20 @@ void draw_events(const Snapshot& snapshot, const ViewControls& controls, Rectang
 }
 
 void draw(const Snapshot& snapshot, const ViewControls& controls, const GeographicLayers& geography,
-          const TerritoryLayer& control, const Layout& screen, bool ended)
+          const TerritoryLayer& control, const CommandSession& session, const Layout& screen, bool ended)
 {
     BeginDrawing();
     ClearBackground(background);
     label("OpenWar", 16, 15, 27, ink, 170);
     label("Campaign viewer", 166, 22, 17, muted, 185);
-    button(screen.perspective[0], "Observer", !controls.perspective);
-    button(screen.perspective[1], "WEST", controls.perspective == FactionId::west);
-    button(screen.perspective[2], "EAST", controls.perspective == FactionId::east);
+    if (const auto faction = session.permissions().faction) {
+        label(std::string(faction_name(*faction)) + " command", screen.perspective.front().x,
+              23, 17, accent, 275);
+    } else {
+        button(screen.perspective[0], "Observer", !controls.perspective);
+        button(screen.perspective[1], "WEST", controls.perspective == FactionId::west);
+        button(screen.perspective[2], "EAST", controls.perspective == FactionId::east);
+    }
     button(screen.play, ended ? "Ended" : controls.paused ? "Resume" : "Pause");
     button(screen.slower, "-");
     button(screen.faster, "+");
@@ -630,7 +830,7 @@ void draw(const Snapshot& snapshot, const ViewControls& controls, const Geograph
         button(screen.layers[i], layer_names[i], controls.layers[i]);
     }
     draw_map(snapshot, controls, geography, control, screen.map);
-    draw_details(snapshot, controls, geography, screen.details);
+    draw_details(snapshot, controls, geography, session, screen.details);
     draw_events(snapshot, controls, screen.events);
     const auto y = static_cast<int>(screen.map.y + screen.map.height + 11);
     const auto mouse = GetMousePosition();
@@ -668,20 +868,23 @@ public:
             throw std::runtime_error("Could not open the viewer window");
         }
         SetWindowMinSize(800, 580);
+        SetExitKey(KEY_NULL);
         SetTargetFPS(60);
     }
 
     ~Window() { CloseWindow(); }
 };
 
-void run(CampaignState& campaign)
+void run(CampaignState& campaign, std::optional<FactionId> faction)
 {
     using Clock = std::chrono::steady_clock;
     const Window window;
     const GeographicLayers geography(campaign.geographic_world(), campaign.world());
     TerritoryLayer territory_layer;
     ViewControls controls;
-    auto snapshot = read_snapshot(campaign, controls.perspective);
+    controls.perspective = faction;
+    CommandSession session(campaign, faction);
+    auto snapshot = session.snapshot(controls.perspective);
     territory_layer.update(snapshot);
     fit_map(controls, snapshot, layout().map);
     auto previous = Clock::now();
@@ -690,6 +893,14 @@ void run(CampaignState& campaign)
     const auto remaining_ticks = std::numeric_limits<std::uint64_t>::max() / tick_seconds - initial_tick;
     std::chrono::duration<long double> simulated{};
     while (!WindowShouldClose()) {
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            if (!controls.draft && !controls.cancel_prompt) {
+                break;
+            }
+            controls.draft.reset();
+            controls.cancel_prompt.reset();
+            controls.feedback.reset();
+        }
         const auto now = Clock::now();
         if (!controls.paused && !campaign.war_ended()) {
             simulated += std::chrono::duration<long double>(now - previous) * controls.speed;
@@ -702,9 +913,9 @@ void run(CampaignState& campaign)
         previous = now;
         const auto screen = layout();
         const auto old_perspective = controls.perspective;
-        handle_playback(controls, screen, campaign.war_ended());
+        handle_playback(controls, screen, campaign.war_ended(), !faction);
         if (snapshot.tick != campaign.clock().tick() || old_perspective != controls.perspective) {
-            snapshot = read_snapshot(campaign, controls.perspective);
+            snapshot = session.snapshot(controls.perspective);
             territory_layer.update(snapshot);
             controls.event_offset = std::min(controls.event_offset,
                 snapshot.events.empty() ? std::size_t{0} : snapshot.events.size() - 1);
@@ -718,7 +929,11 @@ void run(CampaignState& campaign)
             controls.object.reset();
         }
         handle_map_input(controls, snapshot, geography, screen);
-        draw(snapshot, controls, geography, territory_layer, screen, campaign.war_ended());
+        if (handle_command_input(controls, snapshot, screen.details, session)) {
+            snapshot = session.snapshot(controls.perspective);
+            controls.event_offset = 0;
+        }
+        draw(snapshot, controls, geography, territory_layer, session, screen, campaign.war_ended());
     }
 }
 
@@ -732,6 +947,7 @@ int main(int argc, char* argv[])
         std::optional<std::filesystem::path> load_path;
         std::optional<std::filesystem::path> save_path;
         std::optional<std::string_view> demo;
+        std::optional<FactionId> faction;
         const auto select = [&](std::string_view selection) {
             if (demo && demo != selection) {
                 throw std::invalid_argument("Select one demonstration scenario");
@@ -742,17 +958,28 @@ int main(int argc, char* argv[])
             const std::string_view option = argv[i];
             if (option == "--help") {
                 std::cout << "Usage: openwar-gui [--demo NAME | --scenario FILE | --load FILE] "
-                             "[--seed N] [--save FILE]\n"
+                             "[--seed N] [--faction WEST|EAST] [--save FILE]\n"
                              "Demos: combat, operations, campaign, procedural.\n"
                              "Use --load to resume and --save to write a checkpoint when the window closes.\n";
                 return 0;
             }
             if ((option != "--seed" && option != "--demo" && option != "--scenario" &&
-                option != "--load" && option != "--save") || i + 1 == argc) {
-                throw std::invalid_argument("Expected --demo, --scenario, --seed, --load or --save with a value");
+                option != "--load" && option != "--save" && option != "--faction") || i + 1 == argc) {
+                throw std::invalid_argument("Expected --demo, --scenario, --seed, --load, --save or --faction with a value");
             }
             const std::string_view value = argv[++i];
-            if (option == "--demo") {
+            if (option == "--faction") {
+                if (faction) {
+                    throw std::invalid_argument("Specify one command faction");
+                }
+                if (value == "WEST" || value == "west") {
+                    faction = FactionId::west;
+                } else if (value == "EAST" || value == "east") {
+                    faction = FactionId::east;
+                } else {
+                    throw std::invalid_argument("Faction must be WEST or EAST");
+                }
+            } else if (option == "--demo") {
                 if (value != "combat" && value != "operations" && value != "campaign" && value != "procedural") {
                     throw std::invalid_argument("Unknown viewer demonstration");
                 }
@@ -790,7 +1017,7 @@ int main(int argc, char* argv[])
                 const auto seed = seed_override.value_or(0);
                 if (seed > UINT32_MAX)
                     throw std::out_of_range("Seed must fit in 32 bits");
-                return CampaignState(read_geographic_scenario(*scenario_path), static_cast<std::uint32_t>(seed));
+                return CampaignState(read_geographic_scenario(*scenario_path, faction), static_cast<std::uint32_t>(seed));
             }
             auto settings = scenario_path ? read_procedural_settings(*scenario_path) : ProceduralSettings{};
             settings.seed = seed_override.value_or(settings.seed);
@@ -806,11 +1033,14 @@ int main(int argc, char* argv[])
                 return long_example_campaign(seed);
             }
             if (scenario == "combat") {
-                return CampaignState(combat_example_scenario(), seed);
+                return CampaignState(combat_example_scenario(faction), seed);
             }
-            return operations_example_campaign(seed);
+            return operations_example_campaign(seed, faction);
         }();
-        run(campaign);
+        if (faction && (!campaign.has_operational_view() || campaign.player_faction() != faction)) {
+            throw std::invalid_argument("Campaign does not grant command authority to that faction");
+        }
+        run(campaign, faction);
         if (save_path) {
             campaign.save(*save_path);
         }

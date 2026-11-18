@@ -263,6 +263,26 @@ A geometria do mundo continua contínua. Em zoom afastado, a interface pode redu
 
 ## 6. Seleção, inspeção e edição operacional
 
+### Phase 1 implementation
+
+The standalone viewer and CLI submit existing orders through the headless
+`CommandSession`. It exposes a filtered snapshot, command permissions,
+formation actions and cancellation eligibility. A command session reads
+its own faction. Observer sessions may change their inspection perspective.
+
+The viewer keeps one local draft with a mission type and destination.
+Selecting a friendly formation offers actions it is equipped to perform.
+On confirmation the campaign validates current authority, resources and
+intelligence, then assigns a participant using the existing mission rules.
+Choosing a geographic point submits a ground attack or ground defense.
+Sector-based actions use the clicked strategic sector. Cancelling a
+mission follows the same eligibility rule as the CLI, with a separate
+confirmation in the viewer.
+
+This phase implements draft review with destination and known control.
+Route estimates and configurable waypoints remain part of the later
+planning interface described below.
+
 ### 6.1 Seleção
 
 Um clique seleciona unidade, contato, ponto geográfico, via ou instalação visível. O painel deve comunicar `tipo`, `fonte`, `última atualização`, `situação conhecida` e `ações possíveis`. Seleção múltipla pode agrupar ordens compatíveis; operações sobre entidades de facções distintas são rejeitadas. Em áreas de sobreposição visual, oferecer menu de candidatos filtrados e ordenados estavelmente.

@@ -445,6 +445,32 @@ viewer glyphs pending the official APP-6 renderer. The viewer advances the
 same campaign engine in whole simulated ticks and supports the CLI's
 checkpoint format with `--load` and `--save`.
 
+### Issue orders from the map
+
+Start a new geographic, combat, or operations campaign with a command faction.
+
+```sh
+./openwar-gui --scenario examples/connecticut-valley/valley-demo.owscenario \
+    --faction WEST --save valley.ows
+./openwar-gui --load valley.ows --faction WEST
+```
+
+The selected command faction fixes the session's perspective. Opening the
+viewer without `--faction` starts a read-only observer session. A loaded
+checkpoint grants authority to its saved command faction.
+
+Select an eligible friendly formation and choose one of its available order
+types. Click the map for a destination. Attack and ground defense use the
+clicked position. Recon, patrol, sector-based defense, and repositioning use
+the clicked sector. Review the draft and click **Confirm order**. The engine
+assigns the participant using its existing rules. With a draft open, Escape
+discards it. To cancel an existing order, select its mission marker and use
+**Cancel mission** when the action is available.
+
+The CLI uses the same command boundary. Use `--order TYPE:SECTOR` for a
+sector goal and `--ground-order TYPE:EAST,SOUTH,UP` for a ground position in
+local millimetres. The CLI's `--cancel ID` applies to the command faction.
+
 ## Roadmap
 
 1. M0 — Core. Clock, world, sectors, and factions.

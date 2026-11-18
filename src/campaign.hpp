@@ -415,8 +415,11 @@ public:
     void set_facility_conditions(FacilityId id, bool operational, std::uint32_t technicians);
     FactionView faction_view(FactionId faction, bool include_events = true) const;
     std::span<const OperationsEvent> observer_operations_log() const { return operations_log_; }
+    bool can_issue_orders(FactionId actor) const;
+    std::vector<MissionKind> available_orders(FactionId actor, UnitId unit) const;
     OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target);
     OrderResult issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination);
+    bool can_cancel_order(FactionId actor, MissionId id) const;
     bool cancel_order(FactionId actor, MissionId id);
     bool combat_enabled() const { return combat_.enabled; }
     bool war_ended() const;
@@ -525,6 +528,7 @@ private:
     geography::Route legacy_ground_route(geography::Point origin, std::span<const SectorId> steps,
                                          geography::Point destination, std::uint32_t speed) const;
     std::uint32_t ground_speed(UnitId id) const;
+    std::optional<EquipmentId> ground_order_equipment(UnitId unit, MissionKind kind) const;
     bool ground_opposition(SectorId sector, FactionId faction) const;
     enum class GroundStep { no_fuel, blocked, travelling, arrived };
     GroundStep advance_ground(CombatUnit& unit, GroundJourney& journey, bool withdrawing);

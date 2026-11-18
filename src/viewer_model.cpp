@@ -17,18 +17,19 @@ std::span<const Entry> recent(std::span<const Entry> events)
     return events.last(std::min(events.size(), event_limit));
 }
 
-void add_missions(Snapshot& snapshot, const FactionView& view)
+void add_missions(Snapshot& snapshot, const CampaignState& campaign, const FactionView& view)
 {
     for (const auto& mission : view.missions) {
         if (mission.status != MissionStatus::scheduled && mission.status != MissionStatus::preparing &&
             mission.status != MissionStatus::in_progress) {
             continue;
         }
+        const auto assigned = campaign.equipment().at(mission.equipment).assignment.unit;
         snapshot.markers.push_back({
             mission.target, MarkerKind::mission, mission.faction, static_cast<std::uint32_t>(mission.id),
             mission.ground_destination.value_or(snapshot.sector_center(mission.target)), !mission.ground_destination,
             std::string(mission_name(mission.kind)) + " #" + std::to_string(static_cast<std::uint32_t>(mission.id)),
-            std::string(mission_status_name(mission.status))
+            std::string(mission_status_name(mission.status)), "Assigned to " + campaign.units().at(assigned).name
         });
     }
 }
@@ -183,7 +184,7 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
                 std::string(confidence_name(site.confidence)) + " / tick " + std::to_string(site.observed_tick)
             });
         }
-        add_missions(snapshot, view);
+        add_missions(snapshot, campaign, view);
         for (const auto& event : recent(std::span<const OperationsEvent>{view.events})) {
             snapshot.events.push_back(operation_event(event));
         }
@@ -192,7 +193,7 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
 
     if (campaign.has_operational_view()) {
         for (auto faction : {FactionId::west, FactionId::east}) {
-            add_missions(snapshot, campaign.faction_view(faction, false));
+            add_missions(snapshot, campaign, campaign.faction_view(faction, false));
         }
     }
     for (const auto& event : recent(campaign.logistics_log())) {

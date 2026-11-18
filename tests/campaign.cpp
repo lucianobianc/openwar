@@ -1,4 +1,5 @@
 #include "campaign.hpp"
+#include "command.hpp"
 #include "realtime.hpp"
 #include "scenario.hpp"
 
@@ -659,6 +660,53 @@ void test_forces_and_maintenance()
                      {UnitId{2}, "East", FactionId::east, SectorId{2}}};
     require_throws<std::invalid_argument>([&] { CampaignState state(invalid, 42); },
                                           "Cross-faction organizational ownership accepted");
+}
+
+void test_command_session()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr UnitId formation{1}, opposing_formation{2};
+    const auto setup = combat_example_scenario(west);
+    CampaignState campaign(setup, 42), direct(setup, 42);
+    CommandSession observer(campaign), commander(campaign, west), opposing(campaign, east);
+    const auto initial = commander.snapshot(east);
+    require(commander.permissions().may_issue_orders && commander.permissions().faction == west &&
+            !observer.permissions().may_issue_orders && !opposing.permissions().may_issue_orders &&
+            observer.actions_for(formation).empty() && commander.actions_for(opposing_formation).empty() &&
+            !observer.submit(MissionKind::attack, SectorId{1}).mission &&
+            !opposing.submit(MissionKind::attack, SectorId{1}).mission,
+            "Observer or opposing commander obtained order permissions");
+    require(std::ranges::any_of(initial.markers, [west](const auto& marker) { return marker.faction == west; }) &&
+            std::ranges::none_of(initial.markers, [east](const auto& marker) { return marker.faction == east; }) &&
+            std::ranges::any_of(observer.snapshot(east).markers, [east](const auto& marker) { return marker.faction == east; }),
+            "Command perspective switched factions or observer inspection was lost");
+    require_throws<std::invalid_argument>([&] { (void)opposing.snapshot(); }, "Unauthorized command snapshot was exposed");
+    const auto actions = commander.actions_for(formation);
+    require(actions.size() == 2 && std::ranges::all_of(actions, &OrderAction::geographic_destination) &&
+            std::ranges::any_of(actions, [](const auto& action) { return action.kind == MissionKind::attack; }),
+            "Ground formation did not offer its supported geographic commands");
+    const auto rejected = commander.submit(MissionKind::attack, SectorId{2});
+    const auto expected = direct.issue_order(west, MissionKind::attack, SectorId{2});
+    require(!rejected.mission && rejected.reason == expected.reason &&
+            campaign.faction_view(west).events.empty() && campaign.faction_view(west).missions.empty(),
+            "Rejected command changed state or supplied a different intelligence diagnostic");
+    constexpr geography::Point destination{751'000, 251'000, 0};
+    const auto order = commander.submit(MissionKind::attack, destination);
+    const auto direct_order = direct.issue_ground_order(west, MissionKind::attack, destination);
+    require(order.mission && order.mission == direct_order.mission &&
+            campaign.faction_view(west).missions == direct.faction_view(west).missions &&
+            campaign.faction_view(west).missions.back().ground_destination == destination &&
+            commander.actions_for(formation).empty(), "Command submission changed assignment or geographic validation");
+    const auto id = *order.mission;
+    require(commander.can_cancel(west, id) && !commander.can_cancel(east, id) &&
+            !commander.cancel(east, id).cancelled && !observer.cancel(west, id).cancelled &&
+            commander.cancel(west, id).cancelled && !commander.cancel(west, id).cancelled &&
+            campaign.faction_view(west).missions.back().status == MissionStatus::cancelled &&
+            !commander.actions_for(formation).empty(), "Cancellation bypassed its role or failed to release availability");
+    require(std::ranges::none_of(commander.snapshot().markers, [](const auto& marker) {
+        return marker.kind == viewer::MarkerKind::mission;
+    }), "Same-tick snapshot retained a cancelled mission marker");
 }
 
 void test_operations_and_intelligence()
@@ -2654,6 +2702,7 @@ int main()
     test_realtime_pacing();
     test_forces_and_maintenance();
     test_operations_and_intelligence();
+    test_command_session();
     test_recon_revisit();
     test_mission_preparation_reservation();
     test_destroyed_reinforcement();

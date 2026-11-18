@@ -1,4 +1,5 @@
 #include "scenario.hpp"
+#include "command.hpp"
 #include "realtime.hpp"
 
 #include <charconv>
@@ -26,6 +27,7 @@ Options
   --seed N     Override the seed (32-bit for fixed demos, 64-bit for procedural).
   --faction WEST|EAST  Use one faction's view in an operational checkpoint or demo.
   --order TYPE:SECTOR  Queue a recon, patrol, defend, reposition, or attack order.
+  --ground-order TYPE:EAST,SOUTH,UP  Submit a ground order at a point in millimetres.
   --cancel ID         Cancel an eligible order before advancing time.
   --help       Show this help.
 
@@ -110,21 +112,51 @@ std::uint64_t parse_number(std::string_view text, std::string_view option)
     return value;
 }
 
-void apply_order(openwar::CampaignState& campaign, openwar::FactionId faction, std::string_view order)
+openwar::geography::Point parse_ground_target(std::string_view coordinates)
+{
+    openwar::geography::Point point;
+    for (auto* axis : {&point.east, &point.south, &point.elevation}) {
+        if (coordinates.empty()) {
+            throw std::invalid_argument("Expected ground coordinates EAST,SOUTH,UP in millimetres");
+        }
+        const auto separator = coordinates.find(',');
+        if ((axis == &point.elevation) != (separator == std::string_view::npos)) {
+            throw std::invalid_argument("Expected ground coordinates EAST,SOUTH,UP in millimetres");
+        }
+        const auto component = coordinates.substr(0, separator);
+        const auto end = component.data() + component.size();
+        const auto result = std::from_chars(component.data(), end, *axis);
+        if (result.ec != std::errc{} || result.ptr != end) {
+            throw std::invalid_argument("Invalid ground coordinate in millimetres");
+        }
+        if (separator != std::string_view::npos) {
+            coordinates.remove_prefix(separator + 1);
+        }
+    }
+    return point;
+}
+
+void apply_order(openwar::CommandSession& session, std::string_view order, bool geographic)
 {
     using namespace openwar;
     const auto separator = order.find(':');
     if (separator == std::string_view::npos) {
-        throw std::invalid_argument("Expected order TYPE:SECTOR");
+        throw std::invalid_argument(geographic ? "Expected ground order TYPE:EAST,SOUTH,UP" : "Expected order TYPE:SECTOR");
     }
-    const auto sector = parse_number(order.substr(separator + 1), "--order sector");
-    if (sector > UINT32_MAX) {
-        throw std::out_of_range("Order sector must fit in 32 bits");
+    OrderTarget target;
+    if (geographic) {
+        target = parse_ground_target(order.substr(separator + 1));
+    } else {
+        const auto sector = parse_number(order.substr(separator + 1), "--order sector");
+        if (sector > UINT32_MAX) {
+            throw std::out_of_range("Order sector must fit in 32 bits");
+        }
+        target = SectorId{static_cast<std::uint32_t>(sector)};
     }
     for (const auto kind : {MissionKind::recon, MissionKind::patrol, MissionKind::defend,
                            MissionKind::reposition, MissionKind::attack}) {
         if (order.substr(0, separator) == mission_name(kind)) {
-            const auto result = campaign.issue_order(faction, kind, SectorId{static_cast<std::uint32_t>(sector)});
+            const auto result = session.submit(kind, target);
             if (!result.mission) {
                 throw std::invalid_argument(std::string(result.reason));
             }
@@ -251,7 +283,7 @@ int main(int argc, char* argv[])
                 continue;
             }
             if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed" &&
-                option != "--faction" && option != "--order" && option != "--cancel" && option != "--scenario" &&
+                option != "--faction" && option != "--order" && option != "--ground-order" && option != "--cancel" && option != "--scenario" &&
                 option != "--load" && option != "--save" && option != "--inspect-world") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
@@ -289,7 +321,7 @@ int main(int argc, char* argv[])
                 }
                 continue;
             }
-            if (option == "--order" || option == "--cancel") {
+            if (option == "--order" || option == "--ground-order" || option == "--cancel") {
                 commands.emplace_back(option, argv[i]);
                 continue;
             }
@@ -357,13 +389,18 @@ int main(int argc, char* argv[])
         if (generated) {
             report_procedural_world(campaign, ticks == 0);
         }
+        openwar::CommandSession operator_session(campaign, faction);
         for (const auto& [command, value] : commands) {
-            if (command == "--order") {
-                apply_order(campaign, *faction, value);
+            if (command != "--cancel") {
+                apply_order(operator_session, value, command == "--ground-order");
             } else {
                 const auto id = parse_number(value, "--cancel");
-                if (id > UINT32_MAX || !campaign.cancel_order(*faction, openwar::MissionId{static_cast<std::uint32_t>(id)})) {
-                    throw std::invalid_argument("No cancellable order with that ID");
+                if (id > UINT32_MAX) {
+                    throw std::out_of_range("Order ID must fit in 32 bits");
+                }
+                const auto result = operator_session.cancel(*faction, openwar::MissionId{static_cast<std::uint32_t>(id)});
+                if (!result.cancelled) {
+                    throw std::invalid_argument(std::string(result.reason));
                 }
             }
         }

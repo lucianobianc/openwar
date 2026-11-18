@@ -233,6 +233,14 @@ EOF
     grep -F 'Imported geographic world: 16x16 sectors' "$scratch/resumed.txt"
     grep -F 'ground objective secured' "$scratch/resumed.txt"
     grep -Fx 'Shipments delivered: 2/2' "$scratch/resumed.txt"
+    "$openwar" --scenario "$geographic" --faction WEST --order defend:122 \
+        --ticks 0 --save "$scratch/sector-order.ows"
+    "$openwar" --scenario "$geographic" --faction WEST --ground-order defend:20266672,15133974,165151 \
+        --ticks 0 --save "$scratch/point-order.ows"
+    cmp "$scratch/sector-order.ows" "$scratch/point-order.ows"
+    reject --load "$scratch/point-order.ows" --faction EAST --cancel 1 --ticks 0
+    reject --load "$scratch/point-order.ows" --cancel 1 --ticks 0
+    reject --load "$scratch/point-order.ows" --faction WEST --ground-order defend:20266672,15133974 --ticks 0
 
     valley=${VALLEY_FIXTURES:-examples/connecticut-valley}
     world="$valley/valley-world.owgeo"

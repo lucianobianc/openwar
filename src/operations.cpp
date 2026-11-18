@@ -91,9 +91,63 @@ std::string_view mission_status_name(MissionStatus status)
     throw std::invalid_argument("Unknown mission status");
 }
 
+bool CampaignState::can_issue_orders(FactionId actor) const
+{
+    return operations_.enabled && operations_.player == actor && !war_ended();
+}
+
+std::vector<MissionKind> CampaignState::available_orders(FactionId actor, UnitId id) const
+{
+    const auto unit = units_.find(id);
+    if (!can_issue_orders(actor) || unit == units_.end() || unit->second.faction != actor ||
+        std::ranges::any_of(missions_, [&](const auto& entry) {
+            const auto& mission = entry.second;
+            return mission.faction == actor && active(mission.status) &&
+                   equipment_.at(mission.equipment).assignment.unit == id;
+        })) {
+        return {};
+    }
+
+    std::vector<MissionKind> actions;
+    if (combat_.enabled && ground_speed(id)) {
+        for (const auto kind : {MissionKind::defend, MissionKind::attack}) {
+            if (ground_order_equipment(id, kind)) {
+                actions.push_back(kind);
+            }
+        }
+    }
+    if (!unit->second.facility) {
+        return actions;
+    }
+    const auto& facility = facilities_.at(*unit->second.facility);
+    const auto& stock = stockpiles_.at(facility.stockpile);
+    if (!facility.operational || stock.owner != actor) {
+        return actions;
+    }
+    const bool available = std::ranges::any_of(equipment_, [&](const auto& entry) {
+        const auto& item = entry.second;
+        const auto& type = equipment_types_.at(item.assignment.type);
+        return item.assignment.unit == id && item.status == EquipmentStatus::available && type.operation_range &&
+            (facility.supported_types.empty() || std::ranges::find(facility.supported_types, type.id) !=
+                facility.supported_types.end());
+    });
+    if (available) {
+        actions.insert(actions.end(), {MissionKind::recon, MissionKind::patrol});
+        if (!combat_.enabled) {
+            actions.push_back(MissionKind::defend);
+        }
+        if (!combat_units_.contains(id) && std::ranges::count_if(equipment_, [&](const auto& entry) {
+            return entry.second.assignment.unit == id && entry.second.status != EquipmentStatus::lost;
+        }) == 1) {
+            actions.push_back(MissionKind::reposition);
+        }
+    }
+    return actions;
+}
+
 OrderResult CampaignState::issue_order(FactionId actor, MissionKind kind, SectorId target)
 {
-    if (war_ended() || !operations_.enabled || operations_.player != actor) {
+    if (!can_issue_orders(actor)) {
         return {{}, "player has no authority for this faction"};
     }
     return schedule_mission(actor, kind, target, true);
@@ -254,16 +308,20 @@ MissionId CampaignState::next_mission_id(FactionId faction) const
     return MissionId{number};
 }
 
-bool CampaignState::cancel_order(FactionId actor, MissionId id)
+bool CampaignState::can_cancel_order(FactionId actor, MissionId id) const
 {
     const auto found = missions_.find({actor, id});
-    if (war_ended() || operations_.player != actor || found == missions_.end() ||
-        (found->second.status != MissionStatus::scheduled &&
-         !(found->second.ground_unit && found->second.manual &&
-           found->second.status == MissionStatus::in_progress))) {
+    return can_issue_orders(actor) && found != missions_.end() &&
+        (found->second.status == MissionStatus::scheduled ||
+         (found->second.ground_unit && found->second.manual && found->second.status == MissionStatus::in_progress));
+}
+
+bool CampaignState::cancel_order(FactionId actor, MissionId id)
+{
+    if (!can_cancel_order(actor, id)) {
         return false;
     }
-    auto& mission = found->second;
+    auto& mission = missions_.at({actor, id});
     if (mission.ground_unit) {
         release_ground_equipment(mission.equipment);
     } else {

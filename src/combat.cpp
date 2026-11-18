@@ -221,7 +221,7 @@ void CampaignState::initialize_combat(const ScenarioDefinition& scenario)
 
 OrderResult CampaignState::issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination)
 {
-    if (war_ended() || !operations_.enabled || operations_.player != actor) {
+    if (!can_issue_orders(actor)) {
         return {{}, "player has no authority for this faction"};
     }
     if (!combat_.enabled || (kind != MissionKind::attack && kind != MissionKind::defend)) {
@@ -285,7 +285,7 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
     std::int64_t best_duration = 0;
     for (const auto& [id, combat] : combat_units_) {
         const auto& unit = units_.at(id);
-        if (unit.faction != faction || combat.status != GroundStatus::holding ||
+        if (unit.faction != faction ||
             std::ranges::find(excluded, id) != excluded.end() ||
             std::ranges::any_of(view.missions, [&](const auto& mission) {
                 return (mission.status == MissionStatus::preparing || active_ground(mission.status)) &&
@@ -298,15 +298,8 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
             continue;
         }
         const auto& stores = stockpiles_.at(combat.stores);
-        if (!free_stock(stores, supply) || (kind == MissionKind::attack && !free_stock(stores, ammo))) {
-            continue;
-        }
-        const auto equipment = std::ranges::find_if(equipment_, [&](const auto& entry) {
-            const auto& item = entry.second;
-            return item.assignment.unit == id && item.status == EquipmentStatus::available &&
-                equipment_types_.at(item.assignment.type).can_occupy;
-        });
-        if (equipment == equipment_.end()) {
+        const auto equipment = ground_order_equipment(id, kind);
+        if (!equipment) {
             continue;
         }
         std::vector<SectorId> path;
@@ -318,7 +311,7 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
             route.fuel_ml > fuel_balance(stores, combat) || (chosen && route.duration_us >= best_duration)) {
             continue;
         }
-        chosen = Mission{MissionId{}, faction, kind, target, equipment->first, combat.stores, 0, 0};
+        chosen = Mission{MissionId{}, faction, kind, target, *equipment, combat.stores, 0, 0};
         chosen->ground_path = std::move(path);
         chosen->ground_unit = id;
         chosen->ground_destination = objective;
@@ -329,6 +322,24 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
         chosen->ground_journey = GroundJourney{std::move(route), std::move(progress), speed};
     }
     return chosen;
+}
+
+std::optional<EquipmentId> CampaignState::ground_order_equipment(UnitId id, MissionKind kind) const
+{
+    const auto combat = combat_units_.find(id);
+    if (combat == combat_units_.end() || combat->second.status != GroundStatus::holding) {
+        return {};
+    }
+    const auto& stores = stockpiles_.at(combat->second.stores);
+    if (!free_stock(stores, supply) || (kind == MissionKind::attack && !free_stock(stores, ammo))) {
+        return {};
+    }
+    const auto equipment = std::ranges::find_if(equipment_, [&](const auto& entry) {
+        const auto& item = entry.second;
+        return item.assignment.unit == id && item.status == EquipmentStatus::available &&
+            equipment_types_.at(item.assignment.type).can_occupy;
+    });
+    return equipment == equipment_.end() ? std::nullopt : std::optional{equipment->first};
 }
 
 MissionId CampaignState::commit_ground_mission(Mission mission)
