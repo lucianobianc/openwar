@@ -3,7 +3,7 @@ AM_CXXFLAGS = -std=c++20
 
 noinst_LIBRARIES = libcampaign.a
 libcampaign_a_SOURCES = src/campaign.cpp src/campaign.hpp src/economy.cpp \
-	src/logistics.cpp src/forces.cpp src/scenario.cpp src/intelligence.cpp \
+	src/logistics.cpp src/forces.cpp src/scenario.cpp src/scenario.hpp src/scenario_config.cpp src/intelligence.cpp \
 	src/operations.cpp src/operations.hpp src/strategy.cpp src/combat.cpp src/combat.hpp src/territory.cpp
 
 bin_PROGRAMS = openwar
@@ -36,4 +36,4 @@ EXTRA_DIST = tests/cli.sh AGENTS.md LICENSE \
 	docs/ECONOMY.md docs/LOGISTICS.md docs/MAINTENANCE.md \
 	docs/MILITARY_FORCES.md docs/INTELLIGENCE.md docs/OPERATIONS.md \
 	docs/COMBAT.md docs/TACTICAL.md docs/SCENARIOS.md \
-	docs/CAMPAIGN_SETUP.md
+	docs/CAMPAIGN_SETUP.md examples/procedural.toml

@@ -50,8 +50,8 @@ printf '%s\n' "$output" | grep -Fx '  fuel (L): 900/2400'
 printf '%s\n' "$output" | grep -Fx '  supplies: 10/30'
 printf '%s\n' "$output" | grep -Fx 'Economy transactions: 3'
 help=$("$openwar" --help)
-printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--demo NAME] [--speed N] [--ticks N] [--events] [--seed N]'
-printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, operations, combat, or campaign.'
+printf '%s\n' "$help" | tr -d '\r' | grep -Fx 'Usage: openwar [--demo NAME | --scenario FILE] [--speed N] [--ticks N] [--events] [--seed N]'
+printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenance, operations, combat, campaign, or procedural.'
 if printf '%s\n' "$help" | grep -E -- '--(logistics-demo|maintenance-demo|realtime)'; then
     exit 1
 fi
@@ -166,3 +166,33 @@ printf '%s\n' "$campaign" | grep -F 'WEST strategy |'
 printf '%s\n' "$campaign" | grep -F 'EAST strategy |'
 progress=$("$openwar" --demo campaign --seed 42 --ticks 12)
 printf '%s\n' "$progress" | grep -m 1 -E 'next sector [0-9]+ \| 50% \| ETA 120s'
+
+(
+    scratch=$(mktemp -d)
+    trap 'rm -f "$scratch"/setup.toml "$scratch"/invalid.toml; rmdir "$scratch"' 0
+    cat >"$scratch/setup.toml" <<'EOF'
+schema_version = 1
+generator_version = 1
+seed = 18446744073709551615 # full 64-bit seed
+width = 13
+height = 11
+west_armor = 4
+east_armor = 2
+EOF
+    preview=$("$openwar" --scenario "$scratch/setup.toml" --ticks 0)
+    printf '%s\n' "$preview" | grep -Fx 'Campaign summary | seed 18446744073709551615'
+    printf '%s\n' "$preview" | grep -Fx 'World: 13x11, sector size 2000 m'
+    test "$(printf '%s\n' "$preview" | grep -Ec '^[.F~]{13}$')" = 11
+    run=$("$openwar" --demo procedural --scenario "$scratch/setup.toml" --seed 42 --ticks 500 --events)
+    repeat=$("$openwar" --scenario "$scratch/setup.toml" --seed 42 --ticks 500 --events)
+    test "$run" = "$repeat"
+    printf '%s\n' "$run" | grep -Fx 'Campaign summary | seed 42'
+    reject --demo combat --scenario "$scratch/setup.toml" --ticks 0
+    reject --demo procedural --seed 18446744073709551616 --ticks 0
+    for invalid in 'width = 12' 'seed = -1' 'unknown = 1' 'generator_version = 2' 'schema_version = 1' 'width ='; do
+        printf 'schema_version = 1\n%s\n' "$invalid" >"$scratch/invalid.toml"
+        reject --scenario "$scratch/invalid.toml" --ticks 0
+    done
+    printf 'seed = 42\n' >"$scratch/invalid.toml"
+    reject --scenario "$scratch/invalid.toml" --ticks 0
+)

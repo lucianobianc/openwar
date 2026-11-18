@@ -1,4 +1,5 @@
 #include "viewer_model.hpp"
+#include "scenario.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -126,4 +127,16 @@ int main()
             std::ranges::equal(displayed.forces_log(), headless.forces_log()) &&
             std::ranges::equal(displayed.economy_ledger(), headless.economy_ledger()),
             "Viewer snapshots changed the long campaign");
+
+    ProceduralSettings settings;
+    settings.seed = 2026;
+    settings.width = 13;
+    settings.height = 11;
+    auto procedural = procedural_campaign(settings);
+    const auto preview = read_snapshot(procedural, {});
+    require(preview.width == 13 && preview.height == 11 && preview.tiles.size() == 143 &&
+            std::ranges::any_of(preview.tiles, [](const Tile& tile) { return tile.terrain == Terrain::water; }) &&
+            std::ranges::any_of(preview.markers, [](const Marker& marker) {
+                return marker.kind == MarkerKind::installation;
+            }), "The viewer did not use the generated world and infrastructure");
 }

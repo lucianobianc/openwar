@@ -1,5 +1,6 @@
 #include "viewer_model.hpp"
 #include "realtime.hpp"
+#include "scenario.hpp"
 
 #include <raylib.h>
 
@@ -421,32 +422,56 @@ void run(CampaignState& campaign)
 int main(int argc, char* argv[])
 {
     try {
-        std::uint32_t seed = 0;
-        std::string_view scenario = "combat";
+        std::optional<std::uint64_t> seed_override;
+        std::optional<std::filesystem::path> scenario_path;
+        std::optional<std::string_view> demo;
+        const auto select = [&](std::string_view selection) {
+            if (demo && demo != selection) {
+                throw std::invalid_argument("Select one demonstration scenario");
+            }
+            demo = selection;
+        };
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
             if (option == "--help") {
-                std::cout << "Usage: openwar-gui [--demo combat|operations|campaign] [--seed UINT32]\n";
+                std::cout << "Usage: openwar-gui [--demo combat|operations|campaign|procedural] "
+                             "[--scenario FILE] [--seed N]\n";
                 return 0;
             }
-            if ((option != "--seed" && option != "--demo") || i + 1 == argc) {
-                throw std::invalid_argument("Expected --demo combat|operations|campaign or --seed UINT32");
+            if ((option != "--seed" && option != "--demo" && option != "--scenario") || i + 1 == argc) {
+                throw std::invalid_argument("Expected --demo, --scenario or --seed with a value");
             }
             const std::string_view value = argv[++i];
             if (option == "--demo") {
-                if (value != "combat" && value != "operations" && value != "campaign") {
+                if (value != "combat" && value != "operations" && value != "campaign" && value != "procedural") {
                     throw std::invalid_argument("Unknown viewer demonstration");
                 }
-                scenario = value;
+                select(value);
+            } else if (option == "--scenario") {
+                select("procedural");
+                if (scenario_path) {
+                    throw std::invalid_argument("Select one scenario file");
+                }
+                scenario_path = value;
             } else {
+                std::uint64_t seed = 0;
                 const auto end = value.data() + value.size();
                 const auto result = std::from_chars(value.data(), end, seed);
                 if (result.ec != std::errc{} || result.ptr != end) {
-                    throw std::invalid_argument("Seed must be a 32-bit unsigned integer");
+                    throw std::invalid_argument("Seed must be an unsigned integer");
                 }
+                seed_override = seed;
             }
         }
-        auto campaign = scenario == "campaign" ? long_example_campaign(seed) :
+        auto settings = scenario_path ? read_procedural_settings(*scenario_path) : ProceduralSettings{};
+        settings.seed = seed_override.value_or(settings.seed);
+        const auto scenario = demo.value_or("combat");
+        if (scenario != "procedural" && settings.seed > UINT32_MAX) {
+            throw std::invalid_argument("Seed must fit in 32 bits");
+        }
+        const auto seed = static_cast<std::uint32_t>(settings.seed);
+        auto campaign = scenario == "procedural" ? procedural_campaign(settings) :
+                        scenario == "campaign" ? long_example_campaign(seed) :
                         scenario == "combat" ? CampaignState(combat_example_scenario(), seed) :
                                                operations_example_campaign(seed);
         run(campaign);

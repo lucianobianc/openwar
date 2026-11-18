@@ -119,6 +119,9 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed)
     initialize_forces(scenario);
     initialize_operations(scenario);
     initialize_combat(scenario);
+    for (const auto& request : scenario.initial_supply_requests) {
+        request_supply(request);
+    }
 }
 
 const SectorState& CampaignState::sector_state(SectorId sector) const

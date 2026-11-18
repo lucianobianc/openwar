@@ -1,5 +1,6 @@
 #include "campaign.hpp"
 #include "realtime.hpp"
+#include "scenario.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -7,6 +8,8 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <queue>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -1384,6 +1387,105 @@ void test_strategic_command()
             "Strategic command changed with tick batching");
 }
 
+void test_procedural_campaign()
+{
+    ProceduralSettings settings;
+    settings.seed = 0x10000002a;
+    settings.width = 13;
+    settings.height = 11;
+    settings.west_armor = 4;
+    settings.east_armor = 2;
+    settings.crossings = 4;
+    settings.hold_minutes = 37;
+    settings.time_limit_minutes = 1000;
+    settings.require_relay = 0;
+    settings.capitulation = 0;
+    const auto scenario = resolve_procedural_scenario(settings);
+    const auto repeated = resolve_procedural_scenario(settings);
+    auto low_seed = settings;
+    low_seed.seed = 42;
+    const auto alternate = resolve_procedural_scenario(low_seed);
+    const auto sector_equal = [](const Sector& left, const Sector& right) {
+        return left.id == right.id && left.properties.terrain == right.properties.terrain &&
+               left.properties.traversable == right.properties.traversable && left.neighbors == right.neighbors;
+    };
+    require(scenario.world.width() == 13 && scenario.world.height() == 11 &&
+            std::ranges::equal(scenario.world.sectors(), repeated.world.sectors(), sector_equal) &&
+            !std::ranges::equal(scenario.world.sectors(), alternate.world.sectors(), sector_equal),
+            "Procedural geography ignored configuration, seed high bits or reproducibility");
+    require(scenario.public_sectors == repeated.public_sectors && scenario.public_sectors.size() == 4 &&
+            scenario.command_objectives.empty() && scenario.victory_objectives.size() == 2 &&
+            scenario.victory_objectives.front().sectors == scenario.public_sectors &&
+            scenario.victory_objectives.front().required_installations.empty() &&
+            scenario.victory_objectives.front().hold_seconds == 2220 &&
+            scenario.combat.time_limit_seconds == 60000,
+            "Procedural objectives did not honor the configured victory rules");
+    const auto armor_count = [&](FactionId faction) {
+        const auto type = std::ranges::find_if(scenario.equipment_types, [faction](const auto& entry) {
+            return entry.faction == faction && entry.can_occupy;
+        })->id;
+        return std::ranges::count_if(scenario.equipment, [type](const auto& item) {
+            return item.type == type && item.reserve_source.empty();
+        });
+    };
+    require(armor_count(FactionId::west) == 16 && armor_count(FactionId::east) == 8 &&
+            scenario.initial_supply_requests.size() == 36,
+            "Procedural deployments did not honor force budgets or create starting orders");
+
+    auto wet = settings;
+    wet.width = wet.height = 25;
+    wet.sector_size_m = 5000;
+    wet.crossings = 5;
+    wet.forest_percent = 0;
+    wet.water_percent = 100;
+    wet.seed = std::numeric_limits<std::uint64_t>::max();
+    const auto corridors = resolve_procedural_scenario(wet);
+    require(std::ranges::all_of(corridors.routes, [](const auto& route) {
+                return route.travel_ticks == 10 && route.fuel_cost == 3;
+            }), "Generated roads did not scale with the sector size");
+    std::set<SectorId> reached;
+    std::queue<SectorId> pending;
+    pending.push(corridors.public_sectors.front());
+    reached.insert(pending.front());
+    while (!pending.empty()) {
+        const auto from = pending.front();
+        pending.pop();
+        for (const auto& route : corridors.routes) {
+            const auto& sector = corridors.world.sector(route.to);
+            require(sector.properties.traversable, "A generated road crosses impassable water");
+            if (route.from == from && reached.insert(route.to).second) {
+                pending.push(route.to);
+            }
+        }
+    }
+    require(std::ranges::all_of(corridors.stockpiles, [&](const auto& stock) {
+                return reached.contains(stock.sector);
+            }) && std::ranges::all_of(corridors.public_sectors, [&](SectorId sector) {
+                return reached.contains(sector);
+            }), "The generator isolated a crossing or installation from the road network");
+
+    auto campaign = procedural_campaign(settings);
+    auto stepped = procedural_campaign(settings);
+    require(campaign.shipments().size() == scenario.initial_supply_requests.size() &&
+            campaign.faction_view(FactionId::west).contacts.empty(),
+            "Procedural initialization bypassed logistics or exposed enemy deployments");
+    campaign.advance_ticks(400);
+    for (std::uint32_t tick = 0; tick < 400; ++tick) {
+        stepped.advance_ticks(1);
+    }
+    require(campaign.war_result() == stepped.war_result() &&
+            std::ranges::equal(campaign.observer_battle_log(), stepped.observer_battle_log()) &&
+            std::ranges::equal(campaign.observer_operations_log(), stepped.observer_operations_log()) &&
+            std::ranges::equal(campaign.logistics_log(), stepped.logistics_log()) &&
+            std::ranges::any_of(campaign.logistics_log(), [](const auto& event) {
+                return event.kind == LogisticsEventKind::delivered;
+            }), "Procedural campaigns did not run reproducibly through the shared simulator");
+
+    settings.width = 12;
+    require_throws<std::invalid_argument>([&] { resolve_procedural_scenario(settings); },
+                                          "An incompatible procedural map size was accepted");
+}
+
 void test_ground_movement()
 {
     constexpr auto west = FactionId::west;
@@ -1554,6 +1656,7 @@ int main()
     test_war_endings();
     test_long_campaign();
     test_strategic_command();
+    test_procedural_campaign();
     test_ground_movement();
     test_depleted_withdrawal();
 }

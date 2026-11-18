@@ -1,4 +1,4 @@
-#include "campaign.hpp"
+#include "scenario.hpp"
 #include "realtime.hpp"
 
 #include <charconv>
@@ -10,16 +10,17 @@
 
 namespace {
 
-constexpr std::string_view usage = R"(Usage: openwar [--demo NAME] [--speed N] [--ticks N] [--events] [--seed N]
+constexpr std::string_view usage = R"(Usage: openwar [--demo NAME | --scenario FILE] [--speed N] [--ticks N] [--events] [--seed N]
 
 Without a tick limit, the dashboard runs in real time until Ctrl+C.
 
 Options
-  --demo NAME  Select economy (default), logistics, maintenance, operations, combat, or campaign.
+  --demo NAME  Select economy (default), logistics, maintenance, operations, combat, campaign, or procedural.
+  --scenario FILE  Load a procedural scenario configuration.
   --speed N    Pace the run at N simulated seconds per real second (default 60).
   --ticks N    Stop after N ticks. Runs in batch mode unless speed is specified.
   --events     Show timestamped campaign events.
-  --seed N     Set the deterministic seed (default 0).
+  --seed N     Override the seed (32-bit for fixed demos, 64-bit for procedural).
   --faction WEST|EAST  Use one faction's view in the operations or combat demo.
   --order TYPE:SECTOR  Queue a recon, patrol, defend, reposition, or attack order.
   --cancel ID         Cancel a scheduled order before the simulation starts.
@@ -33,9 +34,10 @@ Examples
   openwar --demo operations --faction WEST --order recon:2 --ticks 12 --events
   openwar --demo combat --ticks 30 --events
   openwar --demo campaign --seed 42 --ticks 3000
+  openwar --scenario examples/procedural.toml --ticks 0
 )";
 
-enum class Demo { economy, logistics, maintenance, operations, combat, campaign };
+enum class Demo { economy, logistics, maintenance, operations, combat, campaign, procedural };
 
 Demo parse_demo(std::string_view name)
 {
@@ -57,12 +59,18 @@ Demo parse_demo(std::string_view name)
     if (name == "campaign") {
         return Demo::campaign;
     }
+    if (name == "procedural") {
+        return Demo::procedural;
+    }
     throw std::invalid_argument("Unknown demonstration: " + std::string(name));
 }
 
-openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed, std::optional<openwar::FactionId> faction)
+openwar::CampaignState make_campaign(Demo demo, std::uint64_t requested_seed,
+                                     std::optional<openwar::FactionId> faction,
+                                     const openwar::ProceduralSettings& procedural)
 {
     using namespace openwar;
+    const auto seed = static_cast<std::uint32_t>(requested_seed);
     switch (demo) {
     case Demo::economy:
         return CampaignState(example_scenario(), seed);
@@ -74,6 +82,8 @@ openwar::CampaignState make_campaign(Demo demo, std::uint32_t seed, std::optiona
         return CampaignState(combat_example_scenario(faction), seed);
     case Demo::campaign:
         return long_example_campaign(seed);
+    case Demo::procedural:
+        return procedural_campaign(procedural);
     case Demo::logistics: {
         CampaignState campaign(logistics_example_scenario(), seed);
         campaign.request_supply({ShipmentId{1}, StockpileId{1}, StockpileId{3}, Resource::fuel, 80});
@@ -171,11 +181,31 @@ void report(const openwar::CampaignState& campaign, std::uint32_t seed)
     openwar::cli::report_forces(std::cout, campaign);
 }
 
+void report_procedural_world(const openwar::CampaignState& campaign, bool preview)
+{
+    const auto& world = campaign.world();
+    std::cout << "Procedural generator: " << openwar::procedural_generator_version << '\n'
+              << "World: " << world.width() << 'x' << world.height()
+              << ", sector size " << world.sector_size_m() << " m\n";
+    if (preview) {
+        std::cout << "Terrain (. plains, F forest, ~ water)\n";
+        for (const auto& sector : world.sectors()) {
+            using openwar::Terrain;
+            const auto terrain = sector.properties.terrain;
+            std::cout << (terrain == Terrain::water ? '~' : terrain == Terrain::forest ? 'F' : '.');
+            if (sector.x + 1 == world.width()) {
+                std::cout << '\n';
+            }
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char* argv[])
 {
-    std::uint32_t seed = 0;
+    std::optional<std::uint64_t> seed_override;
+    std::optional<std::filesystem::path> scenario_path;
     std::optional<std::uint64_t> ticks;
     std::optional<std::uint32_t> speed;
     std::optional<Demo> demo;
@@ -213,7 +243,7 @@ int main(int argc, char* argv[])
                 continue;
             }
             if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed" &&
-                option != "--faction" && option != "--order" && option != "--cancel") {
+                option != "--faction" && option != "--order" && option != "--cancel" && option != "--scenario") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
             if (++i == argc) {
@@ -221,6 +251,14 @@ int main(int argc, char* argv[])
             }
             if (option == "--demo") {
                 select_demo(parse_demo(argv[i]));
+                continue;
+            }
+            if (option == "--scenario") {
+                select_demo(Demo::procedural);
+                if (scenario_path) {
+                    throw std::invalid_argument("Select one scenario file");
+                }
+                scenario_path = argv[i];
                 continue;
             }
             if (option == "--faction") {
@@ -240,10 +278,7 @@ int main(int argc, char* argv[])
             }
             const auto value = parse_number(argv[i], option);
             if (option == "--seed") {
-                if (value > UINT32_MAX) {
-                    throw std::out_of_range("Seed must fit in 32 bits");
-                }
-                seed = static_cast<std::uint32_t>(value);
+                seed_override = value;
             } else if (option == "--ticks") {
                 ticks = value;
             } else {
@@ -254,13 +289,24 @@ int main(int argc, char* argv[])
             }
         }
         const bool operations_view = demo == Demo::operations || demo == Demo::combat;
+        const bool generated = demo == Demo::procedural;
+        const bool campaign_view = demo == Demo::campaign || generated;
         if ((faction || !commands.empty()) && !operations_view) {
             throw std::invalid_argument("Faction controls require --demo operations or --demo combat");
         }
         if (!commands.empty() && !faction) {
             throw std::invalid_argument("Orders require --faction WEST or EAST");
         }
-        auto campaign = make_campaign(demo.value_or(Demo::economy), seed, faction);
+        auto settings = scenario_path ? openwar::read_procedural_settings(*scenario_path) : openwar::ProceduralSettings{};
+        const auto seed = seed_override.value_or(settings.seed);
+        if (!generated && seed > UINT32_MAX) {
+            throw std::out_of_range("Seed must fit in 32 bits");
+        }
+        settings.seed = seed;
+        auto campaign = make_campaign(demo.value_or(Demo::economy), seed, faction, settings);
+        if (generated) {
+            report_procedural_world(campaign, ticks == 0);
+        }
         for (const auto& [command, value] : commands) {
             if (command == "--order") {
                 apply_order(campaign, *faction, value);
@@ -271,14 +317,14 @@ int main(int argc, char* argv[])
                 }
             }
         }
-        const auto perspective = operations_view || demo == Demo::campaign ?
+        const auto perspective = operations_view || campaign_view ?
             std::optional{faction.value_or(openwar::FactionId::neutral)} : std::nullopt;
         if (!ticks || speed || legacy_realtime) {
             openwar::cli::run_realtime(campaign, speed.value_or(60), ticks, events, perspective,
-                                       demo == Demo::campaign);
+                                       campaign_view);
         } else {
             campaign.advance_ticks(*ticks);
-            if (demo == Demo::campaign) {
+            if (campaign_view) {
                 if (events) {
                     openwar::cli::print_operations_events(campaign, openwar::FactionId::neutral, true);
                 }
@@ -288,10 +334,10 @@ int main(int argc, char* argv[])
                 if (events) {
                     openwar::cli::print_events(campaign);
                 }
-                report(campaign, seed);
+                report(campaign, static_cast<std::uint32_t>(seed));
             }
         }
-        if (demo == Demo::campaign) {
+        if (campaign_view) {
             openwar::cli::print_campaign_summary(std::cout, campaign, seed);
         }
     } catch (const std::exception& error) {

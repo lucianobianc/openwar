@@ -325,6 +325,7 @@ struct ScenarioDefinition {
     std::vector<VictoryObjective> victory_objectives{};
     std::vector<CommandObjectives> command_objectives{};
     std::vector<ResupplyPolicy> resupply{};
+    std::vector<SupplyRequest> initial_supply_requests{};
 };
 
 class SimulationClock {

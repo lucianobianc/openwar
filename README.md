@@ -249,6 +249,46 @@ entry point. Heavy losses can pause new offensives until forces recover.
 The demo prints each faction's current focus and review tick. Use `--events`
 to see strategic decisions alongside operations and logistics.
 
+## Procedural scenarios
+
+```sh
+./openwar --demo procedural --seed 2026 --ticks 3000 --events
+./openwar --scenario examples/procedural.toml --ticks 0
+./openwar --scenario examples/procedural.toml --seed 2026 --ticks 3000
+./openwar-gui --scenario examples/procedural.toml
+```
+
+With `--ticks 0` the CLI validates and previews the map. `--scenario` accepts
+a flat TOML subset with unsigned integers and `#` comments. Include
+`schema_version = 1`. The optional `generator_version` must also be 1.
+Omitted values use the defaults below. A command-line `--seed` overrides the
+file. Procedural seeds are unsigned 64-bit values.
+
+| Setting | Default | Accepted values |
+| --- | --- | --- |
+| `seed` | 0 | 0 through 2⁶⁴ − 1 |
+| `width`, `height` | 9, 7 | Odd width 9–25 and height 5–25 |
+| `sector_size_m` | 2000 | 500–5000 |
+| `crossings` | 3 | 1–5, one armored formation per crossing on each side |
+| `forest_percent`, `water_percent` | 30, 10 | 0–100 each, with a combined maximum of 100 |
+| `west_armor`, `east_armor` | 3, 3 | 1–8 active vehicles per formation |
+| `reserve_armor`, `scout_flights` | 1, 2 | 0–4 reserve vehicles per formation and 1–4 flights per faction |
+| `oil`, `materials`, `ammunition` | 600, 240, 90 | Starting industry stocks per faction. Minimums are 20, 8 and eight ammunition units per crossing. Maximum is 100,000 each. |
+| `hold_minutes`, `time_limit_minutes` | 120, 2880 | Positive hold time. Time limit must allow for the first planning interval, one crossing leg, 120 minutes of occupation and the hold time. Maximum is 10,080 minutes. |
+| `require_relay`, `capitulation` | 1, 1 | 0 or 1. Require the opposing relay in addition to the crossings, or enable victory through command collapse. |
+
+The generator places crossings, rear industrial sites, airfields, workshops
+and initial formations. It preserves connected ground and supply corridors,
+and scales generated road travel time and fuel use with the sector size.
+The terrain percentages apply to background cells before the generator
+places the river and corridors and removes isolated land. The generated
+scenario uses the same economy, logistics, strategic command and combat
+engine as the fixed campaigns.
+
+This version accepts procedural configurations and ships the existing fixed
+scenarios as demos. Authored map packages and real-world map import remain
+outside this generator.
+
 ## Campaign viewer
 
 With raylib available through `pkg-config`, the build commands above

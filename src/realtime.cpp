@@ -457,7 +457,7 @@ void print_operations(const CampaignState& campaign, FactionId perspective, bool
     report_operations(std::cout, campaign, perspective, false);
 }
 
-void print_campaign_summary(std::ostream& out, const CampaignState& campaign, std::uint32_t seed)
+void print_campaign_summary(std::ostream& out, const CampaignState& campaign, std::uint64_t seed)
 {
     out << "Campaign summary | seed " << seed << '\n'
         << "Tick: " << campaign.clock().tick() << '\n'
