@@ -235,7 +235,7 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
                 << " | " << ground_status_name(state.status) << " | morale " << state.morale
                 << " | cohesion " << state.cohesion << " | fatigue " << state.fatigue
                 << " | suppression " << state.suppression;
-            if (const auto movement = campaign.ground_movement(id)) {
+            if (const auto movement = campaign.ground_movement(id, perspective != FactionId::neutral)) {
                 report_movement(out, *movement);
             }
             out << '\n';

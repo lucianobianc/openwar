@@ -314,9 +314,43 @@ Sector-based actions use the clicked strategic sector. Cancelling a
 mission follows the same eligibility rule as the CLI, with a separate
 confirmation in the viewer.
 
-This phase implements draft review with destination and known control.
-Route estimates and configurable waypoints remain part of the later
-planning interface described below.
+Phase 1 established draft review with a destination and reported control.
+Phase 3 extends that workflow with an engine preview and mission history.
+
+### Phase 3 implementation
+
+Use **Missions (M)** to open the faction-authorized mission list. Selecting
+an entry centres the map on its geographic destination or strategic sector
+objective. The list retains scheduled, preparing, active, completed, failed
+and cancelled entries. Inspection shows the engine-assigned formation,
+recorded timing and events, known travel progress, and equipment and stock
+commitments. The observer can still inspect either faction or the whole
+campaign.
+
+The **Routes** layer draws existing ground mission, withdrawal and transport
+journeys in map coordinates. It uses the stored leg vertices and the exact
+progress position. Grey shows travelled segments. Solid teal or blue shows
+the remaining committed segments. A selected terminal mission can show its
+stored journey with an untravelled dashed remainder. A dashed gold line is a
+local draft preview. Road conditions and contact overlays continue to use
+the perspective's intelligence reports. Abstract air operations show their sector objective
+and programmed duration. They have no geographic flight path or travel ETA.
+
+The viewer requests previews through `CommandSession`. Confirmed orders
+from the CLI and viewer use the same planner and validation. The draft shows the currently eligible formation and
+estimated travel time and fuel for ground movement. Ground estimates use
+reported territorial and road conditions. Current speed and faction road
+reports inform the displayed remaining travel ETA. Delays due to unobserved
+opposition are outside that estimate. The preview neither creates a mission
+nor reserves stock. Submission plans again against current campaign state
+before assigning equipment or reserving resources.
+
+The engine chooses ground paths and stores them as journey state.
+User-defined waypoints and mission-specific routing constraints need an
+engine command representation plus validation and execution semantics.
+The current interface has a single destination. Mission history and route
+progress already reside in existing checkpoints. Drafts, camera and panel
+selection are local UI state.
 
 ### 6.1 Seleção
 

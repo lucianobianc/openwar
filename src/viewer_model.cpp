@@ -23,22 +23,6 @@ bool active_mission(const Mission& mission)
         mission.status == MissionStatus::in_progress;
 }
 
-void add_missions(Snapshot& snapshot, const CampaignState& campaign, std::span<const Mission> missions)
-{
-    for (const auto& mission : missions) {
-        if (!active_mission(mission)) {
-            continue;
-        }
-        const auto assigned = campaign.equipment().at(mission.equipment).assignment.unit;
-        snapshot.markers.push_back({
-            mission.target, MarkerKind::mission, mission.faction, static_cast<std::uint32_t>(mission.id),
-            mission.ground_destination.value_or(snapshot.sector_center(mission.target)), !mission.ground_destination,
-            std::string(mission_name(mission.kind)) + " #" + std::to_string(static_cast<std::uint32_t>(mission.id)),
-            std::string(mission_status_name(mission.status)), "Assigned to " + campaign.units().at(assigned).name
-        });
-    }
-}
-
 Event operation_event(const OperationsEvent& event)
 {
     auto label = std::string(faction_name(event.faction)) + " / Sector " +
@@ -52,6 +36,115 @@ Event operation_event(const OperationsEvent& event)
 std::string number_label(std::string_view label, auto id)
 {
     return std::string(label) + " #" + std::to_string(static_cast<std::uint32_t>(id));
+}
+
+std::string travel_progress(const RouteTrace& journey)
+{
+    const auto percent = journey.duration_us == 0 ? 100 :
+        static_cast<int>(__int128_t{100} * journey.elapsed_us / journey.duration_us);
+    return "Stored route " + std::to_string(percent) + "% travelled";
+}
+
+void add_missions(Snapshot& snapshot, const CampaignState& campaign, std::span<const Mission> missions,
+                  std::span<const OperationsEvent> events, bool faction_limited)
+{
+    using MissionKey = std::pair<FactionId, MissionId>;
+    std::map<MissionKey, std::vector<const OperationsEvent*>> by_mission;
+    for (const auto& event : events) {
+        if (event.mission) {
+            by_mission[{event.faction, *event.mission}].push_back(&event);
+        }
+    }
+    std::vector<std::pair<bool, std::uint64_t>> order;
+    order.reserve(missions.size());
+    const auto first_index = snapshot.markers.size();
+    for (const auto& mission : missions) {
+        const auto& item = campaign.equipment().at(mission.equipment);
+        const auto& assigned = campaign.units().at(item.assignment.unit);
+        Marker marker{
+            mission.target, MarkerKind::mission, mission.faction, static_cast<std::uint32_t>(mission.id),
+            mission.ground_destination.value_or(snapshot.sector_center(mission.target)), !mission.ground_destination,
+            number_label(mission_name(mission.kind), mission.id),
+            std::string(mission_status_name(mission.status)),
+            "Assigned to " + assigned.name
+        };
+        marker.mission_status = mission.status;
+        auto& rows = marker.inspection;
+        rows.push_back(std::string(faction_name(mission.faction)) + (mission.manual ? " / Player order" : " / Autonomous"));
+        rows.push_back(number_label("Formation", assigned.id) + " / " + number_label("Equipment", mission.equipment));
+        const auto history = by_mission.find({mission.faction, mission.id});
+        const auto launched = mission.launch_tick != 0;
+        if (history != by_mission.end()) {
+            rows.push_back("First recorded tick " + std::to_string(history->second.front()->tick));
+        }
+        if (launched) {
+            rows.push_back("Launch tick " + std::to_string(mission.launch_tick));
+        } else if (mission.earliest_launch_tick && active_mission(mission)) {
+            rows.push_back("Earliest launch tick " + std::to_string(mission.earliest_launch_tick));
+        } else {
+            rows.push_back(active_mission(mission) ? "Awaiting launch" : "No launch recorded");
+        }
+        if (mission.ground_journey && mission.ground_destination) {
+            const auto& journey = *mission.ground_journey;
+            marker.journey = trace_journey(journey.route, journey.progress, *mission.ground_destination);
+            rows.push_back(travel_progress(*marker.journey));
+            if (active_mission(mission)) {
+                const auto movement = campaign.ground_movement(assigned.id, faction_limited);
+                if (journey.progress.leg == journey.route.legs.size()) {
+                    rows.push_back("Travel ETA 0 s / destination reached");
+                } else {
+                    rows.push_back(movement && movement->eta_seconds ?
+                        "Travel ETA " + std::to_string(*movement->eta_seconds) + " s" : "Travel ETA unavailable");
+                }
+            }
+            std::int64_t paid = 0;
+            for (std::size_t i = 0; i < journey.progress.leg + journey.progress.entry_paid; ++i) {
+                paid += journey.route.legs[i].fuel_ml;
+            }
+            rows.push_back("Route fuel charged " + std::to_string(paid) + " mL");
+            rows.push_back("Stored route fuel " + std::to_string(journey.route.fuel_ml) + " mL");
+            rows.push_back("Ground fuel drawn during travel");
+        } else if (mission.ground_unit) {
+            rows.push_back("Stored route and travel ETA unavailable");
+        } else {
+            const auto tick_seconds = campaign.clock().tick_seconds();
+            rows.push_back("Abstract duration " + std::to_string(mission.duration_ticks * tick_seconds) + " s");
+            if (mission.status == MissionStatus::in_progress) {
+                const auto elapsed_ticks = snapshot.tick - mission.launch_tick;
+                const auto left = mission.duration_ticks - std::min(elapsed_ticks, mission.duration_ticks);
+                rows.push_back("Time to resolution " + std::to_string(left * tick_seconds) + " s");
+            }
+            rows.push_back("Flight route and travel ETA unavailable");
+            const auto fuel = launched ? "Fuel consumed " : active_mission(mission) ? "Fuel reserved " : "Planned fuel ";
+            rows.push_back(fuel + std::to_string(mission.fuel) + " L");
+            if (mission.preparation_reserved) {
+                const auto& costs = campaign.equipment_types().at(item.assignment.type).preparation.costs;
+                for (std::size_t i = 0; i < costs.size(); ++i) {
+                    if (costs[i]) {
+                        rows.push_back("Prep reserve " + std::string(resource_name(static_cast<Resource>(i))) +
+                            " " + std::to_string(costs[i]));
+                    }
+                }
+            }
+        }
+        if (active_mission(mission)) {
+            rows.push_back(number_label("Committed equipment", mission.equipment));
+            rows.push_back(number_label("Mission stockpile", mission.launch_stock));
+        }
+        if (history != by_mission.end()) {
+            const auto& entries = history->second;
+            rows.push_back("Mission events, newest first");
+            for (auto event = entries.rbegin(); event != entries.rend(); ++event) {
+                rows.push_back("Tick " + std::to_string((*event)->tick) + " / " + (*event)->reason);
+            }
+        }
+        order.emplace_back(active_mission(mission), history == by_mission.end() ? 0 : history->second.back()->tick);
+        snapshot.mission_markers.push_back(snapshot.markers.size());
+        snapshot.markers.push_back(std::move(marker));
+    }
+    std::ranges::stable_sort(snapshot.mission_markers, [&](std::size_t left, std::size_t right) {
+        return order[left - first_index] > order[right - first_index];
+    });
 }
 
 std::string position_label(geography::Point point)
@@ -76,6 +169,7 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
         const auto number = static_cast<std::uint32_t>(id);
         std::string detail = "Idle";
         std::string movement;
+        const TransportJourney* active_journey = nullptr;
         std::vector<std::string> inspection{std::string(faction_name(carrier.faction)) + " / Ground transport",
             std::to_string(carrier.fuel) + " / " + std::to_string(carrier.tank_capacity) + " L fuel"};
         if (carrier.shipment) {
@@ -89,6 +183,7 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
             inspection.push_back("Cargo " + movement + " / capacity " + std::to_string(carrier.capacity));
             inspection.push_back(number_label(pickup ? "Pickup stockpile" : "Delivery stockpile", endpoint));
             if (shipment.journey) {
+                active_journey = &*shipment.journey;
                 inspection.push_back(position_label(shipment.journey->destination));
                 movement += " / " + std::to_string(shipment.journey->progress.elapsed_us / 1'000'000) +
                     " s in journey";
@@ -102,6 +197,11 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
             carrier.position.value(), false, "Carrier #" + std::to_string(number), std::move(detail),
             std::move(movement), MilitarySymbol{relative_affiliation(carrier.faction, perspective),
                 {MilitaryDomain::land, MilitaryFunction::transport}}, std::move(inspection)});
+        if (active_journey) {
+            snapshot.markers.back().journey =
+                trace_journey(active_journey->route, active_journey->progress, active_journey->destination);
+            snapshot.markers.back().inspection.push_back(travel_progress(*snapshot.markers.back().journey));
+        }
     }
 
     std::map<StockpileId, std::vector<std::string>> maintenance;
@@ -250,7 +350,7 @@ void add_formations(Snapshot& snapshot, const CampaignState& campaign, std::opti
             }
         }
         std::string movement_detail;
-        if (const auto movement = campaign.ground_movement(id)) {
+        if (const auto movement = campaign.ground_movement(id, perspective.has_value())) {
             movement_detail = "To sector " + std::to_string(static_cast<std::uint32_t>(movement->next_sector)) +
                 " / " + std::to_string(movement->leg_percent) + "% / ETA ";
             movement_detail += movement->eta_seconds ? std::to_string(*movement->eta_seconds) + "s" : "unavailable";
@@ -270,10 +370,28 @@ void add_formations(Snapshot& snapshot, const CampaignState& campaign, std::opti
             std::move(detail), std::move(movement_detail),
             MilitarySymbol{relative_affiliation(unit.faction, perspective), identity, status}, std::move(inspection)
         });
+        if (combat != campaign.combat_units().end() && combat->second.withdrawal_journey) {
+            const auto& journey = *combat->second.withdrawal_journey;
+            const auto destination = journey.route.legs.empty() ? journey.route.origin : journey.route.legs.back().to;
+            snapshot.markers.back().journey = trace_journey(journey.route, journey.progress, destination);
+        }
     }
 }
 
 }  // namespace
+
+RouteTrace trace_journey(const geography::Route& route, const geography::Progress& progress,
+                         geography::Point destination)
+{
+    RouteTrace trace{{}, progress.position, destination, progress.leg, progress.elapsed_us,
+                     route.duration_us, route.fuel_ml};
+    trace.vertices.reserve(route.legs.size() + 1);
+    trace.vertices.push_back(route.origin);
+    for (const auto& leg : route.legs) {
+        trace.vertices.push_back(leg.to);
+    }
+    return trace;
+}
 
 Affiliation relative_affiliation(std::optional<FactionId> faction, std::optional<FactionId> perspective)
 {
@@ -363,14 +481,14 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
                 MilitarySymbol{Affiliation::unknown, {}, SymbolStatus::reported}
             });
         }
-        add_missions(snapshot, campaign, missions);
+        add_missions(snapshot, campaign, missions, view.events, true);
         for (const auto& event : recent(std::span<const OperationsEvent>{view.events})) {
             snapshot.events.push_back(operation_event(event));
         }
         return snapshot;
     }
 
-    add_missions(snapshot, campaign, missions);
+    add_missions(snapshot, campaign, missions, campaign.observer_operations_log(), false);
     for (const auto& event : recent(campaign.logistics_log())) {
         snapshot.events.push_back({
             event.tick, "Shipment " + std::to_string(static_cast<std::uint32_t>(event.shipment)) +

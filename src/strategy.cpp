@@ -220,7 +220,7 @@ bool CampaignState::update_strategy(FactionId faction)
         if (busy.contains(sector) || assigned >= limit) {
             return;
         }
-        const auto order = schedule_air_mission(faction, MissionKind::recon, sector, false, view);
+        const auto order = commit_order(plan_air_order(faction, MissionKind::recon, sector, view), false);
         if (order.mission) {
             view.missions.push_back(missions_.at({faction, *order.mission}));
             record_event(operations_log_, {tick, faction, sector, order.mission, "strategy: survey approach"});

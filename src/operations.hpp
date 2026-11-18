@@ -134,6 +134,11 @@ inline bool current_contact(const ContactReport& contact, const SectorReport& re
            (!report.surveyed || contact.observed_tick >= report.observed_tick);
 }
 
+struct MissionPlan {
+    std::optional<Mission> candidate;
+    std::string_view reason;
+};
+
 struct OrderResult {
     std::optional<MissionId> mission;
     std::string_view reason;

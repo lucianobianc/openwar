@@ -420,6 +420,8 @@ public:
     std::span<const OperationsEvent> observer_operations_log() const { return operations_log_; }
     bool can_issue_orders(FactionId actor) const;
     std::vector<MissionKind> available_orders(FactionId actor, UnitId unit) const;
+    MissionPlan preview_order(FactionId actor, MissionKind kind, SectorId target) const;
+    MissionPlan preview_order(FactionId actor, MissionKind kind, geography::Point destination) const;
     OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target);
     OrderResult issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination);
     bool can_cancel_order(FactionId actor, MissionId id) const;
@@ -429,7 +431,7 @@ public:
     const WarResult& war_result() const { return war_result_; }
     bool declare_surrender(FactionId actor);
     const auto& combat_units() const { return combat_units_; }
-    std::optional<GroundMovement> ground_movement(UnitId id) const;
+    std::optional<GroundMovement> ground_movement(UnitId id, bool faction_limited = false) const;
     std::span<const BattleEvent> observer_battle_log() const { return battle_log_; }
     std::vector<std::pair<SectorId, SectorId>> front_line() const;
 
@@ -502,8 +504,9 @@ private:
     bool update_strategy(FactionId faction);
     void dispatch_reinforcement(FactionId faction, const FactionView& view, const StrategicPlan& plan);
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
-    OrderResult schedule_air_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
-                                     const FactionView& view);
+    MissionPlan plan_sector_order(FactionId faction, MissionKind kind, SectorId target) const;
+    MissionPlan plan_air_order(FactionId faction, MissionKind kind, SectorId target, const FactionView& view) const;
+    OrderResult commit_order(MissionPlan plan, bool manual);
     void release_unspent_mission_stock(Mission& mission);
     void release_air_mission_equipment(const Mission& mission, EquipmentStatus standby);
     std::uint32_t observe(FactionId faction, SectorId sector);
@@ -512,8 +515,8 @@ private:
     bool road_known_closed(FactionId faction, std::uint32_t road) const;
     MissionId next_mission_id(FactionId faction) const;
     void initialize_combat(const ScenarioDefinition& scenario);
-    OrderResult schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
-                                       std::optional<geography::Point> destination = {});
+    MissionPlan plan_ground_order(FactionId faction, MissionKind kind, SectorId target,
+                                  std::optional<geography::Point> destination = {}) const;
     std::string_view ground_target_refusal(const FactionView& view, FactionId faction,
                                            MissionKind kind, SectorId target) const;
     std::optional<Mission> plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,

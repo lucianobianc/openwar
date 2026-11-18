@@ -145,28 +145,38 @@ std::vector<MissionKind> CampaignState::available_orders(FactionId actor, UnitId
     return actions;
 }
 
-OrderResult CampaignState::issue_order(FactionId actor, MissionKind kind, SectorId target)
+MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, SectorId target) const
 {
     if (!can_issue_orders(actor)) {
         return {{}, "player has no authority for this faction"};
     }
-    return schedule_mission(actor, kind, target, true);
+    return plan_sector_order(actor, kind, target);
+}
+
+OrderResult CampaignState::issue_order(FactionId actor, MissionKind kind, SectorId target)
+{
+    return commit_order(preview_order(actor, kind, target), true);
 }
 
 OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual)
+{
+    return commit_order(plan_sector_order(faction, kind, target), manual);
+}
+
+MissionPlan CampaignState::plan_sector_order(FactionId faction, MissionKind kind, SectorId target) const
 {
     mission_name(kind);
     if (static_cast<std::uint32_t>(target) >= world_.sectors().size()) {
         return {{}, "target sector is out of bounds"};
     }
     if (kind == MissionKind::attack || (combat_.enabled && kind == MissionKind::defend)) {
-        return schedule_ground_mission(faction, kind, target, manual);
+        return plan_ground_order(faction, kind, target);
     }
-    return schedule_air_mission(faction, kind, target, manual, faction_view(faction, false));
+    return plan_air_order(faction, kind, target, faction_view(faction, false));
 }
 
-OrderResult CampaignState::schedule_air_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
-                                               const FactionView& view)
+MissionPlan CampaignState::plan_air_order(FactionId faction, MissionKind kind, SectorId target,
+                                         const FactionView& view) const
 {
     if (kind != MissionKind::recon && !known_friendly(view, faction, target)) {
         return {{}, "target lacks confirmed friendly control"};
@@ -243,9 +253,24 @@ OrderResult CampaignState::schedule_air_mission(FactionId faction, MissionKind k
     if (!chosen) {
         return {{}, refusal};
     }
-    chosen->id = next_mission_id(faction);
-    chosen->manual = manual;
     chosen->relocation = relocation;
+    return {std::move(chosen), "feasible"};
+}
+
+OrderResult CampaignState::commit_order(MissionPlan plan, bool manual)
+{
+    if (!plan.candidate) {
+        return {{}, plan.reason};
+    }
+    auto& chosen = plan.candidate;
+    chosen->manual = manual;
+    if (chosen->ground_unit) {
+        return {commit_ground_mission(std::move(*chosen)), "scheduled"};
+    }
+
+    const auto faction = chosen->faction;
+    const auto target = chosen->target;
+    chosen->id = next_mission_id(faction);
     const auto& costs = equipment_types_.at(equipment_.at(chosen->equipment).assignment.type).preparation.costs;
     chosen->preparation_reserved = std::ranges::any_of(costs, [](auto cost) { return cost != 0; });
     missions_.emplace(std::pair{faction, chosen->id}, *chosen);

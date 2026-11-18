@@ -33,6 +33,20 @@ struct MarkerKey {
     bool operator==(const MarkerKey&) const = default;
 };
 
+struct RouteTrace {
+    std::vector<geography::Point> vertices;
+    geography::Point position;
+    geography::Point destination;
+    std::size_t leg;
+    std::int64_t elapsed_us;
+    std::int64_t duration_us;
+    std::int64_t fuel_ml;
+    bool operator==(const RouteTrace&) const = default;
+};
+
+RouteTrace trace_journey(const geography::Route& route, const geography::Progress& progress,
+                         geography::Point destination);
+
 struct Marker {
     SectorId sector;
     MarkerKind kind;
@@ -45,6 +59,8 @@ struct Marker {
     std::string movement{};
     std::optional<MilitarySymbol> symbol{};
     std::vector<std::string> inspection{};
+    std::optional<MissionStatus> mission_status{};
+    std::optional<RouteTrace> journey{};
 
     MarkerKey key() const { return {kind, faction, id}; }
 };
@@ -66,6 +82,7 @@ struct Snapshot {
     std::vector<Marker> markers;
     std::vector<Event> events;
     std::map<std::uint32_t, RoadReport> roads{};
+    std::vector<std::size_t> mission_markers{};  // Indices into markers, in operational list order.
 
     geography::Point sector_center(SectorId sector) const;
 };

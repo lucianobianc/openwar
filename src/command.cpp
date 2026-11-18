@@ -30,6 +30,34 @@ std::vector<OrderAction> CommandSession::actions_for(UnitId formation) const
     return actions;
 }
 
+OrderPreview CommandSession::preview(MissionKind kind, const OrderTarget& target) const
+{
+    const auto tick = campaign_.clock().tick();
+    if (!permissions().may_issue_orders) {
+        return {tick, "player has no authority for this faction"};
+    }
+    const auto plan = std::visit([&](auto destination) {
+        return campaign_.preview_order(*faction_, kind, destination);
+    }, target);
+    OrderPreview result{tick, plan.reason};
+    if (!plan.candidate) {
+        return result;
+    }
+    const auto& mission = *plan.candidate;
+    const auto& item = campaign_.equipment().at(mission.equipment);
+    result.formation = item.assignment.unit;
+    result.formation_name = campaign_.units().at(*result.formation).name;
+    if (mission.ground_journey) {
+        const auto& journey = *mission.ground_journey;
+        result.route = viewer::trace_journey(journey.route, journey.progress, *mission.ground_destination);
+    } else {
+        result.abstract_duration_seconds = mission.duration_ticks * campaign_.clock().tick_seconds();
+        result.launch_reservation = campaign_.equipment_types().at(item.assignment.type).preparation.costs;
+        result.launch_reservation[static_cast<std::size_t>(Resource::fuel)] += mission.fuel;
+    }
+    return result;
+}
+
 OrderResult CommandSession::submit(MissionKind kind, const OrderTarget& target)
 {
     if (!permissions().may_issue_orders) {

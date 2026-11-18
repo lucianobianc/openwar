@@ -704,9 +704,10 @@ void test_command_session()
             commander.cancel(west, id).cancelled && !commander.cancel(west, id).cancelled &&
             campaign.faction_view(west).missions.back().status == MissionStatus::cancelled &&
             !commander.actions_for(formation).empty(), "Cancellation bypassed its role or failed to release availability");
-    require(std::ranges::none_of(commander.snapshot().markers, [](const auto& marker) {
-        return marker.kind == viewer::MarkerKind::mission;
-    }), "Same-tick snapshot retained a cancelled mission marker");
+    const auto history = commander.snapshot();
+    require(history.mission_markers.size() == 1 &&
+            history.markers.at(history.mission_markers.front()).mission_status == MissionStatus::cancelled,
+            "Same-tick snapshot omitted a cancelled mission from its history");
 }
 
 void test_operations_and_intelligence()

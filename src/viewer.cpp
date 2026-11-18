@@ -36,8 +36,8 @@ constexpr Color neutral{84, 96, 111, 255};
 constexpr Color unknown{36, 46, 62, 255};
 constexpr Color contested{216, 172, 63, 255};
 
-enum Layer { sectors, territory, units, carriers, roads, hydrography, sites, layer_count };
-constexpr std::array layer_names{"Sectors", "Control", "Units", "Carriers", "Roads", "Water", "Sites"};
+enum Layer { sectors, territory, units, carriers, roads, hydrography, sites, routes, layer_count };
+constexpr std::array layer_names{"Sectors", "Control", "Units", "Carriers", "Roads", "Water", "Sites", "Routes"};
 using Selection = std::variant<MarkerKey, FeatureHit>;
 
 struct Layout {
@@ -49,6 +49,7 @@ struct Layout {
     Rectangle slower;
     Rectangle faster;
     Rectangle fit;
+    Rectangle missions;
     std::array<Rectangle, layer_count> layers;
 };
 
@@ -62,9 +63,9 @@ Layout layout()
                   {width - side - 16, 150, side, details_height},
                   {width - side - 16, 163 + details_height, side, height - details_height - 205},
                   {{{width - 294, 19, 108, 32}, {width - 178, 19, 76, 32}, {width - 94, 19, 78, 32}}},
-                  {16, 65, 98, 32}, {126, 65, 37, 32}, {230, 65, 37, 32}, {16, 108, 73, 31}, {}};
+                  {16, 65, 98, 32}, {126, 65, 37, 32}, {230, 65, 37, 32}, {16, 108, 73, 31}, {366, 19, 124, 32}, {}};
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
-        screen.layers[i] = {104 + static_cast<float>(i) * 92, 108, 84, 31};
+        screen.layers[i] = {100 + static_cast<float>(i) * 87, 108, 81, 31};
     }
     return screen;
 }
@@ -74,6 +75,7 @@ struct OrderDraft {
     std::optional<OrderTarget> target{};
     geography::Point pin{};
     SectorId sector{};
+    std::optional<OrderPreview> preview{};
 };
 
 struct CommandFeedback {
@@ -88,7 +90,9 @@ struct ViewControls {
     std::optional<OrderDraft> draft;
     std::optional<MarkerKey> cancel_prompt;
     std::optional<CommandFeedback> feedback;
-    std::array<bool, layer_count> layers{false, true, true, true, true, true, true};
+    std::array<bool, layer_count> layers{false, true, true, true, true, true, true, true};
+    bool show_missions = false;
+    std::size_t mission_offset = 0;
     Camera2D camera{};
     bool panning = false;
     std::uint32_t speed = 60;
@@ -109,6 +113,22 @@ void label(std::string text, float x, float y, int size, Color color, float widt
         text += "...";
     }
     DrawText(text.c_str(), static_cast<int>(x), static_cast<int>(y), size, color);
+}
+
+float wrapped_label(const std::string& text, float x, float y, int size, Color color, float width)
+{
+    std::istringstream words(text);
+    std::string word, line;
+    while (words >> word) {
+        if (!line.empty() && MeasureText((line + " " + word).c_str(), size) > width) {
+            label(line, x, y, size, color, width);
+            y += size + 4;
+            line.clear();
+        }
+        line += line.empty() ? word : " " + word;
+    }
+    label(line, x, y, size, color, width);
+    return y + size + 4;
 }
 
 void button(Rectangle bounds, const char* title, bool selected = false)
@@ -140,9 +160,17 @@ void fit_map(ViewControls& controls, const Snapshot& snapshot, Rectangle map)
     controls.camera.zoom = fit_zoom(snapshot, map);
 }
 
+bool active_mission_marker(const Marker& marker)
+{
+    return marker.mission_status == MissionStatus::scheduled ||
+           marker.mission_status == MissionStatus::preparing ||
+           marker.mission_status == MissionStatus::in_progress;
+}
+
 bool marker_visible(const Marker& marker, const ViewControls& controls)
 {
     switch (marker.kind) {
+    case MarkerKind::mission: return controls.layers[units] && active_mission_marker(marker);
     case MarkerKind::carrier: return controls.layers[carriers];
     case MarkerKind::installation:
     case MarkerKind::depot: return controls.layers[sites];
@@ -166,7 +194,7 @@ const Marker* selected_marker(const Snapshot& snapshot, const ViewControls& cont
     const auto* key = controls.object ? std::get_if<MarkerKey>(&*controls.object) : nullptr;
     if (key) {
         const auto marker = std::ranges::find(snapshot.markers, *key, &Marker::key);
-        if (marker != snapshot.markers.end() && marker_visible(*marker, controls)) {
+        if (marker != snapshot.markers.end() && (marker->kind == MarkerKind::mission || marker_visible(*marker, controls))) {
             return &*marker;
         }
     }
@@ -203,6 +231,7 @@ void select_at(ViewControls& controls, const Snapshot& snapshot, const Geographi
 {
     const auto point = GetScreenToWorld2D(mouse, controls.camera);
     controls.detail_offset = 0;
+    controls.show_missions = false;
     controls.selected = sector_at(snapshot, point);
     std::vector<std::pair<float, MarkerKey>> markers;
     for (const auto& marker : snapshot.markers) {
@@ -250,6 +279,7 @@ void handle_playback(ViewControls& controls, const Layout& screen, bool ended, b
             controls.object.reset();
             controls.event_offset = 0;
             controls.detail_offset = 0;
+            controls.mission_offset = 0;
         }
     }
     if (!ended && (clicked(screen.play) || IsKeyPressed(KEY_SPACE))) {
@@ -279,6 +309,7 @@ void choose_destination(ViewControls& controls, const Snapshot& snapshot, const 
                                  static_cast<std::uint32_t>(east / sector_mm)};
     auto& draft = *controls.draft;
     draft.sector = sector;
+    draft.preview.reset();
     if (draft.action.geographic_destination) {
         const auto tile = geography.tile_at(point);
         draft.pin = {east, south, tile ? tile->elevation : 0};
@@ -299,6 +330,55 @@ std::size_t inspection_max_offset(const Marker& marker, Rectangle area)
 {
     const auto visible = inspection_rows(area);
     return marker.inspection.size() > visible ? marker.inspection.size() - visible : 0;
+}
+
+std::size_t mission_rows(Rectangle area)
+{
+    return static_cast<std::size_t>(std::max(1.f, (area.height - 74) / 31));
+}
+
+Rectangle mission_row(Rectangle area, std::size_t row)
+{
+    return {area.x + 15, area.y + 65 + static_cast<float>(row) * 31, area.width - 30, 28};
+}
+
+std::size_t mission_max_offset(const Snapshot& snapshot, Rectangle area)
+{
+    const auto visible = mission_rows(area);
+    return snapshot.mission_markers.size() > visible ? snapshot.mission_markers.size() - visible : 0;
+}
+
+bool handle_mission_list(ViewControls& controls, const Snapshot& snapshot, const Layout& screen)
+{
+    if (controls.draft || controls.cancel_prompt) {
+        return false;
+    }
+    if (clicked(screen.missions) || IsKeyPressed(KEY_M)) {
+        controls.show_missions = !controls.show_missions;
+        return true;
+    }
+    if (!controls.show_missions) {
+        return false;
+    }
+    const auto max_offset = static_cast<std::ptrdiff_t>(mission_max_offset(snapshot, screen.details));
+    const auto wheel = CheckCollisionPointRec(GetMousePosition(), screen.details) ? GetMouseWheelMove() : 0.f;
+    const auto step = wheel > 0 ? -1 : wheel < 0 ? 1 : 0;
+    controls.mission_offset = static_cast<std::size_t>(std::clamp(
+        static_cast<std::ptrdiff_t>(controls.mission_offset) + step, std::ptrdiff_t{0}, max_offset));
+    const auto visible = mission_rows(screen.details);
+    for (std::size_t row = 0; row < visible && controls.mission_offset + row < snapshot.mission_markers.size(); ++row) {
+        if (!clicked(mission_row(screen.details, row))) {
+            continue;
+        }
+        const auto& marker = snapshot.markers[snapshot.mission_markers[controls.mission_offset + row]];
+        controls.show_missions = false;
+        controls.selected = marker.sector;
+        controls.object = marker.key();
+        controls.detail_offset = 0;
+        controls.camera.target = map_position(marker.position);
+        return true;
+    }
+    return false;
 }
 
 void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const GeographicLayers& geography,
@@ -324,7 +404,7 @@ void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const Ge
         controls.event_offset = static_cast<std::size_t>(std::clamp(
             offset, 0LL, snapshot.events.empty() ? 0LL : static_cast<long long>(snapshot.events.size() - 1)));
     }
-    if (CheckCollisionPointRec(mouse, screen.details) && wheel != 0) {
+    if (!controls.show_missions && CheckCollisionPointRec(mouse, screen.details) && wheel != 0) {
         const auto* marker = selected_marker(snapshot, controls);
         const auto last = marker ? static_cast<std::ptrdiff_t>(inspection_max_offset(*marker, screen.details)) :
             controls.selected && !controls.object ? std::max<std::ptrdiff_t>(0, visible_marker_count(snapshot, controls) - 1) : 0;
@@ -395,7 +475,7 @@ std::string action_label(MissionKind kind)
 bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rectangle panel,
                           CommandSession& session)
 {
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (controls.show_missions || !IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         return false;
     }
     if (controls.draft || controls.cancel_prompt) {
@@ -554,15 +634,130 @@ void draw_sectors(const Snapshot& snapshot, const ViewControls& controls, Rectan
     }
 }
 
+constexpr Color route_preview{255, 207, 103, 255};
+constexpr Color route_travelled{168, 184, 196, 255};
+constexpr Color route_carrier{150, 204, 255, 255};
+
+void draw_route_segment(Vector2 from, Vector2 to, Rectangle viewport, Color color, float thickness,
+                        bool dashed, float& phase)
+{
+    const Vector2 delta{to.x - from.x, to.y - from.y};
+    if (delta.x == 0 && delta.y == 0) {
+        return;
+    }
+    constexpr float dash_period = 14;
+    const float previous_phase = phase;
+    const float length = dashed ? std::hypot(delta.x, delta.y) : 0;
+    if (dashed) {
+        phase = std::fmod(phase + length, dash_period);
+    }
+    float entry = 0;
+    float exit = 1;
+    const auto clip_axis = [&](float start, float step, float low, float high) {
+        if (step == 0) {
+            return start >= low && start <= high;
+        }
+        const auto edge_a = (low - start) / step;
+        const auto edge_b = (high - start) / step;
+        entry = std::max(entry, std::min(edge_a, edge_b));
+        exit = std::min(exit, std::max(edge_a, edge_b));
+        return entry <= exit;
+    };
+    if (!clip_axis(from.x, delta.x, viewport.x, viewport.x + viewport.width) ||
+        !clip_axis(from.y, delta.y, viewport.y, viewport.y + viewport.height)) {
+        return;
+    }
+    const auto point = [&](float progress) {
+        return Vector2{from.x + delta.x * progress, from.y + delta.y * progress};
+    };
+    if (!dashed) {
+        DrawLineEx(point(entry), point(exit), thickness, color);
+        return;
+    }
+    const float start = entry * length;
+    const float end = exit * length;
+    for (float dash = start - std::fmod(previous_phase + start, dash_period); dash < end; dash += dash_period) {
+        const auto first = std::max(dash, start);
+        const auto last = std::min(dash + 8, end);
+        if (first < last) {
+            DrawLineEx(point(first / length), point(last / length), thickness, color);
+        }
+    }
+}
+
+void draw_route_trace(const RouteTrace& trace, const ViewControls& controls, Rectangle viewport,
+                      Color remaining, bool dashed, bool selected)
+{
+    const auto screen = [&](geography::Point point) {
+        return GetWorldToScreen2D(map_position(point), controls.camera);
+    };
+    const auto progress = screen(trace.position);
+    const float thickness = selected ? 3.f : 2.f;
+    float phase = 0;
+    for (std::size_t leg = 0; leg + 1 < trace.vertices.size(); ++leg) {
+        const auto from = screen(trace.vertices[leg]);
+        const auto to = screen(trace.vertices[leg + 1]);
+        if (leg < trace.leg) {
+            draw_route_segment(from, to, viewport, route_travelled, thickness, false, phase);
+        } else {
+            if (leg == trace.leg) {
+                draw_route_segment(from, progress, viewport, route_travelled, thickness, false, phase);
+            }
+            draw_route_segment(leg == trace.leg ? progress : from, to, viewport, remaining, thickness, dashed, phase);
+        }
+    }
+    const auto destination = screen(trace.destination);
+    if (CheckCollisionPointRec(destination, viewport)) {
+        DrawRectangleLinesEx({destination.x - 5, destination.y - 5, 10, 10}, 1.5f, remaining);
+    }
+}
+
+void draw_journeys(const Snapshot& snapshot, const ViewControls& controls, Rectangle viewport)
+{
+    if (!controls.layers[routes]) {
+        return;
+    }
+    const auto* selected = selected_marker(snapshot, controls);
+    for (const auto& marker : snapshot.markers) {
+        if (!marker.journey || &marker == selected || !marker_visible(marker, controls)) {
+            continue;
+        }
+        const auto color = marker.kind == MarkerKind::carrier ? route_carrier : accent;
+        draw_route_trace(*marker.journey, controls, viewport, color, false, false);
+    }
+    if (selected && selected->journey) {
+        const bool historical = selected->kind == MarkerKind::mission && !active_mission_marker(*selected);
+        const auto color = selected->kind == MarkerKind::carrier ? route_carrier : historical ? muted : accent;
+        draw_route_trace(*selected->journey, controls, viewport, color, historical, true);
+    }
+    if (controls.draft && controls.draft->preview && controls.draft->preview->route) {
+        draw_route_trace(*controls.draft->preview->route, controls, viewport, route_preview, true, true);
+    }
+}
+
+Color mission_color(MissionStatus status)
+{
+    switch (status) {
+    case MissionStatus::scheduled:
+    case MissionStatus::preparing: return route_carrier;
+    case MissionStatus::in_progress: return accent;
+    case MissionStatus::completed: return {169, 224, 159, 255};
+    case MissionStatus::failed: return {255, 157, 164, 255};
+    case MissionStatus::cancelled: return muted;
+    }
+    return muted;
+}
+
 void draw_marker(const Marker& marker, Vector2 at, bool selected)
 {
     if (marker.symbol) {
         draw_military_symbol(marker, at);
-    } else {
-        DrawLineV({at.x, at.y - 12}, {at.x + 12, at.y}, accent);
-        DrawLineV({at.x + 12, at.y}, {at.x, at.y + 12}, accent);
-        DrawLineV({at.x, at.y + 12}, {at.x - 12, at.y}, accent);
-        DrawLineV({at.x - 12, at.y}, {at.x, at.y - 12}, accent);
+    } else if (marker.mission_status) {
+        const auto color = mission_color(*marker.mission_status);
+        DrawLineV({at.x, at.y - 12}, {at.x + 12, at.y}, color);
+        DrawLineV({at.x + 12, at.y}, {at.x, at.y + 12}, color);
+        DrawLineV({at.x, at.y + 12}, {at.x - 12, at.y}, color);
+        DrawLineV({at.x - 12, at.y}, {at.x, at.y - 12}, color);
     }
     if (selected) {
         DrawCircleLines(std::lround(at.x), std::lround(at.y), 17, WHITE);
@@ -584,6 +779,7 @@ void draw_map(const Snapshot& snapshot, const ViewControls& controls, const Geog
     draw_sectors(snapshot, controls, map);
     geography.draw_vectors(controls.camera, map, controls.layers[hydrography], controls.layers[roads],
                            controls.layers[sites], snapshot.roads, selected_feature(controls));
+    draw_journeys(snapshot, controls, map);
     constexpr float margin = 27;
     const Rectangle marker_area{map.x - margin, map.y - margin, map.width + 2 * margin, map.height + 2 * margin};
     const auto* selection = selected_marker(snapshot, controls);
@@ -603,9 +799,9 @@ void draw_map(const Snapshot& snapshot, const ViewControls& controls, const Geog
     }
     if (controls.draft && controls.draft->target) {
         const auto pin = GetWorldToScreen2D(map_position(controls.draft->pin), controls.camera);
-        DrawCircleLines(std::lround(pin.x), std::lround(pin.y), 10, accent);
-        DrawLineV({pin.x - 14, pin.y}, {pin.x + 14, pin.y}, accent);
-        DrawLineV({pin.x, pin.y - 14}, {pin.x, pin.y + 14}, accent);
+        DrawCircleLines(std::lround(pin.x), std::lround(pin.y), 10, route_preview);
+        DrawLineV({pin.x - 14, pin.y}, {pin.x + 14, pin.y}, route_preview);
+        DrawLineV({pin.x, pin.y - 14}, {pin.x, pin.y + 14}, route_preview);
     }
     EndScissorMode();
     DrawRectangleLinesEx(map, 1, border);
@@ -648,16 +844,53 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
     if (controls.draft) {
         const auto& draft = *controls.draft;
         label(action_label(draft.action.kind) + " order draft", x, y, 21, ink, width);
-        label("The engine assigns an eligible formation.", x, y + 34, 14, muted, width);
+        label("Assignment is automatic on confirmation.", x, y + 29, 14, muted, width);
         if (draft.target) {
             const auto id = static_cast<std::uint32_t>(draft.sector);
             const auto& tile = snapshot.tiles.at(id);
             const auto owner = tile.controller ? std::string(faction_name(*tile.controller)) : "Unknown";
-            label("Target sector " + std::to_string(id) + " / " + owner, x, y + 71, 17, accent, width);
+            label("Target sector " + std::to_string(id) + " / Report " + owner, x, y + 51, 15, accent, width);
             if (draft.action.geographic_destination) {
-                label(position_text(draft.pin, geography.has_source_attribution()), x, y + 99, 15, ink, width);
+                label(position_text(draft.pin, geography.has_source_attribution()), x, y + 71, 15, ink, width);
+            } else {
+                label("Sector objective", x, y + 71, 15, ink, width);
             }
-            label("Click the map to change the destination.", x, y + 132, 14, muted, width);
+            if (draft.preview) {
+                const auto& preview = *draft.preview;
+                if (preview.formation) {
+                    label("Eligible now / " + preview.formation_name, x, y + 93, 15, accent, width);
+                    if (preview.route) {
+                        const auto us = preview.route->duration_us;
+                        const auto seconds = us / 1'000'000 + (us % 1'000'000 != 0);
+                        label("Travel " + std::to_string(seconds) + " s / " + std::to_string(preview.route->fuel_ml) +
+                              " mL estimated", x, y + 114, 15, ink, width);
+                        label("Uses faction reports. Conditions may change.", x, y + 139, 14, muted, width);
+                        label("Ground fuel is drawn during travel.", x, y + 227, 14, muted, width);
+                    } else if (preview.abstract_duration_seconds) {
+                        label("Duration " + std::to_string(*preview.abstract_duration_seconds) + " s after launch",
+                              x, y + 114, 15, ink, width);
+                        label("Flight route and travel ETA unavailable.", x, y + 139, 14, muted, width);
+                        const auto fuel = preview.launch_reservation[static_cast<std::size_t>(Resource::fuel)];
+                        label("Fuel commitment " + std::to_string(fuel) + " L", x, y + 227, 14, muted, width);
+                        std::string extra;
+                        for (std::size_t i = 0; i < preview.launch_reservation.size(); ++i) {
+                            const auto resource = static_cast<Resource>(i);
+                            const auto amount = preview.launch_reservation[i];
+                            if (amount && resource != Resource::fuel) {
+                                extra += (extra.empty() ? "Also reserves " : ", ") + std::to_string(amount) + " " +
+                                    std::string(resource_name(resource));
+                            }
+                        }
+                        if (!extra.empty()) {
+                            wrapped_label(extra, x, y + 248, 14, muted, width);
+                        }
+                    }
+                } else {
+                    wrapped_label("Unavailable / " + std::string(preview.reason), x, y + 99, 14, route_preview, width);
+                    label("Choose another objective to revise the draft.", x, y + 139, 14, muted, width);
+                }
+                label("Preview at tick " + std::to_string(preview.tick), x, y + 159, 13, muted, width);
+            }
             button(review_button(area, true), "Confirm order", true);
         } else {
             label(draft.action.geographic_destination ? "Click a destination on the map." :
@@ -673,6 +906,23 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
         button(review_button(area, true), "Confirm cancellation", true);
         return;
     }
+    if (controls.show_missions) {
+        label("Missions", x, y, 21, ink, width);
+        if (snapshot.mission_markers.empty()) {
+            label("No missions reported.", x, y + 33, 15, muted, width);
+            return;
+        }
+        label("Select an order to inspect and locate it.", x, y + 30, 14, muted, width);
+        for (std::size_t row = 0, index = controls.mission_offset;
+             row < mission_rows(area) && index < snapshot.mission_markers.size(); ++row, ++index) {
+            const auto& marker = snapshot.markers[snapshot.mission_markers[index]];
+            const auto bounds = mission_row(area, row);
+            DrawRectangleRec(bounds, CheckCollisionPointRec(GetMousePosition(), bounds) ? border : background);
+            label(std::string(faction_name(*marker.faction)) + " / " + marker.label + " / " + marker.detail,
+                  bounds.x + 7, bounds.y + 6, 15, mission_color(*marker.mission_status), bounds.width - 14);
+        }
+        return;
+    }
     if (const auto* marker = selected_marker(snapshot, controls)) {
         constexpr std::array kinds{"Formation", "Contact", "Carrier", "Installation", "Stockpile", "Mission"};
         label(marker->label, x, y, 21, ink, width);
@@ -680,7 +930,9 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
             std::string(kinds.at(static_cast<std::size_t>(marker->kind))) + " #" + std::to_string(marker->id);
         label(identity + " / Sector " + std::to_string(static_cast<std::uint32_t>(marker->sector)),
               x, y + 32, 15, accent, width);
-        label(marker->estimated ? "Sector-centre estimate" : "Geographic position", x, y + 58, 14, muted, width);
+        const auto location = marker->kind == MarkerKind::mission && marker->estimated ? "Sector objective (map centre)" :
+            marker->estimated ? "Sector-centre estimate" : "Geographic position";
+        label(location, x, y + 58, 14, muted, width);
         label(position_text(marker->position, !marker->estimated), x, y + 78, 15, ink, width);
         label(marker->detail, x, y + 112, 15, ink, width);
         label(marker->movement, x, y + 135, 15, muted, width);
@@ -732,6 +984,8 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
         label("? / Report    T / Ground transport", x, y + 165, 15, ink, width);
         label("Top bar / Installation or stockpile", x, y + 188, 15, ink, width);
         label("Open diamond / Mission target", x, y + 211, 15, ink, width);
+        label("Dashed gold / Draft route", x, y + 234, 15, route_preview, width);
+        label("Grey / Travelled route", x, y + 257, 15, route_travelled, width);
         return;
     }
     const auto id = static_cast<std::uint32_t>(*controls.selected);
@@ -785,18 +1039,7 @@ void draw_events(const Snapshot& snapshot, const ViewControls& controls, Rectang
     float y = area.y + 48;
     if (controls.feedback) {
         const auto color = controls.feedback->accepted ? accent : Color{255, 157, 164, 255};
-        std::istringstream words(controls.feedback->message);
-        std::string word, line;
-        while (words >> word) {
-            if (!line.empty() && MeasureText((line + " " + word).c_str(), 14) > area.width - 30) {
-                label(line, area.x + 15, y, 14, color, area.width - 30);
-                y += 19;
-                line.clear();
-            }
-            line += line.empty() ? word : " " + word;
-        }
-        label(line, area.x + 15, y, 14, color, area.width - 30);
-        y += 26;
+        y = wrapped_label(controls.feedback->message, area.x + 15, y, 14, color, area.width - 30) + 8;
     }
     if (snapshot.events.empty()) {
         label("No events reported", area.x + 15, y, 16, muted, area.width - 30);
@@ -835,6 +1078,7 @@ void draw(const Snapshot& snapshot, const ViewControls& controls, const Geograph
                        std::string(war_status_name(snapshot.war.status));
     label(clock, 289, 74, 17, ink, GetScreenWidth() - 305);
     button(screen.fit, "Fit (R)");
+    button(screen.missions, "Missions (M)", controls.show_missions);
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
         button(screen.layers[i], layer_names[i], controls.layers[i]);
     }
@@ -904,7 +1148,10 @@ void run(CampaignState& campaign, std::optional<FactionId> faction)
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (!controls.draft && !controls.cancel_prompt) {
-                break;
+                if (!controls.show_missions) {
+                    break;
+                }
+                controls.show_missions = false;
             }
             controls.draft.reset();
             controls.cancel_prompt.reset();
@@ -938,8 +1185,14 @@ void run(CampaignState& campaign, std::optional<FactionId> faction)
             controls.object.reset();
             controls.detail_offset = 0;
         }
+        const bool mission_click = handle_mission_list(controls, snapshot, screen);
         handle_map_input(controls, snapshot, geography, screen);
-        if (handle_command_input(controls, snapshot, screen.details, session)) {
+        if (controls.draft && controls.draft->target &&
+            (!controls.draft->preview || controls.draft->preview->tick != snapshot.tick)) {
+            auto& draft = *controls.draft;
+            draft.preview = session.preview(draft.action.kind, *draft.target);
+        }
+        if (!mission_click && handle_command_input(controls, snapshot, screen.details, session)) {
             snapshot = session.snapshot(controls.perspective);
             controls.event_offset = 0;
         }

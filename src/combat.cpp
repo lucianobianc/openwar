@@ -221,6 +221,11 @@ void CampaignState::initialize_combat(const ScenarioDefinition& scenario)
 
 OrderResult CampaignState::issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination)
 {
+    return commit_order(preview_order(actor, kind, destination), true);
+}
+
+MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, geography::Point destination) const
+{
     if (!can_issue_orders(actor)) {
         return {{}, "player has no authority for this faction"};
     }
@@ -232,11 +237,11 @@ OrderResult CampaignState::issue_ground_order(FactionId actor, MissionKind kind,
         (!authored_geography_ && destination.elevation != 0)) {
         return {{}, "ground destination is out of bounds"};
     }
-    return schedule_ground_mission(actor, kind, static_cast<SectorId>(*target), true, destination);
+    return plan_ground_order(actor, kind, static_cast<SectorId>(*target), destination);
 }
 
-OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
-                                                   std::optional<geography::Point> destination)
+MissionPlan CampaignState::plan_ground_order(FactionId faction, MissionKind kind, SectorId target,
+                                            std::optional<geography::Point> destination) const
 {
     if (!combat_.enabled || war_ended()) {
         return {{}, "ground operations unavailable"};
@@ -250,8 +255,7 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
     if (!chosen) {
         return {{}, refusal};
     }
-    chosen->manual = manual;
-    return {commit_ground_mission(std::move(*chosen)), "scheduled"};
+    return {std::move(chosen), "feasible"};
 }
 
 std::string_view CampaignState::ground_target_refusal(const FactionView& view, FactionId faction,
@@ -531,7 +535,7 @@ geography::Route CampaignState::legacy_ground_route(geography::Point origin, std
     return route;
 }
 
-std::optional<GroundMovement> CampaignState::ground_movement(UnitId id) const
+std::optional<GroundMovement> CampaignState::ground_movement(UnitId id, bool faction_limited) const
 {
     const auto found = combat_units_.find(id);
     if (war_ended() || found == combat_units_.end()) {
@@ -559,7 +563,9 @@ std::optional<GroundMovement> CampaignState::ground_movement(UnitId id) const
     if (authored_geography_) {
         speed = std::min(speed, journey->planned_speed_kph);
     }
-    if (speed && (combat.withdrawal || !ground_opposition(unit.sector, unit.faction))) {
+    // A faction ETA estimates travel at the current speed using its own road reports.
+    // Suppressing it on unobserved opposition would disclose a contact.
+    if (speed && (faction_limited || combat.withdrawal || !ground_opposition(unit.sector, unit.faction))) {
         std::int64_t unpaid = 0;
         bool closed = false;
         for (auto i = progress.leg + progress.entry_paid; i < journey->route.legs.size(); ++i) {
