@@ -161,3 +161,5 @@ printf '%s\n' "$campaign" | grep -E '^War: (.* victory|draw) at tick [0-9]+ '
 printf '%s\n' "$campaign" | grep -E '^Engagement intervals: [1-9][0-9]*'
 printf '%s\n' "$campaign" | grep -E '^Shipments delivered: (29|[3-9][0-9]|[1-9][0-9][0-9]+)/'
 printf '%s\n' "$campaign" | grep -m 1 -F 'travelling empty to pickup'
+progress=$("$openwar" --demo campaign --seed 42 --ticks 12)
+printf '%s\n' "$progress" | grep -m 1 -E 'next sector [0-9]+ \| 50% \| ETA 120s'

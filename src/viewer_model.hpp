@@ -21,6 +21,7 @@ struct Marker {
     std::optional<FactionId> faction;
     std::string label;
     std::string detail;
+    std::string movement{};
 };
 
 struct Event {

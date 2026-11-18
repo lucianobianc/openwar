@@ -84,7 +84,15 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
             detail += " / ";
             detail += ground_status_name(combat->second.status);
         }
-        snapshot.markers.push_back({unit.sector, MarkerKind::unit, unit.faction, unit.name, std::move(detail)});
+        std::string movement_detail;
+        if (const auto movement = campaign.ground_movement(id)) {
+            movement_detail = "To sector " + std::to_string(static_cast<std::uint32_t>(movement->next_sector)) +
+                " / " + std::to_string(movement->leg_percent) + "% / ETA ";
+            movement_detail += movement->eta_seconds ? std::to_string(*movement->eta_seconds) + "s" : "unavailable";
+        }
+        snapshot.markers.push_back({
+            unit.sector, MarkerKind::unit, unit.faction, unit.name, std::move(detail), std::move(movement_detail)
+        });
     }
 
     if (perspective) {

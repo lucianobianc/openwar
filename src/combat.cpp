@@ -1,6 +1,8 @@
 #include "campaign.hpp"
 
 #include <algorithm>
+#include <functional>
+#include <limits>
 #include <queue>
 #include <stdexcept>
 
@@ -32,32 +34,85 @@ void decrease(std::uint32_t& value, std::uint32_t amount)
     value -= std::min(value, amount);
 }
 
-std::vector<SectorId> find_ground_path(const WorldDefinition& world, const FactionView& view,
-                                       FactionId faction, SectorId from, SectorId to)
+std::uint32_t ground_weight(const Sector& sector)
 {
-    std::queue<SectorId> queue;
+    if (!sector.properties.traversable || sector.properties.terrain == Terrain::water) {
+        return 0;
+    }
+    return sector.properties.terrain == Terrain::forest ? 2 : 1;
+}
+
+std::uint64_t ground_fuel_per_weight(const WorldDefinition& world)
+{
+    return (std::uint64_t{world.sector_size_m()} + 1999) / 2000;
+}
+
+// At 1 km/h, a unit covers exactly five increments of 1/18 m per second.
+constexpr std::uint64_t movement_units_per_metre = 18;
+
+std::uint64_t movement_budget(std::uint32_t speed_kph, std::uint32_t seconds)
+{
+    constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
+    return std::min(std::uint64_t{speed_kph} * seconds, maximum / 5) * 5;
+}
+
+std::uint64_t movement_distance(const WorldDefinition& world, std::uint64_t weight)
+{
+    constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
+    const auto sector = world.sector_size_m() * movement_units_per_metre;
+    return std::min(weight, maximum / sector) * sector;
+}
+
+std::uint64_t ceil_divide(std::uint64_t amount, std::uint64_t divisor)
+{
+    return amount / divisor + (amount % divisor != 0);
+}
+
+struct GroundPath {
+    std::vector<SectorId> sectors;
+    std::uint64_t weight = 0;
+};
+
+GroundPath find_ground_path(const WorldDefinition& world, const FactionView& view,
+                            FactionId faction, SectorId from, SectorId to)
+{
+    if (!ground_weight(world.sector(from))) {
+        return {};
+    }
+    using Visit = std::pair<std::uint64_t, SectorId>;
+    std::priority_queue<Visit, std::vector<Visit>, std::greater<>> queue;
     std::map<SectorId, SectorId> previous{{from, from}};
-    queue.push(from);
+    std::map<SectorId, std::uint64_t> distance{{from, 0}};
+    queue.emplace(0, from);
     while (!queue.empty()) {
-        const auto sector = queue.front();
+        const auto [cost, sector] = queue.top();
         queue.pop();
+        if (cost != distance.at(sector)) {
+            continue;
+        }
         if (sector == to) {
             std::vector<SectorId> path{sector};
             while (path.back() != from) {
                 path.push_back(previous.at(path.back()));
             }
             std::ranges::reverse(path);
-            return path;
+            return {std::move(path), cost};
         }
         for (const auto neighbor : world.sector(sector).neighbors) {
             const auto report = view.sectors.find(neighbor);
-            if (previous.contains(neighbor) || !world.sector(neighbor).properties.traversable ||
+            const auto weight = ground_weight(world.sector(neighbor));
+            if (!weight ||
                 (neighbor != to && (report == view.sectors.end() || report->second.confidence < 750 ||
                                     report->second.estimated_controller != faction))) {
                 continue;
             }
-            previous.emplace(neighbor, sector);
-            queue.push(neighbor);
+            const auto next = cost + weight;
+            const auto [best, inserted] = distance.try_emplace(neighbor, next);
+            if (inserted || next < best->second) {
+                best->second = next;
+                previous.insert_or_assign(neighbor, sector);
+                queue.emplace(next, neighbor);
+            }
         }
     }
     return {};
@@ -88,7 +143,8 @@ void CampaignState::initialize_combat(const ScenarioDefinition& scenario)
         throw std::invalid_argument("Combat and occupation intervals must be positive");
     }
     for (const auto& [id, type] : equipment_types_) {
-        if ((type.can_occupy && type.category == EquipmentCategory::helicopter) || type.combat_power > 1000) {
+        if ((type.can_occupy && (type.category == EquipmentCategory::helicopter || !type.ground_speed_kph)) ||
+            type.combat_power > 1000) {
             throw std::invalid_argument("Invalid abstract combat equipment profile");
         }
     }
@@ -99,7 +155,7 @@ void CampaignState::initialize_combat(const ScenarioDefinition& scenario)
         if (stock.owner != unit.faction || stock.sector != unit.sector ||
             combat.morale > 100 || combat.cohesion > 100 || combat.fatigue > 100 ||
             combat.experience > 100 || combat.suppression > 100 ||
-            combat.status != GroundStatus::holding || combat.withdrawal ||
+            combat.status != GroundStatus::holding || combat.withdrawal || combat.withdrawal_progress ||
             std::ranges::find(deployed_stores, combat.stores) != deployed_stores.end() ||
             std::ranges::any_of(installations_, [&](const auto& state) {
                 return state.installation.stockpile == combat.stores;
@@ -148,7 +204,7 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
     if (!combat_.enabled || war_ended()) {
         return {{}, "ground operations unavailable"};
     }
-    if (!world_.sector(target).properties.traversable) {
+    if (!ground_weight(world_.sector(target))) {
         return {{}, "ground target is not traversable"};
     }
     const auto view = faction_view(faction, false);
@@ -166,6 +222,7 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
     }
 
     std::optional<Mission> chosen;
+    std::uint64_t best_seconds = 0;
     for (const auto& [id, combat] : combat_units_) {
         const auto& unit = units_.at(id);
         if (unit.faction != faction || combat.status != GroundStatus::holding ||
@@ -175,10 +232,15 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
             })) {
             continue;
         }
-        const auto path = find_ground_path(world_, view, faction, unit.sector, target);
+        const auto speed = ground_speed(id);
+        if (!speed) {
+            continue;
+        }
+        auto path = find_ground_path(world_, view, faction, unit.sector, target);
         const auto& stores = stockpiles_.at(combat.stores);
-        if (path.empty() || (chosen && path.size() >= chosen->ground_path.size()) ||
-            free_stock(stores, fuel) < path.size() - 1 ||
+        const auto seconds = ceil_divide(movement_distance(world_, path.weight), movement_budget(speed, 1));
+        if (path.sectors.empty() || (chosen && seconds >= best_seconds) ||
+            free_stock(stores, fuel) / ground_fuel_per_weight(world_) < path.weight ||
             !free_stock(stores, supply) || (kind == MissionKind::attack && !free_stock(stores, ammo))) {
             continue;
         }
@@ -188,8 +250,9 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
                 continue;
             }
             chosen = Mission{MissionId{}, faction, kind, target, item_id, combat.stores, 0, 0};
-            chosen->ground_path = path;
+            chosen->ground_path = std::move(path.sectors);
             chosen->ground_unit = id;
+            best_seconds = seconds;
             break;
         }
     }
@@ -205,6 +268,101 @@ OrderResult CampaignState::schedule_ground_mission(FactionId faction, MissionKin
     record_event(operations_log_, {clock_.tick(), faction, target, mission_id,
         manual ? "player ground order scheduled" : "autonomous ground order scheduled"});
     return {mission_id, "scheduled"};
+}
+
+std::uint32_t CampaignState::ground_speed(UnitId id) const
+{
+    std::uint32_t speed = 0;
+    for (const auto& [equipment_id, item] : equipment_) {
+        if (item.assignment.unit != id || !ready(item.status)) {
+            continue;
+        }
+        const auto& type = equipment_types_.at(item.assignment.type);
+        if (type.category != EquipmentCategory::helicopter && type.ground_speed_kph &&
+            (!speed || type.ground_speed_kph < speed)) {
+            speed = type.ground_speed_kph;
+        }
+    }
+    return speed;
+}
+
+bool CampaignState::ground_opposition(SectorId sector, FactionId faction) const
+{
+    return std::ranges::any_of(combat_units_, [&](const auto& entry) {
+        const auto& unit = units_.at(entry.first);
+        return unit.sector == sector && unit.faction != faction &&
+               entry.second.status == GroundStatus::holding;
+    });
+}
+
+std::optional<GroundMovement> CampaignState::ground_movement(UnitId id) const
+{
+    const auto combat = combat_units_.find(id);
+    if (war_ended() || combat == combat_units_.end()) {
+        return std::nullopt;
+    }
+    std::span<const SectorId> remaining;
+    std::uint64_t progress = 0;
+    const bool withdrawing = combat->second.status == GroundStatus::withdrawing && combat->second.withdrawal;
+    if (withdrawing) {
+        remaining = {&*combat->second.withdrawal, 1};
+        progress = combat->second.withdrawal_progress;
+    } else {
+        for (const auto& [key, mission] : missions_) {
+            if (mission.ground_unit == id && active_ground(mission.status) &&
+                mission.ground_leg + 1 < mission.ground_path.size()) {
+                remaining = std::span{mission.ground_path}.subspan(mission.ground_leg + 1);
+                progress = mission.ground_progress;
+                break;
+            }
+        }
+    }
+    if (remaining.empty()) {
+        return std::nullopt;
+    }
+    const auto first_weight = ground_weight(world_.sector(remaining.front()));
+    const auto leg_distance = movement_distance(world_, first_weight);
+    GroundMovement report{remaining.front(), static_cast<std::uint32_t>(100 * progress / leg_distance), {}};
+    const auto& unit = units_.at(id);
+    const auto budget = movement_budget(ground_speed(id), clock_.tick_seconds());
+    if (budget && (withdrawing || !ground_opposition(unit.sector, unit.faction))) {
+        std::uint64_t weight = 0;
+        for (const auto sector : remaining) {
+            weight += ground_weight(world_.sector(sector));
+        }
+        const auto unpaid = progress ? weight - first_weight : weight;
+        const auto& stock = stockpiles_.at(combat->second.stores);
+        if (free_stock(stock, fuel) / ground_fuel_per_weight(world_) >= unpaid) {
+            const auto ticks = ceil_divide(movement_distance(world_, weight) - progress, budget);
+            if (ticks <= std::numeric_limits<std::uint64_t>::max() / clock_.tick_seconds()) {
+                report.eta_seconds = ticks * clock_.tick_seconds();
+            }
+        }
+    }
+    return report;
+}
+
+CampaignState::GroundStep CampaignState::advance_ground_leg(
+    CombatUnit& unit, SectorId to, std::uint64_t& progress, std::uint64_t& budget)
+{
+    const auto weight = ground_weight(world_.sector(to));
+    if (!progress) {
+        ResourceAmounts movement{};
+        movement[fuel] = ground_fuel_per_weight(world_) * weight;
+        if (!consume(unit.stores, movement)) {
+            return GroundStep::no_fuel;
+        }
+    }
+    const auto distance = movement_distance(world_, weight);
+    const auto step = std::min(budget, distance - progress);
+    budget -= step;
+    progress += step;
+    if (progress < distance) {
+        return GroundStep::travelling;
+    }
+    progress = 0;
+    move_combat_unit(unit, to);
+    return GroundStep::arrived;
 }
 
 void CampaignState::move_combat_unit(CombatUnit& combat, SectorId sector)
@@ -235,16 +393,25 @@ void CampaignState::update_combat()
         evaluate_war();
         return;
     }
-    ResourceAmounts movement{};
-    movement[fuel] = 1;
     for (auto& [id, combat] : combat_units_) {
         if (combat.status == GroundStatus::withdrawing && combat.withdrawal) {
-            if (sector_state(*combat.withdrawal).controller == units_.at(id).faction &&
-                consume(combat.stores, movement)) {
-                move_combat_unit(combat, *combat.withdrawal);
-                record_event(battle_log_, {tick, *combat.withdrawal, "withdrawal completed", id});
+            const auto to = *combat.withdrawal;
+            const auto faction = units_.at(id).faction;
+            auto budget = movement_budget(ground_speed(id), clock_.tick_seconds());
+            if (budget && sector_state(to).controller == faction && !ground_opposition(to, faction)) {
+                const auto step = advance_ground_leg(combat, to, combat.withdrawal_progress, budget);
+                if (step == GroundStep::travelling) {
+                    continue;
+                }
+                if (step == GroundStep::arrived) {
+                    record_event(battle_log_, {tick, to, "withdrawal completed", id});
+                    if (operations_.enabled) {
+                        observe(faction, to);
+                    }
+                }
             }
             combat.withdrawal.reset();
+            combat.withdrawal_progress = 0;
             combat.status = GroundStatus::broken;
         }
     }
@@ -267,21 +434,21 @@ void CampaignState::update_combat()
             set_equipment_status(item, EquipmentStatus::in_operation, tick);
             record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, "ground operation started"});
         }
-        const auto sector = units_.at(combat.unit).sector;
-        const bool opposed = std::ranges::any_of(combat_units_, [&](const auto& entry) {
-            const auto& other = units_.at(entry.first);
-            return other.faction != mission.faction && other.sector == sector &&
-                   entry.second.status == GroundStatus::holding;
-        });
-        if (!opposed && mission.ground_leg + 1 < mission.ground_path.size()) {
-            if (!consume(combat.stores, movement)) {
+        auto budget = movement_budget(ground_speed(combat.unit), clock_.tick_seconds());
+        while (budget && mission.ground_leg + 1 < mission.ground_path.size() &&
+               !ground_opposition(units_.at(combat.unit).sector, mission.faction)) {
+            const auto destination = mission.ground_path[mission.ground_leg + 1];
+            const auto step = advance_ground_leg(combat, destination, mission.ground_progress, budget);
+            if (step == GroundStep::no_fuel) {
                 release_ground_equipment(mission.equipment);
                 mission.status = MissionStatus::failed;
                 record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, "movement stopped: no fuel"});
-                continue;
+                break;
             }
-            const auto destination = mission.ground_path[++mission.ground_leg];
-            move_combat_unit(combat, destination);
+            if (step == GroundStep::travelling) {
+                break;
+            }
+            ++mission.ground_leg;
             combat.fatigue = std::min(100u, combat.fatigue + 3);
             record_event(battle_log_, {tick, destination, "unit moved", combat.unit});
             if (operations_.enabled) {
@@ -452,14 +619,11 @@ void CampaignState::resolve_engagements()
             if (!depleted && (!hits[id] || (state.morale >= 45 && state.cohesion >= 45))) {
                 continue;
             }
+            const auto speed = ground_speed(id);
             for (const auto neighbor : world_.sector(sector).neighbors) {
-                if (free_stock(stores, fuel) && sector_state(neighbor).controller == faction &&
-                    world_.sector(neighbor).properties.traversable &&
-                    std::ranges::none_of(combat_units_, [&](const auto& entry) {
-                        const auto& unit = units_.at(entry.first);
-                        return unit.sector == neighbor && unit.faction != faction &&
-                               entry.second.status == GroundStatus::holding;
-                    })) {
+                const auto weight = ground_weight(world_.sector(neighbor));
+                if (speed && weight && free_stock(stores, fuel) / ground_fuel_per_weight(world_) >= weight &&
+                    sector_state(neighbor).controller == faction && !ground_opposition(neighbor, faction)) {
                     state.withdrawal = neighbor;
                     state.status = GroundStatus::withdrawing;
                     record_event(battle_log_, {tick, sector, "unit withdrawing", id});

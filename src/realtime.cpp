@@ -184,6 +184,17 @@ void report_war(std::ostream& out, const CampaignState& campaign)
     out << '\n';
 }
 
+void report_movement(std::ostream& out, const GroundMovement& movement)
+{
+    out << " | next sector " << static_cast<std::uint32_t>(movement.next_sector)
+        << " | " << movement.leg_percent << "% | ETA ";
+    if (movement.eta_seconds) {
+        out << *movement.eta_seconds << "s";
+    } else {
+        out << "unavailable";
+    }
+}
+
 void report_operations(std::ostream& out, const CampaignState& campaign, FactionId perspective, bool compact)
 {
     if (perspective == FactionId::neutral) {
@@ -214,7 +225,11 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
             out << unit.name << " | sector " << static_cast<std::uint32_t>(unit.sector)
                 << " | " << ground_status_name(state.status) << " | morale " << state.morale
                 << " | cohesion " << state.cohesion << " | fatigue " << state.fatigue
-                << " | suppression " << state.suppression << '\n';
+                << " | suppression " << state.suppression;
+            if (const auto movement = campaign.ground_movement(id)) {
+                report_movement(out, *movement);
+            }
+            out << '\n';
         }
     }
     for (const auto faction : {FactionId::west, FactionId::east}) {
@@ -511,6 +526,14 @@ void print_campaign_summary(std::ostream& out, const CampaignState& campaign, st
     out << '\n' << "Shipments delivered: " << std::ranges::count_if(campaign.shipments(), [](const auto& entry) {
         return entry.second.status == ShipmentStatus::delivered;
     }) << '/' << campaign.shipments().size() << '\n';
+    for (const auto& [id, combat] : campaign.combat_units()) {
+        if (const auto movement = campaign.ground_movement(id)) {
+            const auto& unit = campaign.units().at(id);
+            out << faction_name(unit.faction) << " " << unit.name << " | sector " << static_cast<std::uint32_t>(unit.sector);
+            report_movement(out, *movement);
+            out << '\n';
+        }
+    }
 }
 
 void run_realtime(CampaignState& campaign, std::uint32_t speed,

@@ -107,7 +107,15 @@ int main()
         const auto frame = read_snapshot(displayed, {});
         require(frame.width == 9 && frame.height == 7 && frame.tick == displayed.clock().tick(),
                 "Long campaign viewer used different geometry or time");
-        read_snapshot(displayed, tick % 2 == 0 ? FactionId::west : FactionId::east);
+        const auto faction_frame = read_snapshot(displayed, tick % 2 == 0 ? FactionId::west : FactionId::east);
+        if (tick == 12) {
+            require(std::ranges::any_of(faction_frame.markers, [](const Marker& marker) {
+                return marker.kind == MarkerKind::unit && marker.faction == FactionId::west &&
+                       marker.movement.find("50% / ETA 120s") != std::string::npos;
+            }) && std::ranges::none_of(faction_frame.markers, [](const Marker& marker) {
+                return marker.faction == FactionId::east && !marker.movement.empty();
+            }), "The viewer omitted friendly movement or exposed enemy progress");
+        }
         displayed.advance_ticks(1);
     }
     headless.advance_ticks(600);

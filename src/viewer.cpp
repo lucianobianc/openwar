@@ -132,7 +132,7 @@ void handle_input(ViewControls& controls, const Snapshot& snapshot, const Layout
         const auto count = std::ranges::count(snapshot.markers, *controls.selected, &Marker::sector);
         const auto offset = static_cast<long long>(controls.detail_offset) + (wheel > 0 ? -1 : 1);
         controls.detail_offset = static_cast<std::size_t>(
-            std::clamp(offset, 0LL, std::max(0LL, static_cast<long long>(count) - 3)));
+            std::clamp(offset, 0LL, std::max(0LL, static_cast<long long>(count) - 1)));
     }
     if (CheckCollisionPointRec(mouse, screen.map)) {
         if (wheel != 0) {
@@ -296,13 +296,17 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, Rectan
             --skip;
             continue;
         }
-        if (y + 35 > area.y + area.height - 22) {
+        const auto height = marker.movement.empty() ? 39 : 57;
+        if (y + height - 4 > area.y + area.height - 22) {
             ++remaining;
             continue;
         }
         label(marker.label, x, y, 16, ink, width);
         label(marker.detail, x, y + 18, 14, muted, width);
-        y += 39;
+        if (!marker.movement.empty()) {
+            label(marker.movement, x, y + 36, 14, muted, width);
+        }
+        y += height;
     }
     if (remaining) {
         label("Scroll for " + std::to_string(remaining) + " more", x, area.y + area.height - 22, 14, muted, width);
@@ -405,7 +409,7 @@ void run(CampaignState& campaign)
             if (controls.selected) {
                 const auto count = std::ranges::count(snapshot.markers, *controls.selected, &Marker::sector);
                 controls.detail_offset = std::min(controls.detail_offset,
-                    static_cast<std::size_t>(std::max<std::ptrdiff_t>(0, count - 3)));
+                    static_cast<std::size_t>(std::max<std::ptrdiff_t>(0, count - 1)));
             }
         }
         draw(snapshot, controls, screen, campaign.war_ended());

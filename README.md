@@ -173,8 +173,19 @@ sector owners. A faction view shows its own units and reports. Ground attacks
 require confirmed territorial intelligence. Hostile sectors also require a
 reported contact or a recent complete survey. Ground defense requires
 confirmed friendly territory.
-Movement follows orthogonal, traversable sectors through known friendly
-routes. Each step spends fuel from the unit's deployed stockpile.
+Ground routes use orthogonal sectors and known friendly intermediate sectors.
+Plains have a movement cost of one, forests have twice the travel time and
+fuel cost, and water blocks ground units. A formation moves at the speed of
+its slowest ready mobile ground equipment. Prototype rates are 30 km/h for
+armor and mobile air defense, 45 km/h for ground transports, and 5 km/h for
+teams on foot.
+
+Movement and withdrawal accumulate distance from simulated time. Entering a
+leg spends one fuel unit per 2 km of sector width, rounded up, multiplied by
+the destination terrain cost. A unit and its deployed stockpile stay in the
+current sector until the leg is complete. The CLI and viewer report progress
+on the current leg and an estimated time to the destination when available.
+Convoys still use the configured travel times and fuel costs of transport links.
 
 Co-located opponents exchange abstract effects using ready equipment,
 condition, experience, morale, cohesion, fatigue, suppression, terrain,
@@ -186,8 +197,8 @@ and recovery uses the existing maintenance system and local resources.
 Capture requires an eligible ground assignment to maintain uncontested
 occupation. Defaults are 30 simulated minutes for ordinary sectors and 120
 for critical sectors. Captured installations keep their inventory and damage
-and wait through stabilization. The combat demo uses shorter intervals and
-illustrative force profiles. Either faction can win by holding the demo's
+and wait through stabilization. The combat demo uses 500 m sectors, shorter
+intervals, and illustrative force profiles. Either faction can win by holding the demo's
 central objective for three simulated minutes.
 
 Campaign endings use configured hold objectives, which can also require

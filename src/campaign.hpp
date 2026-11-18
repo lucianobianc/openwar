@@ -230,6 +230,7 @@ struct EquipmentType {
     std::uint32_t operation_range = 0;
     std::uint32_t combat_power = 0;
     bool can_occupy = false;
+    std::uint32_t ground_speed_kph = 0;
 };
 
 struct MaintenanceFacility {
@@ -384,6 +385,7 @@ public:
     const WarResult& war_result() const { return war_result_; }
     bool declare_surrender(FactionId actor);
     const auto& combat_units() const { return combat_units_; }
+    std::optional<GroundMovement> ground_movement(UnitId id) const;
     std::span<const BattleEvent> observer_battle_log() const { return battle_log_; }
     std::vector<std::pair<SectorId, SectorId>> front_line() const;
 
@@ -434,6 +436,10 @@ private:
     OrderResult schedule_ground_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
     void update_combat();
     void move_combat_unit(CombatUnit& unit, SectorId sector);
+    std::uint32_t ground_speed(UnitId id) const;
+    bool ground_opposition(SectorId sector, FactionId faction) const;
+    enum class GroundStep { no_fuel, travelling, arrived };
+    GroundStep advance_ground_leg(CombatUnit& unit, SectorId to, std::uint64_t& progress, std::uint64_t& budget);
     void release_ground_equipment(EquipmentId id);
     void resolve_engagements();
     void update_territory();

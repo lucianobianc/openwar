@@ -1162,6 +1162,123 @@ void test_long_campaign()
     }
 }
 
+void test_ground_movement()
+{
+    constexpr auto west = FactionId::west;
+    constexpr UnitId unit{1};
+    constexpr StockpileId stores{10};
+    constexpr SectorId home{0};
+    constexpr SectorId target{3};
+    constexpr std::size_t fuel = static_cast<std::size_t>(Resource::fuel);
+    auto scenario = combat_example_scenario(west);
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.world = WorldDefinition(3, 2, 2000, std::vector<SectorProperties>(6));
+    CampaignState plains(scenario, 42);
+    require(plains.issue_order(west, MissionKind::defend, target).mission.has_value() &&
+            plains.ground_movement(unit) == GroundMovement{target, 0, 240},
+            "Initial movement estimate did not account for sector size and equipment speed");
+    plains.advance_ticks(3);
+    require(plains.ground_movement(unit) == GroundMovement{target, 75, 60} &&
+            plains.units().at(unit).sector == home &&
+            plains.stockpiles().at(stores).sector == home && plains.stockpiles().at(stores).quantity[fuel] == 19,
+            "Plains traversal failed to retain progress or charged for the leg twice");
+    plains.advance_ticks(1);
+    require(!plains.ground_movement(unit) && plains.units().at(unit).sector == target &&
+            plains.stockpiles().at(stores).sector == target,
+            "The unit and its supply stock did not move together on arrival");
+
+    auto shorter_tick = scenario;
+    shorter_tick.tick_seconds = 30;
+    CampaignState half_step(shorter_tick, 42);
+    require(half_step.issue_order(west, MissionKind::defend, target).mission.has_value(),
+            "Could not schedule movement with a different simulated tick duration");
+    half_step.advance_ticks(7);
+    require(half_step.units().at(unit).sector == home, "Short ticks accelerated movement");
+    half_step.advance_ticks(1);
+    require(half_step.units().at(unit).sector == target &&
+            half_step.clock().elapsed_seconds() == plains.clock().elapsed_seconds(),
+            "Equal simulated duration yielded different arrival times");
+
+    auto forest = scenario;
+    std::vector<SectorProperties> terrain(6);
+    terrain[3].terrain = Terrain::forest;
+    forest.world = WorldDefinition(3, 2, 2000, terrain);
+    auto& deployed = *std::ranges::find(forest.stockpiles, stores, &Stockpile::id);
+    deployed.quantity[fuel] = 1;
+    CampaignState short_of_fuel(forest, 42);
+    require(!short_of_fuel.issue_order(west, MissionKind::defend, target).mission,
+            "Route planning underestimated forest fuel requirements");
+    deployed.quantity[fuel] = 2;
+    CampaignState wooded(forest, 42);
+    require(wooded.issue_order(west, MissionKind::defend, target).mission.has_value(),
+            "Exact forest fuel allocation was rejected");
+    wooded.advance_ticks(4);
+    require(wooded.ground_movement(unit) == GroundMovement{target, 50, 240} &&
+            wooded.stockpiles().at(stores).quantity[fuel] == 0 && wooded.units().at(unit).sector == home,
+            "Forest movement did not use twice the plains travel time and fuel");
+    wooded.advance_ticks(4);
+    require(wooded.units().at(unit).sector == target, "A paid leg stalled after using its last fuel");
+
+    auto mixed = scenario;
+    mixed.equipment_types.push_back({EquipmentTypeId{10}, "Slow ground transport", west,
+        EquipmentCategory::transport, {}, {}, {}, {}, 3600, 0, 0, false, 15});
+    mixed.equipment.push_back({EquipmentId{10}, EquipmentTypeId{10}, unit});
+    CampaignState convoy(mixed, 42);
+    require(convoy.issue_order(west, MissionKind::defend, target).mission.has_value() &&
+            convoy.ground_movement(unit) == GroundMovement{target, 0, 480},
+            "A mixed formation ignored its slowest ready equipment");
+    convoy.advance_ticks(2);
+    require(convoy.ground_movement(unit) == GroundMovement{target, 25, 360} &&
+            convoy.lose_equipment(EquipmentId{10}) &&
+            convoy.ground_movement(unit) == GroundMovement{target, 25, 180},
+            "Changing equipment readiness lost progress or kept an unavailable speed limit");
+    convoy.advance_ticks(3);
+    require(convoy.units().at(unit).sector == target && convoy.stockpiles().at(stores).quantity[fuel] == 19,
+            "Mixed formation arrival or leg fuel debit was incorrect");
+
+    auto detour = scenario;
+    terrain.assign(15, {});
+    for (auto i : {1, 2, 3}) {
+        terrain[i].terrain = Terrain::forest;
+    }
+    detour.world = WorldDefinition(5, 3, 2000, terrain);
+    detour.initial_sectors.clear();
+    for (std::uint32_t i = 0; i < 10; ++i) {
+        detour.initial_sectors.push_back({SectorId{i}, {west}});
+    }
+    detour.initial_sectors.push_back({SectorId{14}, {FactionId::east}});
+    detour.units[1].sector = detour.stockpiles[1].sector = detour.stockpiles[3].sector = SectorId{14};
+    detour.command_objectives.clear();
+    detour.victory_objectives.clear();
+    CampaignState roads(detour, 42);
+    require(roads.issue_order(west, MissionKind::defend, SectorId{4}).mission.has_value() &&
+            roads.ground_movement(unit) == GroundMovement{SectorId{5}, 0, 1440},
+            "Pathfinding preferred a shorter forest route to a faster plains route");
+    terrain[1] = {Terrain::water, true};
+    terrain[5] = {Terrain::plains, false};
+    detour.world = WorldDefinition(5, 3, 2000, terrain);
+    CampaignState blocked(detour, 42);
+    require(!blocked.issue_order(west, MissionKind::defend, SectorId{4}).mission &&
+            !blocked.issue_order(west, MissionKind::defend, SectorId{1}).mission &&
+            blocked.stockpiles().at(stores).quantity[fuel] == 20,
+            "Ground movement bypassed water or an impassable neighbor");
+
+    terrain.assign(15, {});
+    detour.world = WorldDefinition(5, 3, 2000, terrain);
+    detour.equipment_types.front().ground_speed_kph = 36;
+    CampaignState consecutive(detour, 42);
+    require(consecutive.issue_order(west, MissionKind::defend, SectorId{2}).mission.has_value(),
+            "Could not schedule a multi-leg movement");
+    consecutive.advance_ticks(4);
+    require(consecutive.units().at(unit).sector == SectorId{1} &&
+            consecutive.ground_movement(unit) == GroundMovement{SectorId{2}, 20, 180},
+            "Unused travel distance was lost at a sector boundary");
+    consecutive.advance_ticks(3);
+    require(consecutive.units().at(unit).sector == SectorId{2} &&
+            consecutive.stockpiles().at(stores).quantity[fuel] == 18,
+            "Multi-leg arrival time or fuel use was rounded independently for each sector");
+}
+
 void test_depleted_withdrawal()
 {
     auto scenario = combat_example_scenario();
@@ -1181,6 +1298,16 @@ void test_depleted_withdrawal()
             std::ranges::none_of(campaign.observer_battle_log(), [](const auto& event) {
                 return event.reason == "ammunition expended";
             }), "Out-of-ammunition units remained pinned despite open withdrawal routes");
+
+    scenario.world = WorldDefinition(3, 2, 2000, std::vector<SectorProperties>(6));
+    CampaignState withdrawal(scenario, 42);
+    withdrawal.advance_ticks(2);
+    require(withdrawal.units().at(UnitId{1}).sector == SectorId{1} &&
+            withdrawal.ground_movement(UnitId{1}) == GroundMovement{SectorId{0}, 25, 180},
+            "Withdrawal did not use accumulated ground movement");
+    withdrawal.advance_ticks(3);
+    require(withdrawal.units().at(UnitId{1}).sector == SectorId{0} &&
+            !withdrawal.ground_movement(UnitId{1}), "Withdrawal did not complete after four travel ticks");
 }
 
 }  // namespace
@@ -1202,5 +1329,6 @@ int main()
     test_combat_and_territory();
     test_war_endings();
     test_long_campaign();
+    test_ground_movement();
     test_depleted_withdrawal();
 }

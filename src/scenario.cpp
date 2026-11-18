@@ -94,24 +94,24 @@ ScenarioDefinition force_example_scenario()
     ServiceProfile repair{180};
     repair.costs[part] = 2;
     const auto add_type = [&](std::uint32_t number, const char* name, FactionId faction,
-                              EquipmentCategory category, UnitId unit) {
+                              EquipmentCategory category, UnitId unit, std::uint32_t speed) {
         const EquipmentTypeId type{number};
         scenario.equipment_types.push_back({
-            type, name, faction, category, preparation, {60}, scheduled, repair, 3600
+            type, name, faction, category, preparation, {60}, scheduled, repair, 3600, 0, 0, false, speed
         });
         scenario.equipment.push_back({EquipmentId{number}, type, unit});
     };
     using enum EquipmentCategory;
-    add_type(1, "AH-64A Apache", FactionId::west, helicopter, west_air);
-    add_type(2, "M1A1 Abrams", FactionId::west, tank, west_command);
-    add_type(3, "M977 HEMTT", FactionId::west, transport, west_command);
-    add_type(4, "M163 Vulcan", FactionId::west, air_defense_vehicle, west_command);
-    add_type(5, "Stinger team", FactionId::west, air_defense_team, west_command);
-    add_type(6, "Mi-24V/P Hind", FactionId::east, helicopter, east_air);
-    add_type(7, "T-72B", FactionId::east, tank, east_command);
-    add_type(8, "Ural-4320", FactionId::east, transport, east_command);
-    add_type(9, "ZSU-23-4 Shilka", FactionId::east, air_defense_vehicle, east_command);
-    add_type(10, "Igla team", FactionId::east, air_defense_team, east_command);
+    add_type(1, "AH-64A Apache", FactionId::west, helicopter, west_air, 0);
+    add_type(2, "M1A1 Abrams", FactionId::west, tank, west_command, 30);
+    add_type(3, "M977 HEMTT", FactionId::west, transport, west_command, 45);
+    add_type(4, "M163 Vulcan", FactionId::west, air_defense_vehicle, west_command, 30);
+    add_type(5, "Stinger team", FactionId::west, air_defense_team, west_command, 5);
+    add_type(6, "Mi-24V/P Hind", FactionId::east, helicopter, east_air, 0);
+    add_type(7, "T-72B", FactionId::east, tank, east_command, 30);
+    add_type(8, "Ural-4320", FactionId::east, transport, east_command, 45);
+    add_type(9, "ZSU-23-4 Shilka", FactionId::east, air_defense_vehicle, east_command, 30);
+    add_type(10, "Igla team", FactionId::east, air_defense_team, east_command, 5);
     scenario.equipment.front().operating_seconds = 3600;
     scenario.equipment.push_back({EquipmentId{11}, EquipmentTypeId{6}, east_air, "External air reserve"});
 
@@ -132,7 +132,7 @@ CampaignState maintenance_example_campaign(std::uint32_t seed)
 ScenarioDefinition combat_example_scenario(std::optional<FactionId> player)
 {
     auto scenario = example_scenario();
-    scenario.world = WorldDefinition(3, 2, 2000, std::vector<SectorProperties>(6));
+    scenario.world = WorldDefinition(3, 2, 500, std::vector<SectorProperties>(6));
     scenario.initial_sectors.push_back({SectorId{1}, {FactionId::neutral, 1}});
     scenario.operations = {true, 4, 12 * 60, 4 * 60, 24 * 60, player};
     scenario.combat = {true, 1, 2 * 60, 3 * 60, 2 * 60, 6 * 3600, 24 * 3600, 90 * 60};
@@ -160,9 +160,9 @@ ScenarioDefinition combat_example_scenario(std::optional<FactionId> player)
     ServiceProfile repair{180, {0, 0, 0, 0, 1}};
     scenario.equipment_types = {
         {EquipmentTypeId{1}, "Heavy game vehicle", FactionId::west, EquipmentCategory::tank,
-         {}, {}, {}, repair, 3600, 0, 110, true},
+         {}, {}, {}, repair, 3600, 0, 110, true, 30},
         {EquipmentTypeId{2}, "Light game vehicle", FactionId::east, EquipmentCategory::tank,
-         {}, {}, {}, repair, 3600, 0, 14, true}
+         {}, {}, {}, repair, 3600, 0, 14, true, 30}
     };
     scenario.equipment = {{EquipmentId{1}, EquipmentTypeId{1}, UnitId{1}},
                           {EquipmentId{2}, EquipmentTypeId{2}, UnitId{2}},
@@ -278,7 +278,7 @@ CampaignState long_example_campaign(std::uint32_t seed)
         ServiceProfile repair{300};
         repair.costs[static_cast<std::size_t>(Resource::spare_parts)] = 2;
         scenario.equipment_types.push_back({
-            armor, "Armored vehicle", faction, EquipmentCategory::tank, {}, {}, {300}, repair, 180 * 60, 0, 10, true
+            armor, "Armored vehicle", faction, EquipmentCategory::tank, {}, {}, {300}, repair, 180 * 60, 0, 10, true, 30
         });
         scenario.equipment_types.push_back({
             scout, "Reconnaissance helicopter", faction, EquipmentCategory::helicopter,

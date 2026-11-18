@@ -79,6 +79,7 @@ struct Mission {
     std::vector<SectorId> ground_path{};
     std::size_t ground_leg = 0;
     bool preparation_reserved = false;
+    std::uint64_t ground_progress = 0;
     bool operator==(const Mission&) const = default;
 };
 

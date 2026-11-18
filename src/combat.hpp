@@ -28,6 +28,14 @@ struct CombatUnit {
     GroundStatus status = GroundStatus::holding;
     std::optional<SectorId> withdrawal{};
     std::uint32_t suppression = 0;
+    std::uint64_t withdrawal_progress = 0;
+};
+
+struct GroundMovement {
+    SectorId next_sector;
+    std::uint32_t leg_percent;
+    std::optional<std::uint64_t> eta_seconds;
+    bool operator==(const GroundMovement&) const = default;
 };
 
 struct VictoryObjective {
