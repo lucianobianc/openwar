@@ -261,6 +261,41 @@ Separar rigorosamente **atributos militares normativos** de **metadados da simul
 
 A geometria do mundo continua contínua. Em zoom afastado, a interface pode reduzir rótulos, juntar marcadores próximos em grupos de exibição e destacar unidades de escalão superior; no zoom aproximado, revela símbolos separados e rotas. **Generalização gráfica não consolida unidades reais, não aumenta escalão e não modifica a visão da facção.** Uma agrupação temporária deve indicar quantidade e oferecer expansão/seleção. Proibir que o agrupamento revele unidades adversárias não observadas.
 
+### 5.9 Phase 2 implementation and reference coverage
+
+The normative target remains NATO APP-6 Edition E Version 2 under STANAG 2019.
+The DLA ASSIST record identifies this release as controlled distribution.
+Phase 2 uses a documented public historical subset pending verification against
+the authorized edition. [DLA ASSIST APP-06 record](https://quicksearch.dla.mil/qsDocDetails.aspx?ident_number=275338)
+
+| Rendered family | Public historical reference |
+|---|---|
+| Friendly, hostile, neutral, and unknown affiliation frames for land units, airspace, and sea surface | National Defence, *NATO Map Symbols (Canadian), Programmed Instruction Package*, January 2000, p. 5 |
+| Land infantry, armor, reconnaissance, engineers, artillery, and signals | Same publication, p. 16 |
+| Land mechanized infantry | Same publication, p. 23 |
+| Land formation echelons from platoon through division | Same publication, pp. 8–9 |
+| Administrative and logistics installations with a tab over the frame | Same publication, p. 27 |
+
+[Public copy of the Canadian National Defence instruction package](https://army.ca/wiki/images/8/80/NATO_Map_Symbol_(Canadian)_Programmed_Instruction_Package_Jan_2000.pdf)
+
+The renderer uses screen-sized geometry anchored to each map position. An
+unspecified domain uses the generic land-style frame. Function glyphs are
+limited to the listed land roles. The white observer frame and W/E labels,
+ground transport tag T, report and operational condition tags, selection ring,
+and mission pin are OpenWar conventions. Unknown reports carry only the
+domain, classification, position estimate, and freshness available through
+intelligence. Full edition conformance, SIDCs, standard status variants,
+formal label fields, platform and subsurface symbols, and full function and
+echelon coverage require further reference validation.
+
+Each formation has one marker and a scrollable inspection panel. Declared
+domain, function, and echelon are independent of the inventory. The panel
+includes existing parent and subordinate relationships, current assignments,
+ground stores, readiness, and equipment counts by type. Available includes
+available and ready items. Unavailable includes the other surviving statuses,
+including reserve and transit. The damaged count is a subset of surviving
+equipment. Carrier and installation panels use authorized campaign records.
+
 ## 6. Seleção, inspeção e edição operacional
 
 ### Phase 1 implementation

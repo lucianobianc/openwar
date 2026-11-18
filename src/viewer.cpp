@@ -1,6 +1,7 @@
 #include "command.hpp"
 #include "viewer_geography.hpp"
 #include "viewer_model.hpp"
+#include "viewer_symbols.hpp"
 #include "realtime.hpp"
 #include "scenario.hpp"
 
@@ -56,9 +57,10 @@ Layout layout()
     const float width = GetScreenWidth();
     const float height = GetScreenHeight();
     constexpr float side = 350;
+    const float details_height = std::min(350.f, height - 290);
     Layout screen{{16, 150, width - side - 48, height - 194},
-                  {width - side - 16, 150, side, 250},
-                  {width - side - 16, 413, side, height - 455},
+                  {width - side - 16, 150, side, details_height},
+                  {width - side - 16, 163 + details_height, side, height - details_height - 205},
                   {{{width - 294, 19, 108, 32}, {width - 178, 19, 76, 32}, {width - 94, 19, 78, 32}}},
                   {16, 65, 98, 32}, {126, 65, 37, 32}, {230, 65, 37, 32}, {16, 108, 73, 31}, {}};
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
@@ -211,7 +213,7 @@ void select_at(ViewControls& controls, const Snapshot& snapshot, const Geographi
         const auto dx = mouse.x - anchor.x;
         const auto dy = mouse.y - anchor.y;
         const auto distance = dx * dx + dy * dy;
-        if (distance <= 144) {
+        if (marker.symbol ? hit_military_symbol(marker, {dx, dy}) : std::abs(dx) + std::abs(dy) <= 14) {
             markers.emplace_back(distance, marker.key());
         }
     }
@@ -288,6 +290,17 @@ void choose_destination(ViewControls& controls, const Snapshot& snapshot, const 
     controls.feedback.reset();
 }
 
+std::size_t inspection_rows(Rectangle area)
+{
+    return static_cast<std::size_t>(std::max(1.f, (area.height - 248) / 18));
+}
+
+std::size_t inspection_max_offset(const Marker& marker, Rectangle area)
+{
+    const auto visible = inspection_rows(area);
+    return marker.inspection.size() > visible ? marker.inspection.size() - visible : 0;
+}
+
 void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const GeographicLayers& geography,
                       const Layout& screen)
 {
@@ -311,11 +324,14 @@ void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const Ge
         controls.event_offset = static_cast<std::size_t>(std::clamp(
             offset, 0LL, snapshot.events.empty() ? 0LL : static_cast<long long>(snapshot.events.size() - 1)));
     }
-    if (controls.selected && !controls.object && CheckCollisionPointRec(mouse, screen.details) && wheel != 0) {
+    if (CheckCollisionPointRec(mouse, screen.details) && wheel != 0) {
+        const auto* marker = selected_marker(snapshot, controls);
+        const auto last = marker ? static_cast<std::ptrdiff_t>(inspection_max_offset(*marker, screen.details)) :
+            controls.selected && !controls.object ? std::max<std::ptrdiff_t>(0, visible_marker_count(snapshot, controls) - 1) : 0;
         const auto offset = static_cast<std::ptrdiff_t>(controls.detail_offset) + (wheel > 0 ? -1 : 1);
-        controls.detail_offset = static_cast<std::size_t>(
-            std::clamp(offset, std::ptrdiff_t{0}, std::max<std::ptrdiff_t>(0, visible_marker_count(snapshot, controls) - 1)));
+        controls.detail_offset = static_cast<std::size_t>(std::clamp(offset, std::ptrdiff_t{0}, last));
     }
+
     if (CheckCollisionPointRec(mouse, screen.map)) {
         if (wheel != 0) {
             const auto anchor = GetScreenToWorld2D(mouse, controls.camera);
@@ -538,45 +554,18 @@ void draw_sectors(const Snapshot& snapshot, const ViewControls& controls, Rectan
     }
 }
 
-// The symbol renderer sees only the read model, including unidentified reports.
 void draw_marker(const Marker& marker, Vector2 at, bool selected)
 {
-    constexpr Color outline{24, 33, 40, 255};
-    const auto color = marker.faction == FactionId::west ? Color{155, 208, 251, 255} :
-        marker.faction == FactionId::east ? Color{255, 157, 164, 255} : ink;
-    const auto ring = [at](float radius, Color tint) {
-        DrawCircleLines(std::lround(at.x), std::lround(at.y), radius, tint);
-    };
-    switch (marker.kind) {
-    case MarkerKind::unit:
-        DrawCircleV(at, 7, outline);
-        DrawCircleV(at, 5, color);
-        break;
-    case MarkerKind::contact:
-        ring(7, outline);
-        ring(6, ink);
-        break;
-    case MarkerKind::carrier:
-        ring(9, outline);
-        ring(8, color);
-        DrawLineV({at.x - 11, at.y}, {at.x - 7, at.y}, color);
-        DrawLineV({at.x + 7, at.y}, {at.x + 11, at.y}, color);
-        break;
-    case MarkerKind::installation:
-    case MarkerKind::depot:
-        DrawRectangleLinesEx({at.x - 11, at.y - 11, 22, 22}, 2, outline);
-        DrawRectangleLinesEx({at.x - 10, at.y - 10, 20, 20}, 1, marker.estimated ? ink : color);
-        break;
-    case MarkerKind::mission:
+    if (marker.symbol) {
+        draw_military_symbol(marker, at);
+    } else {
         DrawLineV({at.x, at.y - 12}, {at.x + 12, at.y}, accent);
         DrawLineV({at.x + 12, at.y}, {at.x, at.y + 12}, accent);
         DrawLineV({at.x, at.y + 12}, {at.x - 12, at.y}, accent);
         DrawLineV({at.x - 12, at.y}, {at.x, at.y - 12}, accent);
-        break;
     }
     if (selected) {
-        ring(14, WHITE);
-        ring(15, outline);
+        DrawCircleLines(std::lround(at.x), std::lround(at.y), 17, WHITE);
     }
 }
 
@@ -595,15 +584,21 @@ void draw_map(const Snapshot& snapshot, const ViewControls& controls, const Geog
     draw_sectors(snapshot, controls, map);
     geography.draw_vectors(controls.camera, map, controls.layers[hydrography], controls.layers[roads],
                            controls.layers[sites], snapshot.roads, selected_feature(controls));
-    constexpr float margin = 15;
+    constexpr float margin = 27;
     const Rectangle marker_area{map.x - margin, map.y - margin, map.width + 2 * margin, map.height + 2 * margin};
     const auto* selection = selected_marker(snapshot, controls);
     for (const auto& marker : snapshot.markers) {
-        if (marker_visible(marker, controls)) {
+        if (&marker != selection && marker_visible(marker, controls)) {
             const auto position = GetWorldToScreen2D(map_position(marker.position), controls.camera);
             if (CheckCollisionPointRec(position, marker_area)) {
-                draw_marker(marker, position, selection == &marker);
+                draw_marker(marker, position, false);
             }
+        }
+    }
+    if (selection) {
+        const auto at = GetWorldToScreen2D(map_position(selection->position), controls.camera);
+        if (CheckCollisionPointRec(at, marker_area)) {
+            draw_marker(*selection, at, true);
         }
     }
     if (controls.draft && controls.draft->target) {
@@ -701,6 +696,19 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                    session.can_cancel(*marker->faction, MissionId{marker->id})) {
             button(cancel_mission_button(area), "Cancel mission");
         }
+        if (!marker->inspection.empty()) {
+            const auto visible = inspection_rows(area);
+            const auto count = marker->inspection.size();
+            const auto offset = std::min(controls.detail_offset, inspection_max_offset(*marker, area));
+            if (count > visible) {
+                label("Scroll for details  /  " + std::to_string(offset + 1) + "-" +
+                      std::to_string(std::min(offset + visible, count)) + " of " + std::to_string(count),
+                      x, y + 216, 13, muted, width);
+            }
+            for (auto i = offset; i < std::min(offset + visible, count); ++i) {
+                label(marker->inspection[i], x, y + 236 + 18 * (i - offset), 15, ink, width);
+            }
+        }
         return;
     }
     if (const auto feature = selected_feature(controls)) {
@@ -718,11 +726,12 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
         label("Map details", x, y, 23, ink, width);
         label("Click a marker, feature, or sector.", x, y + 35, 16, muted, width);
         label("Click again to cycle overlapping items.", x, y + 57, 15, muted, width);
-        label("Dot / Formation", x, y + 96, 15, ink, width);
-        label("Open circle / Reported contact", x, y + 119, 15, ink, width);
-        label("Ring with side ticks / Carrier", x, y + 142, 15, ink, width);
-        label("Square outline / Installation or stockpile", x, y + 165, 15, ink, width);
-        label("Diamond outline / Mission target", x, y + 188, 15, ink, width);
+        label("Blue / Friendly    Red / Hostile", x, y + 96, 15, ink, width);
+        label("Green / Neutral    Yellow / Unknown", x, y + 119, 15, ink, width);
+        label("White / Observer labels W and E", x, y + 142, 15, ink, width);
+        label("? / Report    T / Ground transport", x, y + 165, 15, ink, width);
+        label("Top bar / Installation or stockpile", x, y + 188, 15, ink, width);
+        label("Open diamond / Mission target", x, y + 211, 15, ink, width);
         return;
     }
     const auto id = static_cast<std::uint32_t>(*controls.selected);
@@ -919,7 +928,7 @@ void run(CampaignState& campaign, std::optional<FactionId> faction)
             territory_layer.update(snapshot);
             controls.event_offset = std::min(controls.event_offset,
                 snapshot.events.empty() ? std::size_t{0} : snapshot.events.size() - 1);
-            if (controls.selected) {
+            if (controls.selected && !controls.object) {
                 const auto count = visible_marker_count(snapshot, controls);
                 controls.detail_offset = std::min(controls.detail_offset,
                     static_cast<std::size_t>(std::max<std::ptrdiff_t>(0, count - 1)));
@@ -927,6 +936,7 @@ void run(CampaignState& campaign, std::optional<FactionId> faction)
         }
         if (controls.object && !selected_marker(snapshot, controls) && !selected_feature(controls)) {
             controls.object.reset();
+            controls.detail_offset = 0;
         }
         handle_map_input(controls, snapshot, geography, screen);
         if (handle_command_input(controls, snapshot, screen.details, session)) {

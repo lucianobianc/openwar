@@ -3,6 +3,7 @@
 
 #include "operations.hpp"
 #include "combat.hpp"
+#include "military_identity.hpp"
 
 #include <array>
 #include <cstddef>
@@ -269,6 +270,7 @@ struct MilitaryUnit {
     SectorId sector;
     std::optional<UnitId> parent{};
     std::optional<FacilityId> facility{};
+    MilitaryIdentity identity{};
 };
 
 struct UnitReadiness {
@@ -399,6 +401,7 @@ public:
     const auto& shipments() const { return shipments_; }
     const auto& carriers() const { return carriers_; }
     std::span<const LogisticsEvent> logistics_log() const { return logistics_log_; }
+    const auto& facilities() const { return facilities_; }
     const auto& units() const { return units_; }
     const auto& equipment() const { return equipment_; }
     const auto& equipment_types() const { return equipment_types_; }

@@ -422,6 +422,7 @@ ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std
     bool header = false;
     std::string text;
     std::size_t line_number = 0;
+    std::set<UnitId> declared_identities;
     while (std::getline(input, text)) {
         ScenarioLine line(text, path, ++line_number);
         const auto kind = line.keyword();
@@ -604,6 +605,31 @@ ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std
                 line.fail("unit needs either mobile stock or a facility");
             }
             s.units.push_back(std::move(unit));
+        } else if (kind == "identity") {
+            const auto id = UnitId{line.number(1u)};
+            auto& unit = require_reference(s.units, id, line, "unit");
+            if (!declared_identities.insert(id).second)
+                line.fail("duplicate unit identity");
+            const auto read_identity_field = [&](const auto& values, std::string_view field) {
+                const auto token = line.word();
+                const auto match = std::ranges::find(values, token);
+                if (match == values.end())
+                    line.fail("unknown military " + std::string(field) + " '" + token + "'");
+                return match - values.begin();
+            };
+            unit.identity.domain = static_cast<MilitaryDomain>(read_identity_field(military_domains, "domain"));
+            unit.identity.function = static_cast<MilitaryFunction>(read_identity_field(military_functions, "function"));
+            unit.identity.echelon = static_cast<MilitaryEchelon>(read_identity_field(military_echelons, "echelon"));
+        } else if (kind == "parent") {
+            const auto child = UnitId{line.number(1u)};
+            const auto parent = UnitId{line.number(1u)};
+            auto& unit = require_reference(s.units, child, line, "child unit");
+            if (unit.parent)
+                line.fail("duplicate parent for unit");
+            const auto& senior = require_reference(s.units, parent, line, "parent unit");
+            if (parent == child || senior.faction != unit.faction)
+                line.fail("parent must be another unit of the same faction");
+            unit.parent = parent;
         } else if (kind == "equipment") {
             const auto id = EquipmentId{line.number(1u)};
             const auto type = EquipmentTypeId{line.number(1u)};

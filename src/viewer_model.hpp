@@ -15,6 +15,17 @@ struct Tile {
 
 enum class MarkerKind { unit, contact, carrier, installation, depot, mission };
 
+enum class Affiliation { friendly, hostile, neutral, unknown, observer };
+enum class SymbolStatus { present, reported, destroyed };
+
+struct MilitarySymbol {
+    Affiliation affiliation;
+    MilitaryIdentity identity{};
+    SymbolStatus status = SymbolStatus::present;
+};
+
+Affiliation relative_affiliation(std::optional<FactionId> faction, std::optional<FactionId> perspective);
+
 struct MarkerKey {
     MarkerKind kind;
     std::optional<FactionId> faction;
@@ -32,6 +43,8 @@ struct Marker {
     std::string label;
     std::string detail;
     std::string movement{};
+    std::optional<MilitarySymbol> symbol{};
+    std::vector<std::string> inspection{};
 
     MarkerKey key() const { return {kind, faction, id}; }
 };

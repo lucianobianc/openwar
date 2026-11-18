@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <tuple>
 
@@ -31,6 +33,13 @@ const Marker& marker_at(const Snapshot& snapshot, MarkerKey key)
     const auto marker = std::ranges::find(snapshot.markers, key, &Marker::key);
     require(marker != snapshot.markers.end(), "Expected geographic marker is missing");
     return *marker;
+}
+
+bool has_inspection(const Marker& marker, std::string_view text)
+{
+    return std::ranges::any_of(marker.inspection, [&](const std::string& line) {
+        return line.find(text) != std::string::npos;
+    });
 }
 
 void test_geographic_snapshot()
@@ -62,6 +71,9 @@ void test_geographic_snapshot()
     const auto order = campaign.issue_order(west, MissionKind::defend, target);
     require(order.mission.has_value(), "Could not start geographic viewer fixture movement");
     const auto scheduled = read_snapshot(campaign, west);
+    require(has_inspection(marker_at(scheduled, formation), "defend #") &&
+            has_inspection(marker_at(scheduled, formation), "scheduled"),
+            "Formation inspection omitted the engine-assigned mission");
     require(marker_at(scheduled, {MarkerKind::mission, west, static_cast<std::uint32_t>(*order.mission)}).position ==
                 scenario.ground_destinations.at(target), "Mission marker did not use its geographic objective");
     campaign.advance_ticks(5);
@@ -70,7 +82,10 @@ void test_geographic_snapshot()
     const auto& moving_carrier = marker_at(moving, carrier);
     require(moving_unit.position != start && moving_unit.position == campaign.combat_units().at(UnitId{1}).position &&
             moving_carrier.position != start && moving_carrier.position == campaign.carriers().at(CarrierId{1}).position &&
-            !moving_unit.movement.empty() && !moving_carrier.movement.empty(),
+            !moving_unit.movement.empty() && !moving_carrier.movement.empty() &&
+            has_inspection(moving_carrier, "Ground transport") && has_inspection(moving_carrier, "Shipment #") &&
+            has_inspection(moving_carrier, "Cargo") && has_inspection(moving_carrier, "stockpile #") &&
+            has_inspection(moving_carrier, "L fuel") && has_inspection(depot, "Production installation"),
             "Viewer missed in-transit coordinates or movement status");
     for (const auto perspective : {west, east}) {
         const auto restricted = read_snapshot(campaign, perspective);
@@ -85,11 +100,131 @@ void test_geographic_snapshot()
     }
 }
 
+void test_military_identity()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr auto neutral = FactionId::neutral;
+    require(relative_affiliation(west, west) == Affiliation::friendly &&
+            relative_affiliation(east, east) == Affiliation::friendly &&
+            relative_affiliation(west, east) == Affiliation::hostile &&
+            relative_affiliation(east, west) == Affiliation::hostile &&
+            relative_affiliation(neutral, west) == Affiliation::neutral &&
+            relative_affiliation({}, west) == Affiliation::unknown &&
+            relative_affiliation(west, {}) == Affiliation::observer,
+            "Symbol affiliation did not follow the selected perspective");
+
+    auto scenario = combat_example_scenario(west);
+    constexpr MilitaryIdentity battalion{MilitaryDomain::land, MilitaryFunction::mechanized_infantry,
+                                        MilitaryEchelon::battalion};
+    constexpr MilitaryIdentity platoon{MilitaryDomain::land, MilitaryFunction::reconnaissance,
+                                       MilitaryEchelon::platoon};
+    scenario.units.front().identity = battalion;
+    scenario.units.push_back({UnitId{3}, "Scout platoon", west, SectorId{0}, UnitId{1}, FacilityId{1}, platoon});
+    auto support = scenario.equipment_types.front();
+    support.id = EquipmentTypeId{3};
+    support.name = "Support trucks";
+    support.category = EquipmentCategory::transport;
+    support.combat_power = 0;
+    support.can_occupy = false;
+    scenario.equipment_types.push_back(support);
+    scenario.equipment.push_back({EquipmentId{4}, support.id, UnitId{1}});
+    scenario.equipment.push_back({EquipmentId{5}, support.id, UnitId{1}, "Reserve"});
+    CampaignState campaign(scenario, 42);
+    require(campaign.damage_equipment(EquipmentId{4}, 60) && campaign.lose_equipment(EquipmentId{1}),
+            "Could not exercise damage and loss in the mixed formation");
+    constexpr MarkerKey mixed{MarkerKind::unit, west, 1};
+    const auto frame = read_snapshot(campaign, west);
+    const auto& marker = marker_at(frame, mixed);
+    require(marker.symbol->identity == battalion && marker.symbol->affiliation == Affiliation::friendly &&
+            has_inspection(marker, "mechanized infantry") && has_inspection(marker, "Echelon battalion") &&
+            has_inspection(marker, "Subordinate #3 / Scout platoon") &&
+            has_inspection(marker, "Heavy game vehicle") && has_inspection(marker, "0 damaged / 1 lost") &&
+            has_inspection(marker, "Support trucks") && has_inspection(marker, "2 unavailable") &&
+            has_inspection(marker, "1 damaged / 0 lost") && has_inspection(marker, "supplies 20"),
+            "Mixed formation lost its declared identity, hierarchy, equipment counts or supply information");
+    require(std::ranges::count(frame.markers, mixed, &Marker::key) == 1 &&
+            marker_at(frame, {MarkerKind::unit, west, 3}).symbol->identity == platoon &&
+            has_inspection(marker_at(frame, {MarkerKind::unit, west, 3}), "Parent #1 / West field group"),
+            "A mixed formation emitted equipment symbols or lost its parent relationship");
+    const auto restricted = read_snapshot(campaign, east);
+    require(std::ranges::none_of(restricted.markers, [west](const Marker& object) {
+                return object.faction == west || has_inspection(object, "Support trucks");
+            }), "Enemy view exposed military identity or inventory");
+
+    const auto legacy_path = std::getenv("LEGACY_IDENTITY_CHECKPOINT");
+    require(legacy_path != nullptr, "Military identity migration test requires a schema 5 checkpoint");
+    auto legacy = CampaignState::load(legacy_path);
+    const auto migrated = read_snapshot(legacy, west);
+    require(marker_at(migrated, mixed).symbol->identity == MilitaryIdentity{} &&
+            has_inspection(marker_at(migrated, mixed), "Echelon unspecified"),
+            "A legacy checkpoint should leave military identity unspecified");
+    CampaignState fresh(combat_example_scenario(), 42);
+    legacy.advance_ticks(10);
+    fresh.advance_ticks(10);
+    require(legacy.war_result() == fresh.war_result() &&
+            std::ranges::equal(legacy.observer_operations_log(), fresh.observer_operations_log()) &&
+            std::ranges::equal(legacy.observer_battle_log(), fresh.observer_battle_log()),
+            "A schema 5 checkpoint resumed with different simulation behavior");
+
+    const auto valley_path = std::filesystem::path(std::getenv("VALLEY_FIXTURES")) / "valley-demo.owscenario";
+    const auto valley = read_geographic_scenario(valley_path, west);
+    constexpr MilitaryIdentity company{MilitaryDomain::land, MilitaryFunction::armor, MilitaryEchelon::company};
+    require(valley.units.front().identity == company, "OWSCENARIO 1 unit identity was not read");
+    {
+        const auto path = std::filesystem::path("viewer-identity-parent.owscenario");
+        std::ifstream source(valley_path);
+        std::string line;
+        std::getline(source, line);
+        std::getline(source, line);
+        std::ofstream authored(path);
+        authored << "OWSCENARIO 1\nworld "
+                 << std::quoted(std::filesystem::absolute(valley_path.parent_path() / "valley-world.owgeo").string())
+                 << '\n' << source.rdbuf()
+                 << "\nunit 3 WEST west_base 0 1 80 \"Scout platoon\"\n"
+                 << "identity 3 land reconnaissance platoon\nparent 3 1\n";
+        authored.close();
+        const auto hierarchy = read_geographic_scenario(path, west);
+        std::filesystem::remove(path);
+        require(hierarchy.units.back().parent == UnitId{1} && hierarchy.units.back().identity == platoon,
+                "OWSCENARIO 1 failed to preserve the declared command relationship");
+    }
+    auto plain_valley = valley;
+    for (auto& unit : plain_valley.units) {
+        unit.identity = {};
+    }
+    CampaignState declared(valley, 42);
+    CampaignState unspecified(plain_valley, 42);
+    const auto objective = valley.objectives.front().sector;
+    require(declared.issue_order(west, MissionKind::defend, objective).mission ==
+            unspecified.issue_order(west, MissionKind::defend, objective).mission,
+            "Declared identity changed the order assignment");
+    declared.advance_ticks(2);
+    unspecified.advance_ticks(2);
+    const auto checkpoint = std::filesystem::path("viewer-identity-roundtrip.ows");
+    declared.save(checkpoint);
+    auto resumed = CampaignState::load(checkpoint);
+    std::filesystem::remove(checkpoint);
+    require(resumed.units().at(UnitId{1}).identity == company, "Checkpoint lost declared military identity");
+    resumed.advance_ticks(40);
+    declared.advance_ticks(40);
+    unspecified.advance_ticks(40);
+    for (const auto* other : {&resumed, &unspecified}) {
+        require(other->war_result() == declared.war_result() && other->front_line() == declared.front_line() &&
+                std::ranges::equal(other->observer_operations_log(), declared.observer_operations_log()) &&
+                std::ranges::equal(other->observer_battle_log(), declared.observer_battle_log()) &&
+                std::ranges::equal(other->logistics_log(), declared.logistics_log()) &&
+                std::ranges::equal(other->forces_log(), declared.forces_log()),
+                "Declared military identity or a resumed checkpoint changed campaign behavior");
+    }
+}
+
 }  // namespace
 
 int main()
 {
     test_geographic_snapshot();
+    test_military_identity();
     CampaignState economy(example_scenario(), 42);
     economy.advance_ticks(5);
     const auto economy_observer = read_snapshot(economy, {});
@@ -138,7 +273,12 @@ int main()
     require(has_marker(contested, MarkerKind::mission, "attack #1") &&
             std::ranges::any_of(west_battle.markers, [&](const Marker& marker) {
                 return marker.kind == MarkerKind::contact && marker.sector == SectorId{1} && marker.estimated &&
-                       marker.position == west_battle.sector_center(marker.sector);
+                       marker.position == west_battle.sector_center(marker.sector) &&
+                       marker.symbol && marker.symbol->affiliation == Affiliation::unknown &&
+                       marker.symbol->status == SymbolStatus::reported &&
+                       marker.symbol->identity.function == MilitaryFunction::unspecified &&
+                       marker.symbol->identity.echelon == MilitaryEchelon::unspecified &&
+                       marker.inspection.empty();
             }) && !has_marker(west_battle, MarkerKind::unit, "East field group"),
             "Viewer lost a mission or rendered a reported contact as a true unit");
     require(!west_battle.events.empty() && std::ranges::all_of(west_battle.events, [](const Event& event) {

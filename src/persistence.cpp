@@ -12,7 +12,7 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 5;
+constexpr std::uint64_t schema_version = 6;
 constexpr std::uint64_t rules_version = 6;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
@@ -188,7 +188,12 @@ template<class A> void fields(A& a, Field<A, MaintenanceFacility>& v)
 { a(v.id, v.stockpile, v.bays, v.technicians, v.operational, v.supported_types); }
 
 template<class A> void fields(A& a, Field<A, MilitaryUnit>& v)
-{ a(v.id, v.name, v.faction, v.sector, v.parent, v.facility); }
+{
+    a(v.id, v.name, v.faction, v.sector, v.parent, v.facility);
+    if (a.version >= 6) {
+        a(v.identity.domain, v.identity.function, v.identity.echelon);
+    }
+}
 
 template<class A> void fields(A& a, Field<A, EquipmentAssignment>& v)
 { a(v.id, v.type, v.unit, v.reserve_source, v.operating_seconds); }
@@ -301,6 +306,9 @@ constexpr auto last_value(ShipmentStatus) { return ShipmentStatus::lost; }
 constexpr auto last_value(LogisticsDelay) { return LogisticsDelay::closed; }
 constexpr auto last_value(LogisticsEventKind) { return LogisticsEventKind::crossed; }
 constexpr auto last_value(EquipmentCategory) { return EquipmentCategory::air_defense_team; }
+constexpr auto last_value(MilitaryDomain) { return MilitaryDomain::sea; }
+constexpr auto last_value(MilitaryFunction) { return MilitaryFunction::support; }
+constexpr auto last_value(MilitaryEchelon) { return MilitaryEchelon::division; }
 constexpr auto last_value(EquipmentStatus) { return EquipmentStatus::lost; }
 constexpr auto last_value(ServiceKind) { return ServiceKind::repair; }
 constexpr auto last_value(ForcesEventKind) { return ForcesEventKind::arrival_delayed; }
@@ -1040,6 +1048,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 5 || rules != 6) &&
         (schema != 4 || rules != 5) &&
         (schema != 3 || (rules != 3 && rules != 4)) &&
         (schema != 2 || rules != 2) && (schema != 1 || rules != 1)) {

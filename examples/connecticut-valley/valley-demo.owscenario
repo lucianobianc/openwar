@@ -39,6 +39,8 @@ type 1 WEST tank 110 1 30 0 3600 180 1 valley "Heavy game vehicle"
 type 2 EAST tank 14 1 30 0 3600 180 1 valley "Light game vehicle"
 unit 1 WEST west_base 10 1 80 "West field group"
 unit 2 EAST east_base 11 2 40 "East field group"
+identity 1 land armor company
+identity 2 land armor platoon
 equipment 1 1 1
 equipment 2 2 2
 equipment 3 2 2

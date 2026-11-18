@@ -17,11 +17,16 @@ std::span<const Entry> recent(std::span<const Entry> events)
     return events.last(std::min(events.size(), event_limit));
 }
 
-void add_missions(Snapshot& snapshot, const CampaignState& campaign, const FactionView& view)
+bool active_mission(const Mission& mission)
 {
-    for (const auto& mission : view.missions) {
-        if (mission.status != MissionStatus::scheduled && mission.status != MissionStatus::preparing &&
-            mission.status != MissionStatus::in_progress) {
+    return mission.status == MissionStatus::scheduled || mission.status == MissionStatus::preparing ||
+        mission.status == MissionStatus::in_progress;
+}
+
+void add_missions(Snapshot& snapshot, const CampaignState& campaign, std::span<const Mission> missions)
+{
+    for (const auto& mission : missions) {
+        if (!active_mission(mission)) {
             continue;
         }
         const auto assigned = campaign.equipment().at(mission.equipment).assignment.unit;
@@ -44,6 +49,24 @@ Event operation_event(const OperationsEvent& event)
     return {event.tick, std::string(event.reason) + " / " + label, event.sequence};
 }
 
+std::string number_label(std::string_view label, auto id)
+{
+    return std::string(label) + " #" + std::to_string(static_cast<std::uint32_t>(id));
+}
+
+std::string position_label(geography::Point point)
+{
+    return "E " + std::to_string(point.east) + " / S " + std::to_string(point.south) + " mm";
+}
+
+struct InventoryCount {
+    std::size_t available = 0;
+    std::size_t unavailable = 0;
+    std::size_t damaged = 0;
+    std::size_t lost = 0;
+};
+
+
 void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optional<FactionId> perspective)
 {
     for (const auto& [id, carrier] : campaign.carriers()) {
@@ -53,22 +76,46 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
         const auto number = static_cast<std::uint32_t>(id);
         std::string detail = "Idle";
         std::string movement;
+        std::vector<std::string> inspection{std::string(faction_name(carrier.faction)) + " / Ground transport",
+            std::to_string(carrier.fuel) + " / " + std::to_string(carrier.tank_capacity) + " L fuel"};
         if (carrier.shipment) {
             const auto& shipment = campaign.shipments().at(*carrier.shipment);
             detail = std::string(shipment_status_name(shipment.status)) + " / Shipment #" +
                 std::to_string(static_cast<std::uint32_t>(*carrier.shipment));
             movement = std::to_string(shipment.cargo) + " " + std::string(resource_name(shipment.request.resource));
+            const auto pickup = shipment.cargo == 0;
+            const auto endpoint = pickup ? shipment.request.origin : shipment.request.destination;
+            inspection.push_back(detail);
+            inspection.push_back("Cargo " + movement + " / capacity " + std::to_string(carrier.capacity));
+            inspection.push_back(number_label(pickup ? "Pickup stockpile" : "Delivery stockpile", endpoint));
             if (shipment.journey) {
+                inspection.push_back(position_label(shipment.journey->destination));
                 movement += " / " + std::to_string(shipment.journey->progress.elapsed_us / 1'000'000) +
                     " s in journey";
             }
+        } else {
+            inspection.push_back("Unassigned / no cargo");
+            inspection.push_back("Cargo capacity " + std::to_string(carrier.capacity));
         }
         detail += " / " + std::to_string(carrier.fuel) + " L fuel";
         snapshot.markers.push_back({carrier.sector, MarkerKind::carrier, carrier.faction, number,
             carrier.position.value(), false, "Carrier #" + std::to_string(number), std::move(detail),
-            std::move(movement)});
+            std::move(movement), MilitarySymbol{relative_affiliation(carrier.faction, perspective),
+                {MilitaryDomain::land, MilitaryFunction::transport}}, std::move(inspection)});
     }
 
+    std::map<StockpileId, std::vector<std::string>> maintenance;
+    for (const auto& [id, facility] : campaign.facilities()) {
+        maintenance[facility.stockpile].push_back(number_label("Maintenance facility", id) +
+            (facility.operational ? " / operational" : " / offline"));
+    }
+    const auto add_maintenance = [&](StockpileId stock) {
+        const auto found = maintenance.find(stock);
+        if (found != maintenance.end()) {
+            auto& rows = snapshot.markers.back().inspection;
+            rows.insert(rows.end(), found->second.begin(), found->second.end());
+        }
+    };
     std::set<StockpileId> installation_stocks;
     for (const auto& state : campaign.installations()) {
         const auto& installation = state.installation;
@@ -81,7 +128,19 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
             static_cast<std::uint32_t>(installation.id), campaign.stockpile_position(stock.id), false,
             installation.name, std::string(faction_name(installation.operator_faction)) + " / " +
                 std::to_string(installation.integrity) + "% integrity / " +
-                (installation.has_power ? "power on" : "power off")});
+                (installation.has_power ? "power on" : "power off"), {},
+            MilitarySymbol{relative_affiliation(installation.operator_faction, perspective),
+                {MilitaryDomain::land}, installation.integrity == 0 ? SymbolStatus::destroyed : SymbolStatus::present},
+            {"Production installation", number_label("Supply stockpile", stock.id),
+             "Workers " + std::to_string(installation.workers),
+             "Reactivation remaining " + std::to_string(state.reactivation_seconds) + " s"}});
+        for (std::size_t i = 0; i < installation.recipe.outputs.size(); ++i) {
+            if (const auto quantity = installation.recipe.outputs[i]) {
+                snapshot.markers.back().inspection.push_back("Produces " + std::to_string(quantity) + " " +
+                    std::string(resource_name(static_cast<Resource>(i))) + " per batch");
+            }
+        }
+        add_maintenance(stock.id);
     }
     for (const auto& [id, stock] : campaign.stockpiles()) {
         if (!stock.access_point || installation_stocks.contains(id) || (perspective && stock.owner != *perspective)) {
@@ -89,11 +148,146 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
         }
         const auto number = static_cast<std::uint32_t>(id);
         snapshot.markers.push_back({stock.sector, MarkerKind::depot, stock.owner, number, *stock.access_point,
-            false, "Stockpile #" + std::to_string(number), std::string(faction_name(stock.owner))});
+            false, "Stockpile #" + std::to_string(number), std::string(faction_name(stock.owner)), {},
+            MilitarySymbol{relative_affiliation(stock.owner, perspective), {MilitaryDomain::land}},
+            {"Supply stockpile"}});
+        add_maintenance(id);
+    }
+}
+
+void add_formations(Snapshot& snapshot, const CampaignState& campaign, std::optional<FactionId> perspective,
+                    std::span<const Mission> missions)
+{
+    std::map<UnitId, std::map<EquipmentTypeId, InventoryCount>> inventory;
+    std::map<UnitId, UnitReadiness> readiness_by_unit;
+    for (const auto& [id, item] : campaign.equipment()) {
+        const auto unit = item.assignment.unit;
+        if (perspective && campaign.units().at(unit).faction != perspective) {
+            continue;
+        }
+        auto& count = inventory[unit][item.assignment.type];
+        auto& readiness = readiness_by_unit[unit];
+        if (item.status == EquipmentStatus::lost) {
+            ++count.lost;
+            ++readiness.lost;
+            continue;
+        }
+        if (item.damage) {
+            ++count.damaged;
+        }
+        if (item.status == EquipmentStatus::available || item.status == EquipmentStatus::ready) {
+            ++count.available;
+            ++readiness.ready;
+        } else {
+            ++count.unavailable;
+        }
+        if (item.status != EquipmentStatus::reserve && item.status != EquipmentStatus::in_transit) {
+            ++readiness.active;
+        }
+    }
+    std::map<UnitId, std::vector<UnitId>> children;
+    for (const auto& [id, unit] : campaign.units()) {
+        if (unit.parent && (!perspective || unit.faction == perspective)) {
+            children[*unit.parent].push_back(id);
+        }
+    }
+    std::map<UnitId, std::vector<const Mission*>> assignments;
+    for (const auto& mission : missions) {
+        if (active_mission(mission)) {
+            assignments[campaign.equipment().at(mission.equipment).assignment.unit].push_back(&mission);
+        }
+    }
+
+    for (const auto& [id, unit] : campaign.units()) {
+        if (perspective && unit.faction != perspective) {
+            continue;
+        }
+        const auto readiness = readiness_by_unit[id];
+        const auto& identity = unit.identity;
+        std::string function(military_functions[static_cast<std::size_t>(identity.function)]);
+        std::ranges::replace(function, '-', ' ');
+        std::vector<std::string> inspection{std::string(faction_name(unit.faction)) + " / " +
+            std::string(military_domains[static_cast<std::size_t>(identity.domain)]),
+            "Function " + function,
+            "Echelon " + std::string(military_echelons[static_cast<std::size_t>(identity.echelon)])};
+        if (unit.parent) {
+            inspection.push_back(number_label("Parent", *unit.parent) + " / " + campaign.units().at(*unit.parent).name);
+        }
+        for (const auto child : children[id]) {
+            inspection.push_back(number_label("Subordinate", child) + " / " + campaign.units().at(child).name);
+        }
+        if (assignments[id].empty()) {
+            inspection.push_back("No active mission");
+        }
+        for (const auto* mission : assignments[id]) {
+            inspection.push_back(number_label(mission_name(mission->kind), mission->id) +
+                " / " + std::string(mission_status_name(mission->status)));
+        }
+        auto detail = std::to_string(readiness.ready) + "/" + std::to_string(readiness.active) + " ready";
+        if (readiness.lost) {
+            detail += " / " + std::to_string(readiness.lost) + " lost";
+        }
+        const auto combat = campaign.combat_units().find(id);
+        std::optional<geography::Point> position;
+        auto status = SymbolStatus::present;
+        if (combat != campaign.combat_units().end()) {
+            detail += " / ";
+            detail += ground_status_name(combat->second.status);
+            position = combat->second.position;
+            if (combat->second.status == GroundStatus::destroyed) {
+                status = SymbolStatus::destroyed;
+            }
+            const auto& stores = campaign.stockpiles().at(combat->second.stores);
+            for (const auto resource : {Resource::fuel, Resource::supplies, Resource::ammunition}) {
+                inspection.push_back(std::string(resource_name(resource)) + " " +
+                    std::to_string(stores.quantity[static_cast<std::size_t>(resource)]));
+            }
+        } else if (unit.facility) {
+            const auto stock = campaign.facilities().at(*unit.facility).stockpile;
+            const auto& stores = campaign.stockpiles().at(stock);
+            if (stores.sector == unit.sector) {
+                position = stores.access_point;
+            }
+        }
+        std::string movement_detail;
+        if (const auto movement = campaign.ground_movement(id)) {
+            movement_detail = "To sector " + std::to_string(static_cast<std::uint32_t>(movement->next_sector)) +
+                " / " + std::to_string(movement->leg_percent) + "% / ETA ";
+            movement_detail += movement->eta_seconds ? std::to_string(*movement->eta_seconds) + "s" : "unavailable";
+        }
+        if (inventory[id].empty()) {
+            inspection.push_back("No equipment assigned");
+        }
+        for (const auto& [type_id, count] : inventory[id]) {
+            inspection.push_back(number_label("Type", type_id) + " / " + campaign.equipment_types().at(type_id).name);
+            inspection.push_back(std::to_string(count.available) + " available / " +
+                                 std::to_string(count.unavailable) + " unavailable");
+            inspection.push_back(std::to_string(count.damaged) + " damaged / " + std::to_string(count.lost) + " lost");
+        }
+        snapshot.markers.push_back({
+            unit.sector, MarkerKind::unit, unit.faction, static_cast<std::uint32_t>(id),
+            position.value_or(snapshot.sector_center(unit.sector)), !position, unit.name,
+            std::move(detail), std::move(movement_detail),
+            MilitarySymbol{relative_affiliation(unit.faction, perspective), identity, status}, std::move(inspection)
+        });
     }
 }
 
 }  // namespace
+
+Affiliation relative_affiliation(std::optional<FactionId> faction, std::optional<FactionId> perspective)
+{
+    if (!faction) {
+        return Affiliation::unknown;
+    }
+    if (*faction == FactionId::neutral) {
+        return Affiliation::neutral;
+    }
+    if (!perspective) {
+        return Affiliation::observer;
+    }
+    return faction == perspective ? Affiliation::friendly : Affiliation::hostile;
+}
 
 geography::Point Snapshot::sector_center(SectorId sector) const
 {
@@ -137,65 +331,46 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
         snapshot.tiles.push_back(tile);
     }
 
-    for (const auto& [id, unit] : campaign.units()) {
-        if (perspective && unit.faction != perspective) {
-            continue;
+    std::vector<Mission> observer_missions;
+    if (!perspective && campaign.has_operational_view()) {
+        for (const auto faction : {FactionId::west, FactionId::east}) {
+            const auto known = campaign.faction_view(faction, false);
+            observer_missions.insert(observer_missions.end(), known.missions.begin(), known.missions.end());
         }
-        const auto readiness = campaign.unit_readiness(id);
-        auto detail = std::to_string(readiness.ready) + "/" + std::to_string(readiness.active) + " ready";
-        if (readiness.lost) {
-            detail += " / " + std::to_string(readiness.lost) + " lost";
-        }
-        const auto combat = campaign.combat_units().find(id);
-        std::optional<geography::Point> position;
-        if (combat != campaign.combat_units().end()) {
-            detail += " / ";
-            detail += ground_status_name(combat->second.status);
-            position = combat->second.position;
-        }
-        std::string movement_detail;
-        if (const auto movement = campaign.ground_movement(id)) {
-            movement_detail = "To sector " + std::to_string(static_cast<std::uint32_t>(movement->next_sector)) +
-                " / " + std::to_string(movement->leg_percent) + "% / ETA ";
-            movement_detail += movement->eta_seconds ? std::to_string(*movement->eta_seconds) + "s" : "unavailable";
-        }
-        snapshot.markers.push_back({
-            unit.sector, MarkerKind::unit, unit.faction, static_cast<std::uint32_t>(id),
-            position.value_or(snapshot.sector_center(unit.sector)), !position, unit.name,
-            std::move(detail), std::move(movement_detail)
-        });
     }
+    const auto& missions = perspective ? view.missions : observer_missions;
+    add_formations(snapshot, campaign, perspective, missions);
     add_logistics(snapshot, campaign, perspective);
 
     if (perspective) {
         for (const auto& contact : view.contacts) {
+            const auto domain = contact.classification == "aircraft" ? MilitaryDomain::air :
+                contact.classification == "ground" ? MilitaryDomain::land : MilitaryDomain::unspecified;
             snapshot.markers.push_back({
                 contact.estimated_sector, MarkerKind::contact, {}, static_cast<std::uint32_t>(contact.id),
                 snapshot.sector_center(contact.estimated_sector), true,
                 "Contact #" + std::to_string(static_cast<std::uint32_t>(contact.id)),
                 std::string(contact.classification) + " / " + std::string(confidence_name(contact.confidence)) +
-                    " / tick " + std::to_string(contact.observed_tick)
+                    " / tick " + std::to_string(contact.observed_tick), {},
+                MilitarySymbol{Affiliation::unknown, {domain}, SymbolStatus::reported}
             });
         }
         for (const auto& site : view.installations) {
             snapshot.markers.push_back({
                 site.sector, MarkerKind::installation, {}, static_cast<std::uint32_t>(site.sector),
                 snapshot.sector_center(site.sector), true, "Reported installation",
-                std::string(confidence_name(site.confidence)) + " / tick " + std::to_string(site.observed_tick)
+                std::string(confidence_name(site.confidence)) + " / tick " + std::to_string(site.observed_tick), {},
+                MilitarySymbol{Affiliation::unknown, {}, SymbolStatus::reported}
             });
         }
-        add_missions(snapshot, campaign, view);
+        add_missions(snapshot, campaign, missions);
         for (const auto& event : recent(std::span<const OperationsEvent>{view.events})) {
             snapshot.events.push_back(operation_event(event));
         }
         return snapshot;
     }
 
-    if (campaign.has_operational_view()) {
-        for (auto faction : {FactionId::west, FactionId::east}) {
-            add_missions(snapshot, campaign, campaign.faction_view(faction, false));
-        }
-    }
+    add_missions(snapshot, campaign, missions);
     for (const auto& event : recent(campaign.logistics_log())) {
         snapshot.events.push_back({
             event.tick, "Shipment " + std::to_string(static_cast<std::uint32_t>(event.shipment)) +

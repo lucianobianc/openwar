@@ -109,7 +109,7 @@ void CampaignState::initialize_forces(const ScenarioDefinition& scenario)
     for (const auto& unit : scenario.units) {
         world_.sector(unit.sector);
         faction_name(unit.faction);
-        if (unit.name.empty() || unit.faction == FactionId::neutral ||
+        if (unit.name.empty() || unit.faction == FactionId::neutral || !valid_military_identity(unit.identity) ||
             !units_.emplace(unit.id, unit).second) {
             throw std::invalid_argument("Invalid or duplicate military unit");
         }

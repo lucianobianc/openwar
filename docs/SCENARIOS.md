@@ -104,6 +104,8 @@ referencing them.
 | `facility ID STOCK BAYS TECHNICIANS OPERATIONAL` | Maintenance facility at a fixed stockpile. |
 | `type ID SIDE CATEGORY POWER OCCUPIES SPEED_KPH RANGE SERVICE_SECONDS REPAIR_SECONDS REPAIR_PARTS MOBILITY "NAME"` | Equipment type. Range is in sectors. Service seconds set the service interval. The three other service profiles use engine defaults. |
 | `unit ID SIDE POINT MOBILE_STOCK FACILITY MORALE "NAME"` | Ground units use a dedicated mobile stockpile and may use a local facility. A unit without mobile stock must deploy at its facility. Use 0 for an omitted reference. |
+| `identity UNIT DOMAIN FUNCTION ECHELON` | Optional declared military identity. Use after the unit record. |
+| `parent CHILD PARENT` | Optional existing command relationship. Declare both same-faction units first. |
 | `equipment ID TYPE UNIT` | Assign one starting equipment item. |
 | `carrier ID SIDE POINT CAPACITY FUEL MOBILITY` | Logistics carrier and initial fuel in litres. |
 | `shipment ID ORIGIN DESTINATION RESOURCE QUANTITY PRIORITY` | Initial supply request. |
@@ -111,6 +113,25 @@ referencing them.
 | `timing TICK_SECONDS ECONOMY_TICKS LOAD_TICKS UNLOAD_TICKS TIME_LIMIT_SECONDS` | Optional clock and timing record. Zero time limit disables the limit. |
 | `operations PLANNER_TICKS STRATEGY_TICKS MAX_ORDERS TERRITORY_HALF_LIFE CONTACT_HALF_LIFE INSTALLATION_HALF_LIFE` | Optional planning settings. Use 0 to disable an interval. Half-lives use seconds. |
 | `combat INTERVAL_TICKS OCCUPATION_SECONDS CRITICAL_SECONDS STABILIZATION_SECONDS CAPITULATION_SECONDS REINFORCEMENT_HORIZON_SECONDS` | Optional abstract combat settings. |
+
+Identity fields accept the following case-sensitive values.
+
+- Domain is `land`, `air`, `sea` (surface), or `unspecified`.
+- Function is `infantry`, `armor`, `mechanized-infantry`, `reconnaissance`,
+  `artillery`, `engineer`, `signals`, `transport`, `support`, or `unspecified`.
+- Echelon is `platoon`, `company`, `battalion`, `regiment`, `brigade`,
+  `division`, or `unspecified`.
+
+For example, `identity 1 land mechanized-infantry battalion` declares the
+organization of unit 1 independently of any `equipment` records. Omitted
+identity defaults to unspecified. Cyclic command relationships are invalid.
+
+Checkpoint schema 6 stores the declared identity for each military unit.
+Simulation rules remain at version 6. The reader accepts the previously
+supported schema/rules combinations and supplies unspecified identity for
+older checkpoints. Saving a migrated checkpoint writes schema 6, which
+requires a reader that supports schema 6. The scenario fingerprint includes
+declared identity.
 
 Faction names are `WEST` and `EAST`. `NEUTRAL` can own sectors and fixed
 stocks. Flags use 0 or 1. Resource vectors list seven nonnegative integers
