@@ -139,4 +139,10 @@ int main()
             std::ranges::any_of(preview.markers, [](const Marker& marker) {
                 return marker.kind == MarkerKind::installation;
             }), "The viewer did not use the generated world and infrastructure");
+    settings.width = settings.height = 128;
+    const auto large = procedural_campaign(settings);
+    const auto large_preview = read_snapshot(large, {});
+    require(large_preview.width == 128 && large_preview.height == 128 &&
+            large_preview.tiles.size() == 16384 && large_preview.sector_size_m == 2000,
+            "The viewer truncated a large procedural world or changed its physical scale");
 }

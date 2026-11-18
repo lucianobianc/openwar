@@ -1481,9 +1481,89 @@ void test_procedural_campaign()
                 return event.kind == LogisticsEventKind::delivered;
             }), "Procedural campaigns did not run reproducibly through the shared simulator");
 
-    settings.width = 12;
+    settings.width = 129;
     require_throws<std::invalid_argument>([&] { resolve_procedural_scenario(settings); },
                                           "An incompatible procedural map size was accepted");
+}
+
+void test_large_procedural_campaigns()
+{
+    for (const auto size : {32u, 64u, 128u}) {
+        ProceduralSettings settings;
+        settings.seed = 42;
+        settings.width = settings.height = size;
+        settings.crossings = size / 8;
+        settings.west_armor = settings.east_armor = 5;
+        settings.reserve_armor = 2;
+        settings.scout_flights = 4;
+        settings.ammunition = 800;
+        const auto scenario = resolve_procedural_scenario(settings);
+        const auto field = [&scenario](StockpileId id) -> const Stockpile& {
+            return *std::ranges::find(scenario.stockpiles, id, &Stockpile::id);
+        };
+        require(scenario.world.sectors().size() == size * size && scenario.world.sector_size_m() == 2000 &&
+                scenario.combat_units.size() == 2 * settings.crossings &&
+                scenario.equipment.size() == 14 * settings.crossings + 8 &&
+                scenario.public_sectors.size() == 2 * settings.crossings,
+                "Large generation changed the sector scale or lost formations or crossings");
+        for (const auto& unit : scenario.units) {
+            require(scenario.world.sector(unit.sector).properties.traversable &&
+                    scenario.initial_sectors.at(static_cast<std::uint32_t>(unit.sector)).state.controller == unit.faction,
+                    "A generated formation starts on impassable or hostile ground");
+        }
+        for (const auto& command : scenario.command_objectives) {
+            std::set<SectorId> reached{command.sectors.front()};
+            std::queue<SectorId> todo;
+            todo.push(command.sectors.front());
+            while (!todo.empty()) {
+                const auto sector = todo.front();
+                todo.pop();
+                for (const auto& route : scenario.routes) {
+                    if (route.from != sector) {
+                        continue;
+                    }
+                    require(scenario.world.sector(route.to).properties.traversable,
+                            "A large-world road lies on impassable terrain");
+                    const auto owner = scenario.initial_sectors.at(static_cast<std::uint32_t>(route.to)).state.controller;
+                    if ((owner == command.faction || owner == FactionId::neutral) && reached.insert(route.to).second) {
+                        todo.push(route.to);
+                    }
+                }
+            }
+            require(std::ranges::all_of(scenario.stockpiles, [&](const auto& stock) {
+                        return stock.owner != command.faction || reached.contains(stock.sector);
+                    }) && std::ranges::all_of(scenario.public_sectors, [&](auto sector) {
+                        return reached.contains(sector);
+                    }), "A large faction has inaccessible stockpiles or crossings");
+            const auto victory = std::ranges::find(scenario.victory_objectives, command.faction, &VictoryObjective::faction);
+            require(victory != scenario.victory_objectives.end() &&
+                    victory->sectors.size() == scenario.public_sectors.size() + 1 &&
+                    scenario.initial_sectors.at(static_cast<std::uint32_t>(victory->sectors.back())).state.controller !=
+                        command.faction, "A large faction has no opposing victory objective");
+        }
+        for (const auto& unit : scenario.combat_units) {
+            const auto from = field(unit.stores).sector;
+            require(std::ranges::any_of(scenario.world.sector(from).neighbors, [&](auto sector) {
+                        return std::ranges::find(scenario.public_sectors, sector) != scenario.public_sectors.end();
+                    }), "A generated ground formation has no accessible first objective");
+        }
+        auto batch = procedural_campaign(settings);
+        auto stepped = procedural_campaign(settings);
+        require(std::ranges::equal(batch.world().sectors(), stepped.world().sectors(),
+                                   [](const Sector& left, const Sector& right) {
+                                       return left.id == right.id && left.properties.terrain == right.properties.terrain;
+                                   }), "A large procedural map changed when regenerated with the same seed");
+        batch.advance_ticks(120);
+        for (int i = 0; i < 12; ++i) {
+            stepped.advance_ticks(10);
+        }
+        require(batch.clock().elapsed_seconds() == 7200 &&
+                !batch.observer_battle_log().empty() &&
+                std::ranges::equal(batch.observer_operations_log(), stepped.observer_operations_log()) &&
+                std::ranges::equal(batch.observer_battle_log(), stepped.observer_battle_log()) &&
+                std::ranges::equal(batch.logistics_log(), stepped.logistics_log()),
+                "Large campaigns did not exercise shared rules deterministically");
+    }
 }
 
 void test_ground_movement()
@@ -1657,6 +1737,7 @@ int main()
     test_long_campaign();
     test_strategic_command();
     test_procedural_campaign();
+    test_large_procedural_campaigns();
     test_ground_movement();
     test_depleted_withdrawal();
 }

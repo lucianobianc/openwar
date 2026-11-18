@@ -189,7 +189,7 @@ EOF
     printf '%s\n' "$run" | grep -Fx 'Campaign summary | seed 42'
     reject --demo combat --scenario "$scratch/setup.toml" --ticks 0
     reject --demo procedural --seed 18446744073709551616 --ticks 0
-    for invalid in 'width = 12' 'seed = -1' 'unknown = 1' 'generator_version = 2' 'schema_version = 1' 'width ='; do
+    for invalid in 'width = 129' 'seed = -1' 'unknown = 1' 'generator_version = 2' 'schema_version = 1' 'width ='; do
         printf 'schema_version = 1\n%s\n' "$invalid" >"$scratch/invalid.toml"
         reject --scenario "$scratch/invalid.toml" --ticks 0
     done

@@ -210,6 +210,7 @@ bool CampaignState::update_strategy(FactionId faction)
     const auto dispatch = [&](Mission mission, std::string_view reason) {
         const auto target = mission.target;
         const auto id = commit_ground_mission(std::move(mission));
+        view.missions.push_back(missions_.at({faction, id}));
         record_event(operations_log_, {tick, faction, target, id, reason});
         ++assigned;
         changed = true;
@@ -219,8 +220,9 @@ bool CampaignState::update_strategy(FactionId faction)
         if (busy.contains(sector) || assigned >= limit) {
             return;
         }
-        const auto order = schedule_mission(faction, MissionKind::recon, sector, false);
+        const auto order = schedule_air_mission(faction, MissionKind::recon, sector, false, view);
         if (order.mission) {
+            view.missions.push_back(missions_.at({faction, *order.mission}));
             record_event(operations_log_, {tick, faction, sector, order.mission, "strategy: survey approach"});
             changed = true;
             ++assigned;
@@ -249,7 +251,6 @@ bool CampaignState::update_strategy(FactionId faction)
         if (busy.contains(target) || garrisons[target] >= std::max<std::size_t>(1, opposition)) {
             continue;
         }
-        view = faction_view(faction, false);
         if (auto order = plan_ground_mission(faction, MissionKind::defend, target, view, guards)) {
             dispatch(std::move(*order), "strategy: defend reported threat");
         }
@@ -279,7 +280,6 @@ bool CampaignState::update_strategy(FactionId faction)
         if (busy.contains(target) || !tried.insert(target).second) {
             continue;
         }
-        view = faction_view(faction, false);
         const auto report = view.sectors.find(target);
         const bool stale_contact = report != view.sectors.end() &&
             std::ranges::any_of(view.contacts, [&](const auto& contact) {

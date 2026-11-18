@@ -74,9 +74,15 @@ struct GroundPath {
 };
 
 GroundPath find_ground_path(const WorldDefinition& world, const FactionView& view,
-                            FactionId faction, SectorId from, SectorId to)
+                            FactionId faction, SectorId from, SectorId to, std::uint64_t budget)
 {
-    if (!ground_weight(world.sector(from))) {
+    const auto& goal = world.sector(to);
+    const auto lower_bound = [&goal](const Sector& sector) {
+        return std::uint64_t{std::max(sector.x, goal.x) - std::min(sector.x, goal.x)} +
+               std::max(sector.y, goal.y) - std::min(sector.y, goal.y);
+    };
+    const auto& origin = world.sector(from);
+    if (!ground_weight(origin) || lower_bound(origin) > budget) {
         return {};
     }
     using Visit = std::pair<std::uint64_t, SectorId>;
@@ -99,14 +105,17 @@ GroundPath find_ground_path(const WorldDefinition& world, const FactionView& vie
             return {std::move(path), cost};
         }
         for (const auto neighbor : world.sector(sector).neighbors) {
-            const auto report = view.sectors.find(neighbor);
-            const auto weight = ground_weight(world.sector(neighbor));
-            if (!weight ||
-                (neighbor != to && (report == view.sectors.end() || report->second.confidence < 750 ||
-                                    report->second.estimated_controller != faction))) {
+            const auto& step = world.sector(neighbor);
+            const auto weight = ground_weight(step);
+            const auto next = cost + weight;
+            if (!weight || next + lower_bound(step) > budget) {
                 continue;
             }
-            const auto next = cost + weight;
+            const auto report = view.sectors.find(neighbor);
+            if (neighbor != to && (report == view.sectors.end() || report->second.confidence < 750 ||
+                                   report->second.estimated_controller != faction)) {
+                continue;
+            }
             const auto [best, inserted] = distance.try_emplace(neighbor, next);
             if (inserted || next < best->second) {
                 best->second = next;
@@ -256,12 +265,14 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
         if (!speed) {
             continue;
         }
-        auto path = find_ground_path(world_, view, faction, unit.sector, target);
         const auto& stores = stockpiles_.at(combat.stores);
+        if (!free_stock(stores, supply) || (kind == MissionKind::attack && !free_stock(stores, ammo))) {
+            continue;
+        }
+        const auto budget = free_stock(stores, fuel) / ground_fuel_per_weight(world_);
+        auto path = find_ground_path(world_, view, faction, unit.sector, target, budget);
         const auto seconds = ceil_divide(movement_distance(world_, path.weight), movement_budget(speed, 1));
-        if (path.sectors.empty() || (chosen && seconds >= best_seconds) ||
-            free_stock(stores, fuel) / ground_fuel_per_weight(world_) < path.weight ||
-            !free_stock(stores, supply) || (kind == MissionKind::attack && !free_stock(stores, ammo))) {
+        if (path.sectors.empty() || (chosen && seconds >= best_seconds)) {
             continue;
         }
         for (const auto& [item_id, item] : equipment_) {

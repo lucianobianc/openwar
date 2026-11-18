@@ -267,9 +267,9 @@ file. Procedural seeds are unsigned 64-bit values.
 | Setting | Default | Accepted values |
 | --- | --- | --- |
 | `seed` | 0 | 0 through 2⁶⁴ − 1 |
-| `width`, `height` | 9, 7 | Odd width 9–25 and height 5–25 |
+| `width`, `height` | 9, 7 | Width 9–128 and height 5–128 |
 | `sector_size_m` | 2000 | 500–5000 |
-| `crossings` | 3 | 1–5, one armored formation per crossing on each side |
+| `crossings` | 3 | 1–16, at most the map height. One armored formation per crossing on each side. |
 | `forest_percent`, `water_percent` | 30, 10 | 0–100 each, with a combined maximum of 100 |
 | `west_armor`, `east_armor` | 3, 3 | 1–8 active vehicles per formation |
 | `reserve_armor`, `scout_flights` | 1, 2 | 0–4 reserve vehicles per formation and 1–4 flights per faction |
@@ -280,6 +280,9 @@ file. Procedural seeds are unsigned 64-bit values.
 The generator places crossings, rear industrial sites, airfields, workshops
 and initial formations. It preserves connected ground and supply corridors,
 and scales generated road travel time and fuel use with the sector size.
+Even widths have two central river columns with connected crossing sectors.
+Maps taller than 25 sectors distribute reconnaissance flights among
+airfields along each supply corridor.
 The terrain percentages apply to background cells before the generator
 places the river and corridors and removes isolated land. The generated
 scenario uses the same economy, logistics, strategic command and combat
@@ -288,6 +291,30 @@ engine as the fixed campaigns.
 This version accepts procedural configurations and ships the existing fixed
 scenarios as demos. Authored map packages and real-world map import remain
 outside this generator.
+
+### Large-world measurements
+
+Headless GCC `-O2` runs on Linux with an AMD EPYC 9V74, using seed 42 and
+600 simulated ticks. The sector width was 2 km. Each formation had five
+armored vehicles and two reserves, and each faction had four reconnaissance
+flights. Starting industry stocks were 2,000 oil, 800 materials and 800
+ammunition per faction. Timings exclude generation and are approximate.
+
+| Map | Formations and flights | Equipment including reserves | Carriers | Before | After | Peak RSS after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 32×32 | 16 | 64 | 48 | 0.54 s | 0.18 s | 2.7 MiB |
+| 64×64 | 24 | 120 | 80 | 4.03 s | 0.79 s | 3.7 MiB |
+| 128×128 | 40 | 232 | 144 | 43.83 s | 4.22 s | 7.8 MiB |
+
+Profiling the largest case identified ground-order planning and transport
+routing as the largest CPU costs, followed by territory updates and faction
+view construction. Routing now skips ground paths that exceed available fuel
+and checks only the incoming links at each road junction. Strategy reuses
+its faction view within a planning pass. The campaign event output matched
+byte for byte before and after these changes at all three sizes.
+The same 128×128 configuration ran 2,880 ticks in 20.7 seconds with
+8.0 MiB peak RSS. These measurements describe the tested workload on this
+machine. Campaigns with more equipment or more active fronts can cost more.
 
 ## Campaign viewer
 

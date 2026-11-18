@@ -434,6 +434,8 @@ private:
     bool update_strategy(FactionId faction);
     void dispatch_reinforcement(FactionId faction, const FactionView& view, const StrategicPlan& plan);
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
+    OrderResult schedule_air_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
+                                     const FactionView& view);
     void release_unspent_mission_stock(Mission& mission);
     void release_air_mission_equipment(const Mission& mission, EquipmentStatus standby);
     std::uint32_t observe(FactionId faction, SectorId sector);
@@ -474,6 +476,7 @@ private:
     std::vector<InstallationState> installations_;
     std::vector<EconomyEntry> economy_ledger_;
     std::map<RouteId, TransportRoute> routes_;
+    std::map<SectorId, std::vector<RouteId>> incoming_routes_;
     std::map<CarrierId, Carrier> carriers_;
     std::map<ShipmentId, Shipment> shipments_;
     std::vector<LogisticsEvent> logistics_log_;

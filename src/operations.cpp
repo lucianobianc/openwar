@@ -108,7 +108,12 @@ OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind,
     if (kind == MissionKind::attack || (combat_.enabled && kind == MissionKind::defend)) {
         return schedule_ground_mission(faction, kind, target, manual);
     }
-    const auto view = faction_view(faction, false);
+    return schedule_air_mission(faction, kind, target, manual, faction_view(faction, false));
+}
+
+OrderResult CampaignState::schedule_air_mission(FactionId faction, MissionKind kind, SectorId target, bool manual,
+                                               const FactionView& view)
+{
     if (kind != MissionKind::recon && !known_friendly(view, faction, target)) {
         return {{}, "target lacks confirmed friendly control"};
     }

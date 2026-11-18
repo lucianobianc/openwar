@@ -76,6 +76,9 @@ void CampaignState::initialize_logistics(const ScenarioDefinition& scenario)
             throw std::invalid_argument("Invalid or duplicate transport route");
         }
     }
+    for (const auto& [id, route] : routes_) {
+        incoming_routes_[route.to].push_back(id);
+    }
     for (auto carrier : scenario.carriers) {
         world_.sector(carrier.sector);
         faction_name(carrier.faction);
@@ -269,8 +272,13 @@ std::optional<CampaignState::TransportPath> CampaignState::transport_path(
                 cheapest ? cost.second : cost.first, cheapest ? cost.first : cost.second
             };
         }
-        for (const auto& [id, route] : routes_) {
-            if (route.to != sector || !route_usable(route, faction)) {
+        const auto incoming = incoming_routes_.find(sector);
+        if (incoming == incoming_routes_.end()) {
+            continue;
+        }
+        for (const auto id : incoming->second) {
+            const auto& route = routes_.at(id);
+            if (!route_usable(route, faction)) {
                 continue;
             }
             const auto leg = edge_cost(route);

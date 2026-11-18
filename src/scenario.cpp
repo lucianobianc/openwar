@@ -205,17 +205,23 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
                                  const ProceduralSettings* settings = nullptr)
 {
     ScenarioDefinition scenario{std::move(world), {}};
-    const auto middle = scenario.world.width() / 2;
-    const auto front = middle - 1;
+    const auto width = scenario.world.width();
+    const auto river_first = (width - 1) / 2;
+    const auto river_last = width / 2;
+    const auto front = river_first - 1;
+    const auto east_front = river_last + 1;
     const auto supply_line = front - 1;
+    const bool dispersed_airfields = settings && scenario.world.height() > 25;
     const auto relay_lane = rows.size() / 2;
     const auto relay_row = rows[relay_lane];
     std::vector<SectorId> crossings;
     for (const auto row : rows) {
-        crossings.push_back(scenario.world.sector_id(middle, row));
+        for (auto x = river_first; x <= river_last; ++x) {
+            crossings.push_back(scenario.world.sector_id(x, row));
+        }
     }
     scenario.operations = {true, 10};
-    scenario.operations.max_autonomous_missions = 4;
+    scenario.operations.max_autonomous_missions = std::max<std::size_t>(4, rows.size());
     scenario.operations.strategy_review_ticks = strategic_command ? 60 : 0;
     scenario.combat.enabled = true;
     scenario.combat.interval_ticks = 5;
@@ -223,10 +229,11 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
     scenario.public_sectors = crossings;
     for (const auto& sector : scenario.world.sectors()) {
         const auto owner = settings && !sector.properties.traversable ? FactionId::neutral :
-            sector.x < middle ? FactionId::west : sector.x > middle ? FactionId::east : FactionId::neutral;
+            sector.x < river_first ? FactionId::west :
+            sector.x > river_last ? FactionId::east : FactionId::neutral;
         const auto points = (sector.x == 0 && sector.y == home_rows[0]) ||
-                            (sector.x == 2 * middle && sector.y == home_rows[1]) ||
-                            (sector.x == middle && sector.y == relay_row) ? 2u : 0u;
+                            (sector.x == width - 1 && sector.y == home_rows[1]) ||
+                            (sector.x >= river_first && sector.x <= river_last && sector.y == relay_row) ? 2u : 0u;
         scenario.initial_sectors.push_back({sector.id, {owner, points}});
     }
 
@@ -244,15 +251,13 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
         const auto base = west ? 0u : east_offset;
         const auto home_row = home_rows[west ? 0 : 1];
         const auto at = [&](std::uint32_t x, std::uint32_t y) {
-            return scenario.world.sector_id(west ? x : 2 * middle - x, y);
+            return scenario.world.sector_id(west ? x : width - 1 - x, y);
         };
         const auto industry = at(0, home_row);
         const StockpileId industry_stock{base + 1};
-        const StockpileId air_stock{base + 2};
         const InstallationId relay{base + 4};
-        const SectorId enemy_relay = scenario.world.sector_id(west ? middle + 1 : front, relay_row);
+        const SectorId enemy_relay = scenario.world.sector_id(west ? east_front : front, relay_row);
         const InstallationId enemy_relay_id{(west ? east_offset : 0u) + 4};
-        const auto airfield = at(supply_line, home_row);
         const auto oil = settings ? settings->oil : 600;
         const auto materials = settings ? settings->materials : 240;
         const auto ammunition = settings ? settings->ammunition : 90;
@@ -266,9 +271,6 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
             {InstallationId{base + 3}, industry_stock, "Supply works", faction,
              {{0, 0, 0, 8}, {0, 0, 0, 0, 3, 10}, 3}},
         });
-        scenario.stockpiles.push_back({air_stock, airfield, faction, {0, 0, 180, 0, 24}, {0, 0, 40, 0, 2}});
-        scenario.facilities.push_back({FacilityId{base + 1}, air_stock, 2, 2});
-
         for (std::uint32_t x = 0; x < front; ++x) {
             road(at(x, home_row), at(x + 1, home_row));
         }
@@ -282,10 +284,17 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
             const auto tank = settings ? 2 * (front + scenario.world.height()) * road_fuel : 16;
             scenario.carriers.push_back({CarrierId{id}, faction, industry, 80, tank});
         };
-        shipment(air_stock, Resource::fuel, 80);
-        shipment(air_stock, Resource::spare_parts, 18);
-        scenario.resupply.push_back({industry_stock, air_stock, Resource::fuel, 30, 80, 3});
-        scenario.resupply.push_back({industry_stock, air_stock, Resource::spare_parts, 4, 12, 2});
+        const auto stock_airfield = [&](StockpileId stock, FacilityId facility, SectorId sector) {
+            scenario.stockpiles.push_back({stock, sector, faction, {0, 0, 180, 0, 24}, {0, 0, 40, 0, 2}});
+            scenario.facilities.push_back({facility, stock, 2, 2});
+            shipment(stock, Resource::fuel, 80);
+            shipment(stock, Resource::spare_parts, 18);
+            scenario.resupply.push_back({industry_stock, stock, Resource::fuel, 30, 80, 3});
+            scenario.resupply.push_back({industry_stock, stock, Resource::spare_parts, 4, 12, 2});
+        };
+        if (!dispersed_airfields) {
+            stock_airfield(StockpileId{base + 2}, FacilityId{base + 1}, at(supply_line, home_row));
+        }
 
         const EquipmentTypeId armor{base + 1};
         const EquipmentTypeId scout{base + 2};
@@ -296,7 +305,8 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
         });
         scenario.equipment_types.push_back({
             scout, "Reconnaissance helicopter", faction, EquipmentCategory::helicopter,
-            {60}, {120}, {300, repair.costs}, repair, 60 * 60, settings ? scenario.world.height() + 3 : 6
+            {60}, {120}, {300, repair.costs}, repair, 60 * 60,
+            settings ? std::min(39u, scenario.world.height() + 3) : 6
         });
 
         for (std::uint32_t lane = 0; lane < rows.size(); ++lane) {
@@ -305,7 +315,7 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
             const StockpileId shop_stock{base + 10 + lane};
             const FacilityId shop{base + 10 + lane};
             const UnitId formation{base + 10 + lane};
-            const StockpileId stores{base + 20 + lane};
+            const StockpileId stores{base + (rows.size() > 5 ? 100u : 20u) + lane};
             if (y != home_row) {
                 road(at(supply_line, y), forward);
             }
@@ -337,16 +347,26 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
                 {industry_stock, stores, Resource::supplies, 8, 20, 3},
                 {industry_stock, stores, Resource::ammunition, 8, 20, 3}
             });
-            scenario.objectives.push_back({faction, crossings[lane], y == relay_row ? 5u : 4u});
+            scenario.objectives.push_back({faction, at(river_first, y), y == relay_row ? 5u : 4u});
+            if (river_first != river_last) {
+                scenario.objectives.push_back({faction, at(river_last, y), 3});
+            }
             scenario.objectives.push_back({faction, forward, 2});
         }
         scenario.installations.push_back({
             relay, StockpileId{base + 10 + static_cast<std::uint32_t>(relay_lane)}, "Central relay workshop", faction,
             {{0, 0, 0, 2}, {0, 0, 0, 0, 1}}
         });
-        for (std::uint32_t wing = 0; wing < (settings ? settings->scout_flights : 2); ++wing) {
+        const auto flights = settings ? settings->scout_flights : 2;
+        for (std::uint32_t wing = 0; wing < flights; ++wing) {
             const UnitId unit{base + 30 + wing};
-            scenario.units.push_back({unit, "Reconnaissance flight", faction, airfield, {}, FacilityId{base + 1}});
+            const auto row = dispersed_airfields ? (2 * wing + 1) * scenario.world.height() / (2 * flights) : home_row;
+            const auto airfield = at(supply_line, row);
+            const FacilityId facility{base + (dispersed_airfields ? 200 + wing : 1)};
+            if (dispersed_airfields) {
+                stock_airfield(StockpileId{base + 200 + wing}, facility, airfield);
+            }
+            scenario.units.push_back({unit, "Reconnaissance flight", faction, airfield, {}, facility});
             scenario.equipment.push_back({EquipmentId{base + 30 + wing}, scout, unit});
         }
         scenario.objectives.push_back({faction, enemy_relay, 3});
@@ -360,10 +380,10 @@ ScenarioDefinition build_theater(WorldDefinition world, std::span<const std::uin
         }
         scenario.victory_objectives.push_back(std::move(victory));
     }
-    for (const auto crossing : crossings) {
-        const auto y = scenario.world.sector(crossing).y;
-        road(scenario.world.sector_id(front, y), crossing);
-        road(crossing, scenario.world.sector_id(middle + 1, y));
+    for (const auto y : rows) {
+        for (auto x = front; x < east_front; ++x) {
+            road(scenario.world.sector_id(x, y), scenario.world.sector_id(x + 1, y));
+        }
     }
     return scenario;
 }
@@ -392,12 +412,12 @@ namespace {
 
 void validate(const ProceduralSettings& settings)
 {
-    if (settings.width < 9 || settings.width > 25 || settings.width % 2 == 0 ||
-        settings.height < 5 || settings.height > 25) {
-        throw std::invalid_argument("Procedural width must be odd and in 9..25 and height must be in 5..25");
+    if (settings.width < 9 || settings.width > 128 ||
+        settings.height < 5 || settings.height > 128) {
+        throw std::invalid_argument("Procedural dimensions must be in 9..128 by 5..128");
     }
     if (settings.sector_size_m < 500 || settings.sector_size_m > 5000 ||
-        settings.crossings < 1 || settings.crossings > 5 ||
+        settings.crossings < 1 || settings.crossings > std::min(16u, settings.height) ||
         settings.forest_percent > 100 || settings.water_percent > 100 ||
         settings.forest_percent + settings.water_percent > 100) {
         throw std::invalid_argument("Invalid sector size, crossing count or terrain percentages");
@@ -448,7 +468,8 @@ ScenarioDefinition resolve_procedural_scenario(const ProceduralSettings& setting
     validate(settings);
     const auto width = settings.width;
     const auto height = settings.height;
-    const auto middle = width / 2;
+    const auto river_first = (width - 1) / 2;
+    const auto river_last = width / 2;
     auto terrain_random = generator(settings.seed, 0);
     auto site_random = generator(settings.seed, 1);
     std::vector<std::uint32_t> crossings;
@@ -472,16 +493,18 @@ ScenarioDefinition resolve_procedural_scenario(const ProceduralSettings& setting
     }
     // The river and protected road network also define the accessible ground corridors.
     for (std::uint32_t y = 0; y < height; ++y) {
-        terrain[y * width + middle] = water;
-        terrain[y * width + middle - 2] = {};
-        terrain[y * width + middle + 2] = {};
+        for (auto x = river_first; x <= river_last; ++x) {
+            terrain[y * width + x] = water;
+        }
+        terrain[y * width + river_first - 2] = {};
+        terrain[y * width + river_last + 2] = {};
     }
     for (auto y : crossings) {
-        for (auto x = middle - 1; x <= middle + 1; ++x) {
+        for (auto x = river_first - 1; x <= river_last + 1; ++x) {
             terrain[y * width + x] = {};
         }
     }
-    for (auto x = 0u; x < middle; ++x) {
+    for (auto x = 0u; x < river_first; ++x) {
         terrain[home_rows[0] * width + x] = {};
         terrain[home_rows[1] * width + (width - 1 - x)] = {};
     }
