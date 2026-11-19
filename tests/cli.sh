@@ -277,6 +277,9 @@ EOF
     reject --load "$scratch/point-order.ows" --faction WEST --ground-order defend:20266672,15133974 --ticks 0
 
     valley=${VALLEY_FIXTURES:-examples/connecticut-valley}
+    extended=$("$openwar" --scenario "$valley/valley-junction-48h.owscenario" --seed 42 --ticks 1)
+    printf '%s\n' "$extended" | grep -Fx 'Elapsed seconds: 300'
+    printf '%s\n' "$extended" | grep -Fx 'War: ongoing'
     "$openwar" --scenario "$valley/valley-junction.owscenario" --faction WEST --ticks 0 \
         --preview-supply unit:2:supplies:1 | grep -F 'Supply preview | shipment can be queued | destination #11'
     "$openwar" --scenario "$valley/valley-junction.owscenario" --faction WEST --ticks 0 \

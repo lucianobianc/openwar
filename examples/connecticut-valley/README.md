@@ -109,6 +109,54 @@ Initial WEST previews of both secondary junctions hit the geographic search
 budget. Later movement reached both through the campaign's evolving control
 and routing state.
 
+## Valley Junction 48-hour experiment
+
+Choose **Valley Junction (48-hour experiment)** under Connecticut Valley. The
+scenario uses the same world and starting equipment as Valley Junction, with
+armor in the center, scouts in the north, and mechanized companies on the
+southern approach. Sector 121 is an intermediate objective. The flanks lead
+to opposing outposts, and the rear depots are eight-hour hold objectives.
+Command collapse uses a six-hour confirmation window. The time-limit draw
+occurs at 48 simulated hours.
+
+Each tick represents five minutes. Planning runs every 30 simulated minutes
+and combat resolves every 20. Mobilized formations draw from finite depot
+stocks, with two carriers per side, recurring deliveries, and a local
+workshop for each southern mechanized company. The scenario retains the
+existing repair, withdrawal, and replacement rules.
+
+```sh
+./openwar --scenario examples/connecticut-valley/valley-junction-48h.owscenario --seed 42 --ticks 576 --events
+```
+
+To vary doctrines, use **Campaign settings** in the viewer and start as
+**Observer**. A checkpoint from the observer session can be resumed headlessly
+with `openwar --load FILE --ticks 576 --events`.
+
+### Experimental reference runs
+
+All four autonomous runs drew by the time limit at 48:00. Resuming the
+Balanced seed-42 run at hour 24 produced a byte-identical final checkpoint.
+Times are elapsed simulated hours and minutes. An engagement is one sector resolution
+interval. Quiet hours are one-hour bins with no firing, capture, or military
+sector crossing. A return to action is a distinct formation that reorganized
+and then fired or launched another ground order.
+
+| Seed | WEST / EAST | First–last combat | Engagements | Captures | Equipment lost / repairs completed | Returns | Deliveries | Quiet hours / final quiet stretch |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| 7, 42 | Balanced / Balanced | 0:40–4:00 | 9 | 2 | 16 / 1 | 1 | 14 of 18 | 43 / 43:50 |
+| 42 | Offensive / Defensive | 0:40–8:00 | 15 | 3 | 15 / 0 | 0 | 25 of 27 | 41 / 40:00 |
+| 42 | Defensive / Offensive | 0:40–7:20 | 14 | 3 | 18 / 6 | 0 | 26 of 30 | 41 / 40:40 |
+
+WEST took the southern junction after securing sector 121 in the
+Offensive / Defensive run. In the opposite matchup, EAST reached and fought
+in WEST's command sector after securing the junctions. Deployments and
+supplies supported several operations, but active ground forces were
+exhausted or held at garrisons over the first eight hours. Depots still had
+ammunition at the time limit. The authored format provides starting
+equipment, and the planner needs surviving eligible formations to exploit
+later objectives.
+
 ## Source data and reproduction
 
 - `valley.osm.pbf` is a fixed, filtered OSM extract obtained on 18 November 2026

@@ -72,8 +72,8 @@ void test_discovery(const fs::path& root, const fs::path& bundled)
     require(std::ranges::find(catalog.worlds.at(other).metadata, "8 x 6 km") != catalog.worlds.at(other).metadata.end() &&
             std::ranges::find(catalog.worlds.at(other).metadata, "EPSG 32618") != catalog.worlds.at(other).metadata.end(),
             "Header inspection did not retain extent and geographic reference");
-    require(std::ranges::count_if(catalog.scenarios, [&](const auto& pair) { return pair.second.world == valley; }) == 3 &&
-            catalog.scenarios.size() == 5 && catalog.issues.size() == 3,
+    require(std::ranges::count_if(catalog.scenarios, [&](const auto& pair) { return pair.second.world == valley; }) == 4 &&
+            catalog.scenarios.size() == 6 && catalog.issues.size() == 3,
             "Launcher failed to associate shared worlds, handle errors or deduplicate paths");
     const auto& field = catalog.scenarios.at(fs::canonical(bundled / "valley-demo.owscenario"));
     require(field.name == "Connecticut Valley - Field Deployment" &&
@@ -85,6 +85,10 @@ void test_discovery(const fs::path& root, const fs::path& bundled)
     const auto& junction = catalog.scenarios.at(fs::canonical(bundled / "valley-junction.owscenario"));
     require(junction.world == valley && junction.name == "Connecticut Valley - Valley Junction" &&
             junction.commanders == field.commanders, "Launcher omitted the advanced campaign or its roles");
+    const auto& experiment = catalog.scenarios.at(fs::canonical(bundled / "valley-junction-48h.owscenario"));
+    require(experiment.world == valley && experiment.commanders == field.commanders &&
+            std::ranges::find(experiment.details, "Time limit 48 h") != experiment.details.end(),
+            "Launcher omitted the 48-hour variant or its authored time limit");
     require(catalog.add(custom) == other, "Selecting the same world again duplicated its catalog entry");
     try {
         (void)read_geographic_world(other);
