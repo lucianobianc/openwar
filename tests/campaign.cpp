@@ -2358,6 +2358,76 @@ void test_ground_reconnaissance()
             "Ground Recon entered an inaccessible objective");
 }
 
+void test_strategic_follow_on_objectives()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr SectorId reported{1}, authored{3};
+    auto scenario = combat_example_scenario(west);
+    scenario.geographic_world = geography::Map{3, 2, 500'000, 100'000, {}, {}, {}, {}, {}};
+    scenario.command_objectives.clear();
+    scenario.victory_objectives.clear();
+    scenario.objectives.clear();
+    scenario.public_sectors.clear();
+    scenario.operations.planner_interval_ticks = 10;
+    scenario.operations.strategy_review_ticks = 12;
+    scenario.operations.territory_half_life_seconds = 360 * 60;
+    scenario.operations.contact_half_life_seconds = 30 * 60;
+    std::ranges::find(scenario.initial_sectors, reported, &InitialSectorState::sector)->state.controller = east;
+    scenario.units.at(1).sector = reported;
+    scenario.units.at(1).facility.reset();
+    std::ranges::find(scenario.stockpiles, StockpileId{11}, &Stockpile::id)->sector = reported;
+    scenario.equipment_types.push_back({EquipmentTypeId{3}, "Observer", west, EquipmentCategory::helicopter,
+                                        {}, {}, {}, {}, 3600, 3});
+    scenario.units.push_back({UnitId{3}, "Observer flight", west, SectorId{0}, {}, FacilityId{1}});
+    scenario.equipment.push_back({EquipmentId{4}, EquipmentTypeId{3}, UnitId{3}});
+
+    CampaignState unobserved(scenario, 42);
+    unobserved.advance_ticks(10);
+    require(unobserved.faction_view(west).missions.empty(),
+            "Follow-on planning used an unobserved enemy position");
+
+    CampaignState observed(scenario, 42);
+    require(observed.issue_order(west, MissionKind::recon, reported).mission.has_value(),
+            "Could not survey the follow-on objective fixture");
+    observed.advance_ticks(10);
+    const auto follow_on = observed.faction_view(west);
+    require(follow_on.missions.size() == 2 && follow_on.missions.back().kind == MissionKind::attack &&
+            follow_on.missions.back().target == reported &&
+            std::ranges::any_of(follow_on.events, [](const auto& event) {
+                return event.reason == "strategy: attack reported follow-on position";
+            }), "Planner ignored a feasible reported position outside the authored objectives");
+
+    scenario.objectives = {{west, authored, 1}};
+    scenario.public_sectors = {authored};
+    std::ranges::find(scenario.initial_sectors, authored, &InitialSectorState::sector)->state.controller = FactionId::neutral;
+    CampaignState prioritized(scenario, 42);
+    require(prioritized.issue_order(west, MissionKind::recon, reported).mission.has_value(),
+            "Could not establish the competing reported objective");
+    prioritized.advance_ticks(10);
+    const auto priority = prioritized.faction_view(west);
+    require(priority.missions.size() == 2 && priority.missions.back().kind == MissionKind::attack &&
+            priority.missions.back().target == authored,
+            "A reported follow-on displaced a feasible authored objective");
+
+    scenario.objectives = {{west, reported, 1}};
+    scenario.public_sectors.clear();
+    scenario.units.pop_back();
+    scenario.equipment.pop_back();
+    scenario.units.front().identity = {MilitaryDomain::land, MilitaryFunction::reconnaissance,
+                                       MilitaryEchelon::platoon};
+    CampaignState scouts(scenario, 42);
+    scouts.advance_ticks(10);
+    const auto survey = scouts.faction_view(west);
+    require(survey.missions.size() == 1 && survey.missions.front().kind == MissionKind::ground_recon &&
+            survey.missions.front().target == reported, "Ground scouts did not cover the unserved authored objective");
+
+    CampaignState reserve(scenario, 42);
+    require(reserve.set_operational_reserve(west, UnitId{1}, true), "Could not reserve the ground scouts");
+    reserve.advance_ticks(10);
+    require(reserve.faction_view(west).missions.empty(), "Fallback reconnaissance selected an operational reserve");
+}
+
 void test_geographic_ground_operations()
 {
     using namespace geography;
@@ -3664,6 +3734,7 @@ int main()
     test_ground_position_orders();
     test_ground_patrol_waypoints();
     test_ground_reconnaissance();
+    test_strategic_follow_on_objectives();
     test_geographic_ground_operations();
     test_geographic_transport();
     test_player_supply_requests();

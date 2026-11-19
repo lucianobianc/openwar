@@ -103,6 +103,23 @@ reassignment in the operations log. Checkpoint rules version 13 applies
 the revised allocation at future planning ticks. Earlier checkpoints
 retain their saved orders and use the revised planner when resumed.
 
+### Follow-on objectives
+
+The advanced planner tries authored objectives and the staging sectors toward
+its current focus first. When no ground operation is active and order capacity
+remains, the geographic planner can dispatch one Attack against a confirmed
+enemy sector with a recent ground contact or installation report. It prefers
+reported installations and then sector ID. The usual target intelligence,
+geographic route, fuel, equipment, commitment and garrison checks still apply.
+This selection comes from the faction's reports.
+
+If no such attack can be assigned, an available ground scout can survey an
+authored objective that needs intelligence and has no air survey assigned.
+This uses the existing Ground Recon order, including its movement, visibility,
+and combat rules. Doctrine still determines whether the defense pass runs
+before or after the advance pass. Rules version 14 applies these choices at
+future autonomous planning ticks when older checkpoints resume.
+
 ### Autonomous force recovery
 
 With `force_recovery 1`, the strategic planner considers uncommitted, mobile

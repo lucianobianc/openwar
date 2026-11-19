@@ -233,6 +233,50 @@ the opening and one outcome. The late draw still needs usable objectives
 and routes from current faction reports, while capitulation ends the
 other campaigns before a second day can begin.
 
+### Strategic objective eligibility audit
+
+The baseline is `c56d948`, with workshop recovery and garrison reallocation.
+In the seed-42 Offensive/Defensive run at hour 47, each faction had eight
+authored attack objectives. Both still had ready formations.
+
+| Faction | Confirmed friendly | Territorial report below 750 | Enemy control confirmed, contact or complete survey missing |
+|---|---|---|---|
+| WEST | 120, 121 | 105, 106, 122, 123, 138 | 137 |
+| EAST | — | 104, 105, 119, 120, 122, 136, 137 | 121 |
+
+The same WEST breakdown held at hour 12. EAST then had six stale
+territorial reports, an expired contact at 136, and the same missing
+contact or survey at 121. None passed the target gate at those samples,
+so route or formation assignment checks could not account for the late
+target rejections. Earlier in the campaign, a formation could also fail
+assignment after the target gate because of its current operation,
+equipment, supplies, or a route unavailable under faction reports.
+
+The existing planner derives intermediate staging sectors geometrically
+toward its current focus. Routing and reports determine which are usable.
+The follow-on pass can also use recent faction reports to identify an
+enemy position outside the authored target list. It runs after authored
+targets and staging sectors, and starts at most one ground operation.
+
+| Seeds | WEST / EAST | Last combat | Engagement intervals with fire | Captures | Quiet hours | Outcome in both versions |
+|---|---|---|---|---|---|---|
+| 7, 42 | Balanced / Balanced | 16:20 → 16:20 | 18 → 18 | 7 → 7 | 3 → 3 | EAST by capitulation at 19:40 |
+| 42 | Offensive / Defensive | 3:20 → 8:20 | 6 → 10 | 3 → 3 | 43 → 41 | 48:00 time-limit draw |
+| 42 | Defensive / Offensive | 16:20 → 16:20 | 18 → 18 | 7 → 7 | 3 → 3 | EAST by capitulation at 19:40 |
+
+EAST launched two ground surveys in the modified Offensive/Defensive run.
+Both failed, and the last fighting was part of those contacts. No reported
+follow-on Attack passed all the checks in these runs. At hour 47, four
+formations were still attack-ready, two per side, compared with five
+in the baseline. All 16 authored targets were still rejected. Per faction,
+seven territorial reports were below the confidence threshold and the
+remaining enemy objective lacked a verified contact or complete survey.
+
+In the other matchups, the hour-12 route audit found zero WEST formations
+available for an otherwise valid target at 121. EAST had two attack-ready
+formations, but neither could reach eligible targets at 104 or 136 under
+the existing route and fuel checks. No run fought into the second day.
+
 ## Source data and reproduction
 
 - `valley.osm.pbf` is a fixed, filtered OSM extract obtained on 18 November 2026

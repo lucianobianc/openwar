@@ -383,7 +383,15 @@ bool CampaignState::update_strategy(FactionId faction)
             return priorities.at(left) > priorities.at(right);
         });
         targets.insert(targets.end(), secondary.begin(), secondary.end());
+        const auto needs_survey = [&](SectorId target) {
+            const auto report = view.sectors.find(target);
+            return !ground_target_refusal(view, faction, MissionKind::attack, target).empty() ||
+                (report != view.sectors.end() && std::ranges::any_of(view.contacts, [&](const auto& contact) {
+                    return current_contact(contact, report->second) && contact.confidence < 750;
+                }));
+        };
         std::set<SectorId> tried;
+        std::vector<SectorId> ground_surveys;
         for (const auto target : targets) {
             if (assigned >= limit) {
                 break;
@@ -391,14 +399,12 @@ bool CampaignState::update_strategy(FactionId faction)
             if (busy.contains(target) || !tried.insert(target).second) {
                 continue;
             }
-            const auto report = view.sectors.find(target);
-            const bool stale_contact = report != view.sectors.end() &&
-                std::ranges::any_of(view.contacts, [&](const auto& contact) {
-                    return current_contact(contact, report->second) && contact.confidence < 750;
-                });
-            if (stale_contact || !ground_target_refusal(view, faction, MissionKind::attack, target).empty()) {
+            if (needs_survey(target)) {
                 if (!friendly(view, faction, target)) {
                     recon(target);
+                    if (priorities.contains(target) && !busy.contains(target)) {
+                        ground_surveys.push_back(target);
+                    }
                 }
                 continue;
             }
@@ -422,6 +428,53 @@ bool CampaignState::update_strategy(FactionId faction)
             }
             dispatch(std::move(*lead), target == plan.focus ? "strategy: advance campaign objective" :
                                                             "strategy: advance on another front");
+        }
+
+        if (!authored_geography_ || assigned >= limit ||
+            std::ranges::any_of(view.missions, [](const auto& mission) {
+                return mission.ground_unit && mission_active(mission.status);
+            })) {
+            return;
+        }
+
+        // A follow-on target must come from the faction's own recent observations.
+        // Keep this pass behind authored objectives and their staging sectors.
+        std::map<SectorId, bool> follow_ons;
+        for (const auto& contact : view.contacts) {
+            const auto report = view.sectors.find(contact.estimated_sector);
+            if (contact.classification == "ground" && contact.confidence >= 750 &&
+                report != view.sectors.end() && current_contact(contact, report->second)) {
+                follow_ons.try_emplace(contact.estimated_sector, false);
+            }
+        }
+        for (const auto& installation : view.installations) {
+            if (installation.confidence >= 750) {
+                follow_ons.insert_or_assign(installation.sector, true);
+            }
+        }
+        std::vector<SectorId> reported_targets;
+        for (const auto& [sector, installation] : follow_ons) {
+            const auto report = view.sectors.find(sector);
+            if (!tried.contains(sector) && !busy.contains(sector) && passable(world_.sector(sector)) &&
+                report != view.sectors.end() && report->second.estimated_controller != FactionId::neutral &&
+                !needs_survey(sector)) {
+                reported_targets.push_back(sector);
+            }
+        }
+        std::ranges::stable_sort(reported_targets, [&](SectorId left, SectorId right) {
+            return follow_ons.at(left) > follow_ons.at(right);
+        });
+        for (const auto target : reported_targets) {
+            if (auto order = plan_ground_mission(faction, MissionKind::attack, target, view, guards)) {
+                dispatch(std::move(*order), "strategy: attack reported follow-on position");
+                return;
+            }
+        }
+        for (const auto target : ground_surveys) {
+            if (auto order = plan_ground_mission(faction, MissionKind::ground_recon, target, view, guards)) {
+                dispatch(std::move(*order), "strategy: survey authored objective with ground scouts");
+                return;
+            }
         }
     };
     if (doctrine == StrategicDoctrine::offensive) {
