@@ -334,7 +334,7 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
     std::int64_t best_duration = 0;
     for (const auto& [id, combat] : combat_units_) {
         const auto& unit = units_.at(id);
-        if (unit.faction != faction || (formation && id != *formation) ||
+        if (unit.faction != faction || (formation ? id != *formation : operational_reserve_.contains(id)) ||
             std::ranges::find(excluded, id) != excluded.end() || formation_committed(id)) {
             continue;
         }

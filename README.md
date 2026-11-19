@@ -514,6 +514,14 @@ The CLI uses the same command boundary. Use `--order TYPE:SECTOR` for a
 sector goal and `--ground-order TYPE:EAST,SOUTH,UP` for a ground position in
 local millimetres. The CLI's `--cancel ID` applies to the command faction.
 
+### Operational reserve
+
+Use **Set reserve** or **End reserve** on a selected friendly formation,
+or use `--reserve UNIT` and `--release-reserve UNIT` in a CLI command session.
+The reserve setting excludes the formation from automatic assignment and
+persists in checkpoints. Explicit orders still use the same eligibility and
+resource checks, and orders already underway continue.
+
 ## Roadmap
 
 1. M0 — Core. Clock, world, sectors, and factions.

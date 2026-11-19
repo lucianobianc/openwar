@@ -1325,6 +1325,19 @@ void test_strategic_command()
                                         {}, {}, {}, {}, 3600, 3});
     scenario.equipment.push_back({EquipmentId{5}, EquipmentTypeId{3}, UnitId{4}});
 
+    CampaignState held(scenario, 42);
+    CommandSession commander(held, west);
+    require(commander.set_operational_reserve(UnitId{1}, true) &&
+            commander.set_operational_reserve(UnitId{3}, true) &&
+            commander.submit(MissionKind::recon, objective, UnitId{4}).mission,
+            "Could not configure ground reserve and survey the objective");
+    held.advance_ticks(10);
+    require(std::ranges::none_of(held.faction_view(west).missions, [](const auto& mission) {
+                return mission.ground_unit.has_value();
+            }) && !commander.submit(MissionKind::attack, objective).mission &&
+            commander.submit(MissionKind::attack, objective, UnitId{3}).mission,
+            "Ground reserve did not block automatic assignment or allow an explicit order");
+
     CampaignState coordinated(scenario, 42);
     require(coordinated.issue_order(west, MissionKind::recon, objective).mission.has_value(),
             "Could not survey the offensive objective");
@@ -3372,6 +3385,68 @@ void test_checkpoints()
             "Failed save damaged the destination or left staging files");
 }
 
+void test_operational_reserve()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr UnitId scout{3};
+    constexpr SectorId target{2};
+    constexpr StockpileId base{1};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    auto campaign = operations_example_campaign(42, west);
+    CommandSession commander(campaign, west), observer(campaign), opposing(campaign, east);
+    require(commander.operational_reserve(scout) == false &&
+            !observer.set_operational_reserve(scout, true) &&
+            !opposing.set_operational_reserve(scout, true) &&
+            !commander.set_operational_reserve(UnitId{999}, true) &&
+            commander.set_operational_reserve(scout, true),
+            "Operational reserve bypassed command authority");
+
+    campaign.advance_ticks(4);
+    require(campaign.faction_view(west).missions.empty() &&
+            campaign.stockpiles().at(base).reserved[fuel] == 0 &&
+            !commander.submit(MissionKind::recon, target).mission,
+            "Automatic assignment used a formation in reserve");
+
+    const auto order = commander.submit(MissionKind::recon, target, scout);
+    require(order.mission && campaign.stockpiles().at(base).reserved[fuel] == 10,
+            "Explicit assignment did not use normal mission reservations");
+    require(commander.set_operational_reserve(scout, false) &&
+            commander.set_operational_reserve(scout, true) &&
+            campaign.stockpiles().at(base).reserved[fuel] == 10 &&
+            !commander.submit(MissionKind::recon, target, scout).mission,
+            "Changing reserve status altered an active commitment");
+
+    CheckpointFiles files;
+    const auto path = files.directory / "operational-reserve.ows";
+    campaign.save(path);
+    auto restored = CampaignState::load(path);
+    CommandSession resumed(restored, west);
+    require(resumed.operational_reserve(scout) == true &&
+            resumed.cancel(west, *order.mission).cancelled &&
+            resumed.set_operational_reserve(scout, false),
+            "Checkpoint did not retain reserve status or the normal cancellation rules");
+    restored.advance_ticks(4);
+    const auto missions = restored.faction_view(west).missions;
+    require(missions.size() == 2 && !missions.back().manual,
+            "Released formation did not return to autonomous assignment");
+
+    require(commander.cancel(west, *order.mission).cancelled &&
+            commander.set_operational_reserve(scout, false),
+            "Could not replay the reserve commands");
+    for (int tick = 0; tick < 4; ++tick) {
+        campaign.advance_ticks(1);
+    }
+    const auto continuous_path = files.directory / "continuous.ows";
+    const auto resumed_path = files.directory / "resumed.ows";
+    campaign.save(continuous_path);
+    restored.save(resumed_path);
+    std::ifstream continuous(continuous_path, std::ios::binary), resumed_bytes(resumed_path, std::ios::binary);
+    require(std::ranges::equal(std::istreambuf_iterator<char>(continuous), std::istreambuf_iterator<char>(),
+                               std::istreambuf_iterator<char>(resumed_bytes), std::istreambuf_iterator<char>()),
+            "Reserve commands diverged after checkpoint restore or tick batching");
+}
+
 void test_depleted_withdrawal()
 {
     auto scenario = combat_example_scenario();
@@ -3438,6 +3513,7 @@ int main()
     test_player_supply_requests();
     test_geographic_mobile_delivery();
     test_geographic_transport_control_change();
+    test_operational_reserve();
     test_depleted_withdrawal();
     test_checkpoints();
     test_legacy_road_checkpoint();

@@ -132,6 +132,14 @@ checkpoints load their existing shipments as ordinary logistics orders.
 Eventos: `SUPPLY_REQUESTED`, `TRANSPORT_ASSIGNED`, `CARGO_LOADED`,
 `CONVOY_DELAYED`, `ROUTE_BLOCKED`, `CARGO_LOST`, `CARGO_DELIVERED`.
 
+### Current convoy protection limits
+
+Abstract combat applies damage to ground formations. Its target selection
+does not include carriers or shipment cargo, and it never invokes carrier
+loss. Logistics checks territorial control, route closures and transport
+availability. A nearby friendly formation does not change those checks.
+Consequently the current engine has no convoy escort command.
+
 ## 8. Defaults configuráveis
 
 ```yaml

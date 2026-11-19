@@ -35,6 +35,8 @@ Options
   --preview-supply TARGET:ID:RESOURCE:QUANTITY  Check a request without queuing it.
   --request-supply TARGET:ID:RESOURCE:QUANTITY  Queue delivery to a stockpile or unit.
   --cancel-supply ID  Cancel a player-issued supply request by shipment ID.
+  --reserve UNIT      Exclude a formation from automatic assignment.
+  --release-reserve UNIT  Return a formation to automatic assignment.
   --help       Show this help.
 
 Examples
@@ -357,6 +359,7 @@ int main(int argc, char* argv[])
             }
             if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed" &&
                 option != "--faction" && option != "--order" && option != "--ground-order" && option != "--cancel" && option != "--scenario" &&
+                option != "--reserve" && option != "--release-reserve" &&
                 option != "--preview-supply" && option != "--request-supply" && option != "--cancel-supply" &&
                 option != "--load" && option != "--save" && option != "--inspect-world") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
@@ -396,6 +399,7 @@ int main(int argc, char* argv[])
                 continue;
             }
             if (option == "--order" || option == "--ground-order" || option == "--cancel" ||
+                option == "--reserve" || option == "--release-reserve" ||
                 option == "--preview-supply" || option == "--request-supply" || option == "--cancel-supply") {
                 commands.emplace_back(option, argv[i]);
                 continue;
@@ -467,6 +471,17 @@ int main(int argc, char* argv[])
         for (const auto& [command, value] : commands) {
             if (command == "--preview-supply" || command == "--request-supply") {
                 apply_supply_order(operator_session, value, command == "--preview-supply");
+            } else if (command == "--reserve" || command == "--release-reserve") {
+                const auto id = parse_number(value, command);
+                if (id > UINT32_MAX) {
+                    throw std::out_of_range("Formation ID must fit in 32 bits");
+                }
+                const bool reserved = command == "--reserve";
+                if (!operator_session.set_operational_reserve(openwar::UnitId{static_cast<std::uint32_t>(id)}, reserved)) {
+                    throw std::invalid_argument("Formation is not under your command or campaign has ended");
+                }
+                std::cout << "Formation #" << id << (reserved ? " placed in operational reserve\n" :
+                                                                " released from operational reserve\n");
             } else if (command == "--cancel-supply") {
                 const auto id = parse_number(value, command);
                 if (id > UINT32_MAX) {

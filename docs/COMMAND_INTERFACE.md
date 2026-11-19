@@ -392,6 +392,12 @@ and progress with the mission. Mission-specific routing constraints and
 air waypoints are outside current command support. Drafts, camera and
 panel selection are local UI state.
 
+Select a friendly formation and choose **Set reserve** or **End reserve**.
+The CLI equivalents are `--reserve UNIT` and `--release-reserve UNIT` with
+the appropriate `--faction`. To assign an order to a reserved formation,
+keep explicit assignment in the viewer or include the unit ID in the CLI
+order, for example `--order recon:2:3`. Existing order eligibility still applies.
+
 ### 6.1 Seleção
 
 Open **Supplies (L)** after selecting a friendly stockpile, installation or

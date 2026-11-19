@@ -56,6 +56,12 @@ printf '%s\n' "$help" | grep -F 'Select economy (default), logistics, maintenanc
 if printf '%s\n' "$help" | grep -E -- '--(logistics-demo|maintenance-demo|realtime)'; then
     exit 1
 fi
+output=$("$openwar" --demo operations --faction WEST --reserve 3 --order recon:2:3 --release-reserve 3 --ticks 0)
+printf '%s\n' "$output" | grep -Fx 'Formation #3 placed in operational reserve'
+printf '%s\n' "$output" | grep -Fx 'Formation #3 released from operational reserve'
+if "$openwar" --demo operations --faction WEST --reserve 3 --order recon:2 --ticks 0; then
+    exit 1
+fi
 output=$("$openwar" --demo logistics --ticks 6)
 legacy=$("$openwar" --logistics-demo --ticks 6)
 test "$output" = "$legacy"

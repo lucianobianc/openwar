@@ -82,6 +82,16 @@ OrderResult CommandSession::submit(MissionKind kind, const OrderTarget& target,
     return campaign_.issue_order(*faction_, kind, std::get<SectorId>(target), formation);
 }
 
+std::optional<bool> CommandSession::operational_reserve(UnitId formation) const
+{
+    return faction_ ? campaign_.operational_reserve(*faction_, formation) : std::nullopt;
+}
+
+bool CommandSession::set_operational_reserve(UnitId formation, bool reserved)
+{
+    return faction_ && campaign_.set_operational_reserve(*faction_, formation, reserved);
+}
+
 bool CommandSession::can_cancel(FactionId owner, MissionId id) const
 {
     return faction_ == owner && campaign_.can_cancel_order(owner, id);

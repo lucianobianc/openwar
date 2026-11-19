@@ -368,14 +368,19 @@ void choose_destination(ViewControls& controls, const Snapshot& snapshot, const 
     controls.feedback.reset();
 }
 
-std::size_t inspection_rows(Rectangle area)
+float inspection_top(const Marker& marker)
 {
-    return static_cast<std::size_t>(std::max(1.f, (area.height - 248) / 18));
+    return marker.kind == MarkerKind::unit ? 276.f : 236.f;
+}
+
+std::size_t inspection_rows(const Marker& marker, Rectangle area)
+{
+    return static_cast<std::size_t>(std::max(1.f, (area.height - inspection_top(marker) - 12) / 18));
 }
 
 std::size_t inspection_max_offset(const Marker& marker, Rectangle area)
 {
-    const auto visible = inspection_rows(area);
+    const auto visible = inspection_rows(marker, area);
     return marker.inspection.size() > visible ? marker.inspection.size() - visible : 0;
 }
 
@@ -814,8 +819,17 @@ bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rect
                 if (clicked(action_button(panel, i))) {
                     controls.draft = OrderDraft{actions[i], UnitId{marker->id}, marker->label};
                     controls.feedback.reset();
-                    break;
+                    return false;
                 }
+            }
+            const auto reserve = session.operational_reserve(UnitId{marker->id});
+            if (reserve && clicked(action_button(panel, actions.size()))) {
+                const bool changed = session.set_operational_reserve(UnitId{marker->id}, !*reserve);
+                controls.feedback = CommandFeedback{
+                    changed ? (*reserve ? "Formation released from operational reserve" :
+                                          "Formation placed in operational reserve") :
+                              "Formation reserve status could not be changed", changed};
+                return changed;
             }
         } else if (marker->kind == MarkerKind::mission && marker->faction &&
                    session.can_cancel(*marker->faction, MissionId{marker->id}) &&
@@ -1274,7 +1288,9 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                 button(action_button(area, i), kind == MissionKind::ground_recon ? "Gnd Recon" :
                     kind == MissionKind::ground_patrol ? "Gnd Patrol" : action_label(kind).c_str());
             }
-            if (session.permissions().may_issue_orders && actions.empty()) {
+            if (const auto reserve = session.operational_reserve(UnitId{marker->id})) {
+                button(action_button(area, actions.size()), *reserve ? "End reserve" : "Set reserve");
+            } else if (session.permissions().may_issue_orders && actions.empty()) {
                 label("No orders available from this formation.", x, y + 159, 14, muted, width);
             }
         } else if (marker->kind == MarkerKind::mission && marker->faction &&
@@ -1283,16 +1299,16 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                    "Release hold" : "Cancel mission");
         }
         if (!marker->inspection.empty()) {
-            const auto visible = inspection_rows(area);
+            const auto visible = inspection_rows(*marker, area);
             const auto count = marker->inspection.size();
             const auto offset = std::min(controls.detail_offset, inspection_max_offset(*marker, area));
             if (count > visible) {
                 label("Scroll for details  /  " + std::to_string(offset + 1) + "-" +
                       std::to_string(std::min(offset + visible, count)) + " of " + std::to_string(count),
-                      x, y + 216, 13, muted, width);
+                      x, y + inspection_top(*marker) - 20, 13, muted, width);
             }
             for (auto i = offset; i < std::min(offset + visible, count); ++i) {
-                label(marker->inspection[i], x, y + 236 + 18 * (i - offset), 15, ink, width);
+                label(marker->inspection[i], x, y + inspection_top(*marker) + 18 * (i - offset), 15, ink, width);
             }
         }
         return;

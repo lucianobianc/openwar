@@ -12,8 +12,8 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 11;
-constexpr std::uint64_t rules_version = 9;
+constexpr std::uint64_t schema_version = 12;
+constexpr std::uint64_t rules_version = 10;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
 
@@ -667,6 +667,9 @@ struct CampaignArchive {
         if (a.version >= 7) {
             a(v.setup_);
         }
+        if (a.version >= 12) {
+            a(v.operational_reserve_);
+        }
     }
 
     static void restore_legacy_movement(CampaignState& v, const Reader& archive)
@@ -764,6 +767,12 @@ struct CampaignArchive {
 
     static void validate(const CampaignState& v)
     {
+        for (const auto id : v.operational_reserve_) {
+            const auto unit = v.units_.find(id);
+            if (!v.operations_.enabled || unit == v.units_.end() || unit->second.faction != v.operations_.player) {
+                invalid_checkpoint();
+            }
+        }
         if (v.setup_) {
             const auto& setup = *v.setup_;
             const auto& options = setup.options;
@@ -1141,6 +1150,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 11 || rules != 9) &&
         (schema != 10 || rules != 9) &&
         (schema != 9 || rules != 8) &&
         (schema != 8 || rules != 7) &&

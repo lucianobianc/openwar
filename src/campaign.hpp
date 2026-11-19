@@ -471,6 +471,8 @@ public:
     FactionView faction_view(FactionId faction, bool include_events = true) const;
     std::span<const OperationsEvent> observer_operations_log() const { return operations_log_; }
     bool can_issue_orders(FactionId actor) const;
+    std::optional<bool> operational_reserve(FactionId actor, UnitId id) const;
+    bool set_operational_reserve(FactionId actor, UnitId id, bool reserved);
     std::vector<MissionKind> available_orders(FactionId actor, UnitId unit) const;
     MissionPlan preview_order(FactionId actor, MissionKind kind, SectorId target,
                             std::optional<UnitId> formation = {}) const;
@@ -654,6 +656,7 @@ private:
     std::map<EquipmentTypeId, EquipmentType> equipment_types_;
     std::map<FacilityId, MaintenanceFacility> facilities_;
     std::map<UnitId, MilitaryUnit> units_;
+    std::set<UnitId> operational_reserve_;
     std::map<EquipmentId, Equipment> equipment_;
     std::vector<ForcesEvent> forces_log_;
     OperationsSettings operations_;

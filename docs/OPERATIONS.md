@@ -76,6 +76,20 @@ Confirmation repeats the same checks before reserving resources. The existing
 scenario and checkpoint formats already represent the committed formation
 or equipment assignment.
 
+### Operational reserve
+
+A commander can place any formation under their command in operational reserve
+or release it. Autonomous planners and player orders that use automatic
+assignment exclude reserved formations. A player order with an explicit
+formation ID can still use a reserved formation if it meets the usual
+commitment, readiness, route and resource checks.
+
+Reserve status changes only future assignment eligibility. Existing orders,
+stock reservations, resupply, maintenance and combat continue normally.
+Releasing a formation makes it eligible for future automatic assignment.
+Checkpoint schema 12 with rules version 10 stores formation reserve status.
+Earlier checkpoints load with all formations eligible under their existing rules.
+
 ### Move and Hold
 
 **Move** relocates a formation to an exact geographic point in a sector

@@ -107,6 +107,28 @@ bool CampaignState::can_issue_orders(FactionId actor) const
     return operations_.enabled && operations_.player == actor && !war_ended();
 }
 
+std::optional<bool> CampaignState::operational_reserve(FactionId actor, UnitId id) const
+{
+    const auto unit = units_.find(id);
+    if (!can_issue_orders(actor) || unit == units_.end() || unit->second.faction != actor) {
+        return std::nullopt;
+    }
+    return operational_reserve_.contains(id);
+}
+
+bool CampaignState::set_operational_reserve(FactionId actor, UnitId id, bool reserved)
+{
+    if (!operational_reserve(actor, id).has_value()) {
+        return false;
+    }
+    if (reserved) {
+        operational_reserve_.insert(id);
+    } else {
+        operational_reserve_.erase(id);
+    }
+    return true;
+}
+
 bool CampaignState::formation_committed(UnitId id) const
 {
     const auto faction = units_.at(id).faction;
@@ -241,7 +263,7 @@ MissionPlan CampaignState::plan_air_order(FactionId faction, MissionKind kind, S
     const auto& destination = world_.sector(target);
     for (const auto& [id, item] : equipment_) {
         const auto& unit = units_.at(item.assignment.unit);
-        if (unit.faction != faction || (formation && unit.id != *formation) ||
+        if (unit.faction != faction || (formation ? unit.id != *formation : operational_reserve_.contains(unit.id)) ||
             item.status != EquipmentStatus::available || !unit.facility ||
             formation_committed(unit.id)) {
             continue;
