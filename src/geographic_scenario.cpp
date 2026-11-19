@@ -734,6 +734,13 @@ GeographicHeader inspect_geographic_header(const std::filesystem::path& path)
     return read_geographic_header(file, version);
 }
 
+std::filesystem::path referenced_military_world(const std::filesystem::path& path)
+{
+    auto input = open_scenario_file(path);
+    std::size_t line_number = 0;
+    return read_scenario_world(input, path, line_number);
+}
+
 MilitaryScenarioSummary inspect_military_scenario(const std::filesystem::path& path)
 {
     auto input = open_scenario_file(path);

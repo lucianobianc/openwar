@@ -3,7 +3,7 @@ AM_CXXFLAGS = -std=c++20
 
 noinst_LIBRARIES = libcampaign.a
 libcampaign_a_SOURCES = src/campaign.cpp src/campaign.hpp src/military_identity.hpp src/economy.cpp \
-	src/logistics.cpp src/forces.cpp src/scenario.cpp src/scenario.hpp src/scenario_config.cpp src/geographic_scenario.cpp src/intelligence.cpp \
+	src/logistics.cpp src/forces.cpp src/scenario.cpp src/scenario.hpp src/scenario_config.cpp src/campaign_setup.cpp src/geographic_scenario.cpp src/intelligence.cpp \
 	src/operations.cpp src/operations.hpp src/strategy.cpp src/combat.cpp src/combat.hpp src/territory.cpp src/persistence.cpp \
 	src/geographic_movement.cpp src/geographic_movement.hpp \
 	src/command.cpp src/command.hpp src/viewer_model.cpp src/viewer_model.hpp \
@@ -27,7 +27,8 @@ AM_TESTS_ENVIRONMENT = OPENWAR=./openwar$(EXEEXT); export OPENWAR; \
 	OWGEO_FIXTURE="$(srcdir)/examples/connecticut-valley/connecticut-valley.owgeo"; export OWGEO_FIXTURE; \
 	VALLEY_FIXTURES="$(srcdir)/examples/connecticut-valley"; export VALLEY_FIXTURES; \
 	LEGACY_ROAD_CHECKPOINT="$(srcdir)/tests/fixtures/closed-bridge-schema4.ows"; export LEGACY_ROAD_CHECKPOINT; \
-	LEGACY_IDENTITY_CHECKPOINT="$(srcdir)/tests/fixtures/military-unit-schema5.ows"; export LEGACY_IDENTITY_CHECKPOINT;
+	LEGACY_IDENTITY_CHECKPOINT="$(srcdir)/tests/fixtures/military-unit-schema5.ows"; export LEGACY_IDENTITY_CHECKPOINT; \
+	LEGACY_SETUP_CHECKPOINT="$(srcdir)/tests/fixtures/campaign-schema6.ows"; export LEGACY_SETUP_CHECKPOINT;
 TESTS = campaign-tests$(EXEEXT) tests/cli.sh geographic-movement-tests$(EXEEXT) viewer-model-tests$(EXEEXT) launcher-tests$(EXEEXT)
 
 if BUILD_VIEWER
@@ -46,7 +47,7 @@ else
 AM_DISTCHECK_CONFIGURE_FLAGS = --disable-viewer
 endif
 
-EXTRA_DIST = tests/cli.sh tests/fixtures/closed-bridge-schema4.ows tests/fixtures/military-unit-schema5.ows AGENTS.md LICENSE \
+EXTRA_DIST = tests/cli.sh tests/fixtures/closed-bridge-schema4.ows tests/fixtures/military-unit-schema5.ows tests/fixtures/campaign-schema6.ows AGENTS.md LICENSE \
 	docs/DESIGN.md docs/TERRITORY.md docs/ANNEXES_README.md \
 	docs/ECONOMY.md docs/LOGISTICS.md docs/MAINTENANCE.md \
 	docs/MILITARY_FORCES.md docs/INTELLIGENCE.md docs/OPERATIONS.md \

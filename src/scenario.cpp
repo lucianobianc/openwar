@@ -549,7 +549,13 @@ CampaignState open_campaign_scenario(const std::filesystem::path& path, std::opt
         const auto value = seed.value_or(0);
         if (value > UINT32_MAX)
             throw std::out_of_range("Seed must fit in 32 bits");
-        return CampaignState(read_geographic_scenario(path, player), static_cast<std::uint32_t>(value));
+        auto scenario = read_geographic_scenario(path, player);
+        if (path.extension() == ".owscenario" && value != 0) {
+            CampaignOptions options;
+            options.seed = static_cast<std::uint32_t>(value);
+            scenario = customize_scenario(std::move(scenario), path, options);
+        }
+        return CampaignState(std::move(scenario), static_cast<std::uint32_t>(value));
     }
     auto settings = read_procedural_settings(path);
     settings.seed = seed.value_or(settings.seed);

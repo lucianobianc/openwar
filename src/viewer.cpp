@@ -1159,6 +1159,9 @@ void run(CampaignState& campaign, std::optional<FactionId> faction,
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (!controls.draft && !controls.cancel_prompt) {
                 if (!controls.show_missions) {
+                    // The launcher shares this input context with the viewer.
+                    if (saves)
+                        PollInputEvents();
                     break;
                 }
                 controls.show_missions = false;
@@ -1179,6 +1182,7 @@ void run(CampaignState& campaign, std::optional<FactionId> faction,
         previous = now;
         const auto screen = layout();
         if (saves && clicked(screen.menu)) {
+            PollInputEvents();
             break;
         }
         if (saves && (IsKeyPressed(KEY_F5) || clicked(screen.save))) {

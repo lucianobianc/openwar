@@ -322,6 +322,25 @@ std::string_view equipment_status_name(EquipmentStatus status);
 std::string_view service_name(ServiceKind kind);
 std::uint32_t service_seconds(const EquipmentType& type, ServiceKind kind);
 
+enum class StartingPreset { original, reduced, increased };
+
+struct CampaignOptions {
+    // WEST and EAST respectively.
+    std::array<StartingPreset, 2> strength{};
+    std::array<StartingPreset, 2> stocks{};
+    std::uint32_t seed = 0;
+    std::optional<std::uint32_t> duration_minutes{};
+    std::optional<std::uint32_t> autonomous_orders{};
+    bool operator==(const CampaignOptions&) const = default;
+};
+
+struct CampaignSetupRecord {
+    std::string scenario;
+    std::string world;
+    CampaignOptions options;
+    bool operator==(const CampaignSetupRecord&) const = default;
+};
+
 struct ScenarioDefinition {
     WorldDefinition world;
     // Unlisted sectors start neutral.
@@ -350,6 +369,7 @@ struct ScenarioDefinition {
     std::vector<SupplyRequest> initial_supply_requests{};
     std::optional<geography::Map> geographic_world{};
     std::map<SectorId, geography::Point> ground_destinations{};
+    std::optional<CampaignSetupRecord> setup{};
 };
 
 class SimulationClock {
@@ -373,6 +393,7 @@ public:
     // A checkpoint owns the resolved world and resumes at the saved tick.
     void save(const std::filesystem::path& path) const;
     static CampaignState load(const std::filesystem::path& path);
+    const std::optional<CampaignSetupRecord>& setup() const { return setup_; }
     std::uint64_t seed() const { return seed_; }
     std::uint32_t generator_version() const { return generator_version_; }
     bool has_operational_view() const { return operations_.enabled; }
@@ -554,6 +575,7 @@ private:
     std::uint64_t seed_ = 0;
     std::uint32_t generator_version_ = 0;
     std::uint64_t scenario_fingerprint_ = 0;
+    std::optional<CampaignSetupRecord> setup_;
     WorldDefinition world_;
     SimulationClock clock_;
     std::vector<SectorState> sector_states_;

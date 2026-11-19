@@ -6,6 +6,7 @@
 #include <raylib.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
@@ -83,9 +84,8 @@ void frame(std::string_view title, std::string_view hint)
 }
 
 Choice menu(std::string_view title, std::string_view hint, std::span<const Entry> entries,
-            std::string_view message = {}, bool back = true)
+            std::string_view message = {}, bool back = true, std::size_t focus = 0)
 {
-    std::size_t focus = 0;
     std::size_t first = 0;
     while (!WindowShouldClose()) {
         const int width = GetScreenWidth();
@@ -200,9 +200,8 @@ bool recognized(const fs::path& path, bool checkpoint)
     return checkpoint ? extension == ".ows" : extension == ".owgeo" || extension == ".owscenario" || extension == ".toml";
 }
 
-std::optional<fs::path> enter_path()
+std::optional<std::string> enter_text(std::string_view title, std::string_view hint, std::string input = {})
 {
-    std::string input;
     while (!WindowShouldClose()) {
         const bool submit = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER);
         const bool back = IsKeyPressed(KEY_ESCAPE);
@@ -223,7 +222,7 @@ std::optional<fs::path> enter_path()
             input.resize(last);
         }
         BeginDrawing();
-        frame("Open a path", "Type a file or folder path, or paste it with Ctrl+V.");
+        frame(title, hint);
         const auto width = GetScreenWidth() - 72;
         DrawRectangle(36, 160, width, 45, panel);
         DrawRectangleLines(36, 160, width, 45, accent);
@@ -231,7 +230,7 @@ std::optional<fs::path> enter_path()
         while (!tail.empty() && MeasureText(tail.c_str(), 18) > width - 24)
             tail.erase(0, 1);
         text(tail, 48, 172, 18, ink, width - 24);
-        text("Enter to open / Esc to go back", 36, 227, 15, muted, width);
+        text("Enter to confirm / Esc to go back", 36, 227, 15, muted, width);
         EndDrawing();
         if (back)
             return {};
@@ -239,7 +238,7 @@ std::optional<fs::path> enter_path()
             while (!input.empty() && (input.back() == '\r' || input.back() == '\n'))
                 input.pop_back();
             if (!input.empty())
-                return fs::u8path(input);
+                return input;
         }
     }
     return {};
@@ -313,8 +312,8 @@ fs::path browse(fs::path directory, bool checkpoint)
             return {};
         auto path = choice.row ? entries[*choice.row].path : std::move(choice.dropped);
         if (choice.row == 0) {
-            if (const auto entered = enter_path())
-                path = *entered;
+            if (const auto entered = enter_text("Open a path", "Type a file or folder path, or paste it with Ctrl+V."))
+                path = fs::u8path(*entered);
 #ifndef _WIN32
         } else if (picker && choice.row == 1) {
             path = native_picker();
@@ -336,11 +335,24 @@ fs::path browse(fs::path directory, bool checkpoint)
     return {};
 }
 
+std::string_view strength_label(StartingPreset preset)
+{
+    constexpr std::array names{"Scenario original", "Reduced", "Reinforced"};
+    return names[static_cast<std::size_t>(preset)];
+}
+
+std::string_view stock_label(StartingPreset preset)
+{
+    constexpr std::array names{"Scenario original", "Lower (75%)", "Higher (125% within capacity)"};
+    return names[static_cast<std::size_t>(preset)];
+}
+
 struct OperatorRole {
     std::optional<FactionId> faction;
 };
 
-std::optional<OperatorRole> select_role(std::string_view name, const std::set<FactionId>& commanders, bool resume)
+std::optional<OperatorRole> select_role(std::string_view name, const std::set<FactionId>& commanders, bool resume,
+                                       std::span<const std::string> setup = {})
 {
     std::vector<OperatorRole> roles{{{}}};
     std::vector<Entry> entries{{"Observer", {"Read-only campaign view."}}};
@@ -350,6 +362,8 @@ std::optional<OperatorRole> select_role(std::string_view name, const std::set<Fa
             "Issue orders and view intelligence for " + std::string(faction_name(faction)) + "."
         }});
     }
+    for (auto& entry : entries)
+        entry.details.insert(entry.details.end(), setup.begin(), setup.end());
     const auto choice = menu(resume ? "Resume as" : "Start as", name, entries);
     return choice.row ? std::optional{roles[*choice.row]} : std::nullopt;
 }
@@ -370,7 +384,22 @@ std::optional<LaunchSelection> continue_campaign(const fs::path& saves, fs::path
                 commanders.insert(faction);
         }
         const auto name = file.filename().string() + " / tick " + std::to_string(campaign.clock().tick());
-        if (const auto role = select_role(name, commanders, true))
+        std::vector<std::string> settings;
+        if (campaign.setup()) {
+            const auto& record = *campaign.setup();
+            const auto& options = record.options;
+            settings = {"Scenario " + record.scenario, "World " + record.world,
+                "Seed " + std::to_string(options.seed),
+                "WEST strength / " + std::string(strength_label(options.strength[0])),
+                "EAST strength / " + std::string(strength_label(options.strength[1])),
+                "WEST stocks / " + std::string(stock_label(options.stocks[0])),
+                "EAST stocks / " + std::string(stock_label(options.stocks[1]))};
+            if (options.duration_minutes)
+                settings.push_back("Time limit " + std::to_string(*options.duration_minutes) + " min");
+            if (options.autonomous_orders)
+                settings.push_back("Autonomous orders " + std::to_string(*options.autonomous_orders) + " per faction");
+        }
+        if (const auto role = select_role(name, commanders, true, settings))
             return LaunchSelection{std::move(campaign), role->faction};
     } catch (const std::exception& failure) {
         error = failure.what();
@@ -378,8 +407,125 @@ std::optional<LaunchSelection> continue_campaign(const fs::path& saves, fs::path
     return {};
 }
 
+void choose_preset(std::string_view title, StartingPreset& value, bool strength)
+{
+    const std::array choices{
+        Entry{"Scenario original", {"Use the authored starting values."}},
+        strength ? Entry{"Reduced", {"Remove one ready ground item from each repeated occupying type per formation."}} :
+            Entry{"Lower (75%)", {"Reduce initial unreserved stock quantities by 25%, rounding down."}},
+        strength ? Entry{"Reinforced", {"Add one ready ground item to each repeated occupying type per formation."}} :
+            Entry{"Higher (125%)", {"Increase initial unreserved stock quantities by up to 25% within capacity."}}
+    };
+    const auto choice = menu(title, "Select a starting preset.", choices, {}, true, static_cast<std::size_t>(value));
+    if (choice.row)
+        value = static_cast<StartingPreset>(*choice.row);
+}
+
+std::optional<LaunchSelection> start_with_settings(const Entry& entry, const ScenarioListing& listing)
+{
+    const auto base = read_geographic_scenario(entry.path);
+    const auto planner = base.operations.enabled && base.operations.planner_interval_ticks;
+    CampaignOptions options;
+    std::string error;
+    std::size_t focus = 0;
+    while (!WindowShouldClose()) {
+        const auto original_duration = base.combat.time_limit_seconds ?
+            std::to_string(*base.combat.time_limit_seconds / 60) + " min" : "No time limit";
+        const auto duration = options.duration_minutes ?
+            std::to_string(*options.duration_minutes) + " min" : original_duration + " (scenario)";
+        const auto orders = !planner ? std::string("Disabled by scenario") : options.autonomous_orders ?
+            std::to_string(*options.autonomous_orders) + " per faction" :
+            std::to_string(base.operations.max_autonomous_missions) + " per faction (scenario)";
+        const std::array entries{
+            Entry{"Continue to operator role", {"Validate these settings, then choose Observer or a commander.",
+                "Restore scenario defaults to start with the original forces, stocks, schedule and seed."}},
+            Entry{"WEST strength / " + std::string(strength_label(options.strength[0])),
+                {"Changes ready ground equipment that can occupy sectors and occurs at least twice in a formation."}},
+            Entry{"EAST strength / " + std::string(strength_label(options.strength[1])),
+                {"Changes ready ground equipment that can occupy sectors and occurs at least twice in a formation."}},
+            Entry{"WEST stocks / " + std::string(stock_label(options.stocks[0])),
+                {"Adjusts fixed and mobile WEST stock quantities within their original capacity."}},
+            Entry{"EAST stocks / " + std::string(stock_label(options.stocks[1])),
+                {"Adjusts fixed and mobile EAST stock quantities within their original capacity."}},
+            Entry{"Random seed / " + std::to_string(options.seed),
+                {"Repeat the same seed, settings and commands to reproduce a campaign. The launcher default is 0."}},
+            Entry{"Time limit / " + duration, {"Sets the maximum simulated duration. Victory can occur earlier."}},
+            Entry{"Autonomous orders / " + orders, {planner ? "Sets the maximum active automatic orders per faction." :
+                "Automatic planning is disabled for this scenario."}},
+            Entry{"Restore scenario defaults", {"Reset every setting on this screen."}}
+        };
+        const auto choice = menu("Campaign settings", entry.title, entries, error, true, focus);
+        if (!choice.row)
+            return {};
+        focus = *choice.row;
+        error.clear();
+        try {
+            switch (focus) {
+            case 0: {
+                auto resolved = customize_scenario(base, entry.path, options);
+                if (const auto role = select_role(entry.title, listing.commanders, false)) {
+                    resolved.operations.player = role->faction;
+                    return LaunchSelection{CampaignState(std::move(resolved), options.seed), role->faction};
+                }
+                break;
+            }
+            case 1:
+            case 2:
+                choose_preset(focus == 1 ? "WEST starting strength" : "EAST starting strength",
+                    options.strength[focus - 1], true);
+                break;
+            case 3:
+            case 4:
+                choose_preset(focus == 3 ? "WEST starting stocks" : "EAST starting stocks",
+                    options.stocks[focus - 3], false);
+                break;
+            case 5: {
+                const auto input = enter_text("Random seed", "Enter a whole number from 0 to 4294967295.",
+                                              std::to_string(options.seed));
+                if (input) {
+                    std::uint32_t seed = 0;
+                    const auto end = input->data() + input->size();
+                    const auto parsed = std::from_chars(input->data(), end, seed);
+                    if (parsed.ec != std::errc{} || parsed.ptr != end)
+                        throw std::invalid_argument("Enter a whole number from 0 to 4294967295");
+                    options.seed = seed;
+                }
+                break;
+            }
+            case 6: {
+                const std::array choices{Entry{"Scenario original / " + original_duration}, Entry{"1 hour"},
+                    Entry{"2 hours"}, Entry{"4 hours"}, Entry{"8 hours"}};
+                constexpr std::array<std::optional<std::uint32_t>, 5> minutes{{{}, 60, 120, 240, 480}};
+                if (const auto selected = menu("Time limit", "Choose the maximum simulated duration.", choices).row)
+                    options.duration_minutes = minutes[*selected];
+                break;
+            }
+            case 7: {
+                if (!planner)
+                    break;
+                const std::array choices{Entry{"Scenario original"}, Entry{"One per faction"},
+                    Entry{"Two per faction"}, Entry{"Three per faction"}};
+                if (const auto selected = menu("Autonomous orders", "Choose the maximum active automatic orders.", choices).row)
+                    options.autonomous_orders = *selected == 0 ? std::nullopt :
+                        std::optional{static_cast<std::uint32_t>(*selected)};
+                break;
+            }
+            case 8:
+                options = {};
+                focus = 0;
+                break;
+            }
+        } catch (const std::exception& failure) {
+            error = failure.what();
+        }
+    }
+    return {};
+}
+
 std::optional<LaunchSelection> start_scenario(const Entry& entry, const ScenarioListing& scenario)
 {
+    if (entry.path.extension() == ".owscenario")
+        return start_with_settings(entry, scenario);
     const auto role = select_role(entry.title, scenario.commanders, false);
     if (!role)
         return {};

@@ -51,12 +51,16 @@ struct MilitaryScenarioSummary {
 };
 
 GeographicHeader inspect_geographic_header(const std::filesystem::path& path);
+std::filesystem::path referenced_military_world(const std::filesystem::path& path);
 MilitaryScenarioSummary inspect_military_scenario(const std::filesystem::path& path);
 GeographicWorld read_geographic_world(const std::filesystem::path& path);
 bool is_geographic_scenario_file(const std::filesystem::path& path);
 ScenarioDefinition read_geographic_scenario(const std::filesystem::path& path,
     std::optional<FactionId> player = {});
 
+// Resolve authored settings before initializing any live campaign state.
+ScenarioDefinition customize_scenario(ScenarioDefinition scenario, const std::filesystem::path& source,
+                                     const CampaignOptions& options);
 CampaignState open_campaign_scenario(const std::filesystem::path& path, std::optional<FactionId> player = {},
                                      std::optional<std::uint64_t> seed = {});
 ProceduralSettings read_procedural_settings(const std::filesystem::path& path);

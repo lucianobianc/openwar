@@ -448,6 +448,12 @@ and scenario summaries. Full terrain and military validation run when the
 campaign is started. Combined OWGEO 1 demonstrations and procedural
 configurations are listed separately from reusable geographic worlds.
 
+Authored military scenarios such as **Valley Junction** open **Campaign
+settings** before the operator-role screen. Start with the authored defaults
+or adjust each faction's starting strength and supplies, the seed, the time
+limit and the number of automatic orders. Use **Restore scenario defaults**
+to reset the settings. [Preset and checkpoint details](docs/CAMPAIGN_SETUP.md#authored-campaign-settings)
+
 Choose **Observer**, or a commander role supported by the selected scenario.
 A checkpoint retains the command faction it was created with. The launcher
 can resume it in that command role or as a read-only observer. In campaigns

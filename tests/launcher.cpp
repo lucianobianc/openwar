@@ -148,6 +148,122 @@ void test_valley_junction(const fs::path& bundled)
     }
 }
 
+void test_campaign_settings(const fs::path& root, const fs::path& bundled)
+{
+    const auto path = bundled / "valley-junction.owscenario";
+    const auto world = bundled / "valley-world.owgeo";
+    const auto scenario_before = bytes(path);
+    const auto world_before = bytes(world);
+    const auto base = read_geographic_scenario(path);
+    const auto saves = root / "settings";
+    {
+        auto original = open_campaign_scenario(path);
+        CampaignState defaults(customize_scenario(base, path, {}), 0);
+        require(!defaults.setup() && bytes(save_new_checkpoint(defaults, saves)) ==
+                bytes(save_new_checkpoint(original, saves)), "Default options changed the authored campaign");
+    }
+
+    CampaignOptions options;
+    options.strength = {StartingPreset::reduced, StartingPreset::increased};
+    options.stocks = {StartingPreset::reduced, StartingPreset::increased};
+    options.seed = 42;
+    options.duration_minutes = 120;
+    options.autonomous_orders = 1;
+    auto resolved = customize_scenario(base, path, options);
+
+    const auto equipment_in = [](const ScenarioDefinition& scenario, UnitId unit, EquipmentTypeId type) {
+        return std::ranges::count_if(scenario.equipment, [&](const auto& item) {
+            return item.unit == unit && item.type == type;
+        });
+    };
+    require(equipment_in(base, UnitId{2}, EquipmentTypeId{1}) == 3 &&
+            equipment_in(resolved, UnitId{2}, EquipmentTypeId{1}) == 2 &&
+            equipment_in(base, UnitId{102}, EquipmentTypeId{101}) == 2 &&
+            equipment_in(resolved, UnitId{102}, EquipmentTypeId{101}) == 3 &&
+            equipment_in(resolved, UnitId{6}, EquipmentTypeId{6}) == 2 &&
+            resolved.equipment_types.size() == base.equipment_types.size(),
+            "Strength presets failed to adjust repeated ready ground equipment independently");
+    require(resolved.combat.time_limit_seconds == 7200 && resolved.operations.max_autonomous_missions == 1,
+            "The time and autonomous-order settings were not passed to the initializer");
+
+    CampaignOptions opposite;
+    opposite.stocks = {StartingPreset::increased, StartingPreset::reduced};
+    opposite.strength = {StartingPreset::increased, StartingPreset::reduced};
+    CampaignState changed(std::move(resolved), options.seed);
+    CampaignState reverse(customize_scenario(base, path, opposite), opposite.seed);
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    require(changed.stockpiles().at(StockpileId{1}).quantity.at(fuel) == 225 &&
+            changed.stockpiles().at(StockpileId{101}).quantity.at(fuel) == 340 &&
+            changed.stockpiles().at(StockpileId{1}).reserved.at(fuel) == 0 &&
+            reverse.stockpiles().at(StockpileId{1}).quantity.at(fuel) == 340 &&
+            reverse.stockpiles().at(StockpileId{101}).quantity.at(fuel) == 225 &&
+            changed.shipments().size() == base.initial_supply_requests.size() &&
+            changed.carriers().at(CarrierId{1}).fuel == 35,
+            "Stock presets changed reservations or carrier fuel, or two campaign setups shared state");
+
+    const auto rejects = [&](const ScenarioDefinition& scenario, const fs::path& source, CampaignOptions invalid) {
+        try {
+            (void)customize_scenario(scenario, source, invalid);
+        } catch (const std::invalid_argument&) {
+            return true;
+        }
+        return false;
+    };
+    CampaignOptions invalid;
+    invalid.duration_minutes = 60;
+    require(rejects(base, path, invalid), "Time limit accepted an unreachable scenario victory duration");
+    invalid = {};
+    invalid.autonomous_orders = 1;
+    auto without_planner = base;
+    without_planner.operations.planner_interval_ticks = 0;
+    require(rejects(without_planner, path, invalid), "Planner limit accepted a scenario without automatic planning");
+    invalid = {};
+    invalid.strength[0] = static_cast<StartingPreset>(9);
+    require(rejects(base, path, invalid), "Invalid strength preset accepted");
+
+    // Relative source references keep equivalent packages reproducible after relocation.
+    const auto relocated = root / "relocated";
+    fs::create_directory(relocated);
+    const auto relocated_path = relocated / path.filename();
+    fs::copy_file(path, relocated_path);
+    fs::copy_file(world, relocated / world.filename());
+    CampaignState duplicate(customize_scenario(read_geographic_scenario(relocated_path), relocated_path, options),
+                            options.seed);
+    changed.advance_ticks(4);
+    duplicate.advance_ticks(4);
+    for (const auto faction : {FactionId::west, FactionId::east}) {
+        require(changed.faction_view(faction, false).missions.size() == 1,
+                "Automatic order limit did not affect early planning");
+    }
+    const auto checkpoint = save_new_checkpoint(duplicate, saves);
+    fs::remove_all(relocated);
+    auto resumed = CampaignState::load(checkpoint);
+    require(resumed.setup() == CampaignSetupRecord{"valley-junction.owscenario", "valley-world.owgeo", options} &&
+            resumed.clock().tick() == 4 && bytes(checkpoint) == bytes(save_new_checkpoint(changed, saves)),
+            "Customized setup was not preserved or was not deterministic");
+    resumed.advance_ticks(3);
+    changed.advance_ticks(3);
+    require(bytes(save_new_checkpoint(resumed, saves)) == bytes(save_new_checkpoint(changed, saves)),
+            "Customized campaign diverged after resumption");
+    require(bytes(path) == scenario_before && bytes(world) == world_before, "Campaign settings edited a source file");
+
+    CampaignOptions seed_only;
+    seed_only.seed = 22;
+    auto direct = open_campaign_scenario(path, {}, seed_only.seed);
+    CampaignState seed_from_launcher(customize_scenario(base, path, seed_only), seed_only.seed);
+    require(bytes(save_new_checkpoint(direct, saves)) == bytes(save_new_checkpoint(seed_from_launcher, saves)),
+            "Direct authored launch differs from launcher with the same seed");
+
+    const auto* legacy = std::getenv("LEGACY_SETUP_CHECKPOINT");
+    require(legacy, "Missing schema 6 checkpoint fixture");
+    auto old = CampaignState::load(legacy);
+    CampaignState legacy_equivalent(combat_example_scenario(), 42);
+    old.advance_ticks(8);
+    legacy_equivalent.advance_ticks(8);
+    require(!old.setup() && bytes(save_new_checkpoint(old, saves)) ==
+            bytes(save_new_checkpoint(legacy_equivalent, saves)), "Schema 6 checkpoint resumes differently");
+}
+
 }  // namespace
 
 int main()
@@ -159,6 +275,7 @@ int main()
         test_discovery(files.directory, fixtures);
         test_start_and_resume(files.directory, fixtures);
         test_valley_junction(fixtures);
+        test_campaign_settings(files.directory, fixtures);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

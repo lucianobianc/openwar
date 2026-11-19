@@ -110,6 +110,37 @@ write a numbered checkpoint and return to the launcher, respectively.
 The [viewer guide](../README.md#campaign-viewer) documents install and user
 data paths.
 
+### Authored campaign settings
+
+After choosing an `OWSCENARIO 1` scenario, the launcher presents **Campaign
+settings** before operator selection. Continue with the defaults to start the
+authored scenario as published. **Restore scenario defaults** resets every
+choice, including seed 0. The launcher applies the settings to an in-memory
+definition before the normal campaign initializer runs.
+
+| Setting | Effect |
+|---|---|
+| WEST and EAST starting strength | Reduced removes one item from each repeated group of initially ready, sector-occupying ground equipment of the same type in a deployed formation. Reinforced adds one item to each such group. The highest eligible ID is removed, and new IDs are allocated in unit and type order. Both presets preserve at least one of every authored equipment type and leave helicopters, reserves and service-due items intact. |
+| WEST and EAST starting stocks | Lower sets unreserved starting quantities to 75%, rounded down. Higher adds up to 25%, rounded down and capped by the authored stock capacity. The presets apply to faction-owned fixed and mobile stockpiles. Carrier tanks, capacities, ownership and queued supply requests retain their authored values. |
+| Random seed | Unsigned 32-bit value. Use the same seed, settings, role and commands to reproduce a run. |
+| Time limit | Scenario value or a launcher preset of 1, 2, 4 or 8 hours. The existing time-limit rule runs alongside authored victory conditions. An overridden limit must exceed every authored victory hold period. |
+| Autonomous orders | Scenario value or 1, 2 or 3 active automatic orders per faction. The scenario must enable automatic planning to use an override. |
+
+A preset with no applicable effect produces a validation message before role
+selection. Combined demos and procedural configurations use their existing
+startup paths. Initial readiness and reserves follow the normal equipment
+initializer. Doctrine, victory objectives, terrain and unit placement are
+outside the settings screen.
+
+Checkpoint schema 7 stores custom setup provenance alongside the resolved
+campaign. It identifies the source scenario and its world reference, records
+effective overrides and the seed, and uses the checkpoint header to record the
+simulation rules version. The launcher shows the record on the resume screen.
+Default settings produce the same checkpoint as direct launch in the same
+build. Checkpoints through schema 6 resume without a custom setup record, and
+the normal checkpoint reader resumes custom campaigns offline from resolved
+state. The simulation rules version remains 6.
+
 ## 3. Origem do mundo e cenário-base
 
 The world source and military composition are separate decisions. The current
