@@ -171,6 +171,13 @@ released=$("$openwar" --demo combat --faction WEST --ground-order hold:250000,25
 printf '%s\n' "$released" | grep -F 'Mission 1 hold to sector 0 | released | equipment 1 (historical assignment)'
 legacy_hold=${LEGACY_HOLD_CHECKPOINT:-tests/fixtures/hold-schema8.ows}
 "$openwar" --load "$legacy_hold" --faction WEST --cancel 1 --ticks 0 | grep -F 'Mission 1 hold to sector 0 | released'
+legacy_move=${LEGACY_MOVE_CHECKPOINT:-tests/fixtures/move-schema9.ows}
+"$openwar" --load "$legacy_move" --faction WEST --ticks 2 | grep -F 'Mission 1 move to sector 1 | completed'
+patrolled=$("$openwar" --demo combat --faction WEST \
+    --ground-order 'ground-patrol:250000,350000,0;751000,350000,0:1' --ticks 2 --events)
+printf '%s\n' "$patrolled" | grep -E 'Mission 1 ground-patrol to sector 1 \| completed .* \| waypoints 2/2'
+printf '%s\n' "$patrolled" | grep -F 'ground waypoint 1 reached, no contacts detected'
+reject --demo combat --faction WEST --ground-order 'ground-patrol:751000,350000,0;' --ticks 0
 
 campaign=$("$openwar" --demo campaign --seed 42 --ticks 3000 --events)
 printf '%s\n' "$campaign" | grep -Fx 'Campaign summary | seed 42'

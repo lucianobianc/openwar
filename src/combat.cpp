@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <queue>
 #include <stdexcept>
@@ -33,7 +34,8 @@ bool position_access(MissionKind kind, FactionId own, FactionId controller, bool
 {
     return controller == own ||
         (destination && (kind == MissionKind::ground_recon ||
-                         (kind == MissionKind::move && controller == FactionId::neutral)));
+                         ((kind == MissionKind::move || kind == MissionKind::ground_patrol) &&
+                          controller == FactionId::neutral)));
 }
 
 void decrease(std::uint32_t& value, std::uint32_t amount)
@@ -227,13 +229,13 @@ void CampaignState::initialize_combat(const ScenarioDefinition& scenario)
 }
 
 OrderResult CampaignState::issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination,
-                                              std::optional<UnitId> formation)
+                                              std::optional<UnitId> formation, std::span<const geography::Point> via)
 {
-    return commit_order(preview_order(actor, kind, destination, formation), true);
+    return commit_order(preview_order(actor, kind, destination, formation, via), true);
 }
 
 MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, geography::Point destination,
-                                         std::optional<UnitId> formation) const
+                                         std::optional<UnitId> formation, std::span<const geography::Point> via) const
 {
     if (const auto refusal = order_authority_refusal(actor, formation); !refusal.empty()) {
         return {{}, refusal};
@@ -247,12 +249,12 @@ MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, geog
         (!authored_geography_ && destination.elevation != 0)) {
         return {{}, "ground destination is out of bounds"};
     }
-    return plan_ground_order(actor, kind, static_cast<SectorId>(*target), destination, formation);
+    return plan_ground_order(actor, kind, static_cast<SectorId>(*target), destination, formation, via);
 }
 
 MissionPlan CampaignState::plan_ground_order(FactionId faction, MissionKind kind, SectorId target,
                                             std::optional<geography::Point> destination,
-                                             std::optional<UnitId> formation) const
+                                             std::optional<UnitId> formation, std::span<const geography::Point> via) const
 {
     if (!combat_.enabled || war_ended()) {
         return {{}, "ground operations unavailable"};
@@ -261,11 +263,23 @@ MissionPlan CampaignState::plan_ground_order(FactionId faction, MissionKind kind
     if (const auto refusal = ground_target_refusal(view, faction, kind, target); !refusal.empty()) {
         return {{}, refusal};
     }
+    if (via.size() >= max_ground_waypoints) {
+        return {{}, "a ground route allows at most 16 points including the destination"};
+    }
+    for (const auto point : via) {
+        const auto sector = movement_map_.sector(point);
+        if (!sector || !movement_map_.valid_position(point) || (!authored_geography_ && point.elevation != 0)) {
+            return {{}, "intermediate waypoint is out of bounds"};
+        }
+        if (!ground_target_refusal(view, faction, MissionKind::hold, static_cast<SectorId>(*sector)).empty()) {
+            return {{}, "intermediate waypoints require traversable, confirmed friendly sectors"};
+        }
+    }
     if (formation && !combat_units_.contains(*formation)) {
         return {{}, "selected formation has no ground deployment"};
     }
     std::string_view refusal = "no eligible supplied ground unit with a known route";
-    auto chosen = plan_ground_mission(faction, kind, target, view, {}, destination, &refusal, formation);
+    auto chosen = plan_ground_mission(faction, kind, target, view, {}, destination, &refusal, formation, via);
     if (!chosen) {
         return {{}, refusal};
     }
@@ -287,8 +301,11 @@ std::string_view CampaignState::ground_target_refusal(const FactionView& view, F
             return "destination lacks confirmed territorial intelligence";
         }
         if (!position_access(kind, faction, report->second.estimated_controller, true)) {
-            return kind == MissionKind::hold ? "hold requires a reported friendly destination" :
-                                             "move requires a reported friendly or neutral destination";
+            if (kind == MissionKind::hold) {
+                return "hold requires a reported friendly destination";
+            }
+            return kind == MissionKind::ground_patrol ? "patrol requires a reported friendly or neutral destination" :
+                                                       "move requires a reported friendly or neutral destination";
         }
         return {};
     }
@@ -309,7 +326,8 @@ std::string_view CampaignState::ground_target_refusal(const FactionView& view, F
 std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,
                                                        const FactionView& view, std::span<const UnitId> excluded,
                                                        std::optional<geography::Point> destination,
-                                                       std::string_view* refusal, std::optional<UnitId> formation) const
+                                                       std::string_view* refusal, std::optional<UnitId> formation,
+                                                       std::span<const geography::Point> via) const
 {
     const auto objective = destination.value_or(ground_anchor(target));
     std::optional<Mission> chosen;
@@ -332,11 +350,16 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
         }
         const auto& stores = stockpiles_.at(combat.stores);
         std::vector<SectorId> path;
-        auto route = ground_route(combat, objective, view, path, geographic_ground_order(kind));
+        std::vector<GroundWaypoint> waypoints;
+        const bool itinerary = !via.empty() || kind == MissionKind::ground_patrol;
+        auto route = itinerary ? ground_itinerary(combat, objective, via, view, path, waypoints) :
+            ground_route(combat, *combat.position, objective, view, path, geographic_ground_order(kind));
         if (route.status == geography::RouteStatus::limit_exceeded && refusal) {
             *refusal = "ground route search limit exceeded";
-        } else if ((formation || geographic_ground_order(kind)) && refusal) {
-            if (formation && route.status != geography::RouteStatus::found)
+        } else if ((formation || geographic_ground_order(kind) || itinerary) && refusal) {
+            if (itinerary && route.status != geography::RouteStatus::found)
+                *refusal = "could not route through all ground waypoints with current faction reports";
+            else if (formation && route.status != geography::RouteStatus::found)
                 *refusal = "selected formation has no route with current faction reports";
             else if (route.status == geography::RouteStatus::found && route.fuel_ml > fuel_balance(stores, combat))
                 *refusal = formation ? "selected formation has insufficient fuel for the route" :
@@ -350,6 +373,7 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
         chosen->ground_path = std::move(path);
         chosen->ground_unit = id;
         chosen->ground_destination = objective;
+        chosen->waypoints = std::move(waypoints);
         chosen->duration_ticks = std::max<std::uint64_t>(1,
             ceil_divide(route.duration_us, clock_.tick_seconds() * second_us));
         best_duration = route.duration_us;
@@ -396,7 +420,8 @@ std::optional<EquipmentId> CampaignState::ground_order_equipment(UnitId id, Miss
     });
     if (equipment == equipment_.end()) {
         if (refusal) {
-            *refusal = (kind == MissionKind::move || kind == MissionKind::ground_recon) ?
+            *refusal = (kind == MissionKind::move || kind == MissionKind::ground_recon ||
+                        kind == MissionKind::ground_patrol) ?
                 "selected formation has no available mobile ground equipment" :
                 kind == MissionKind::hold ? "selected formation has no available ground defensive equipment" :
                 "selected formation has no available equipment that can occupy territory";
@@ -417,7 +442,8 @@ MissionId CampaignState::commit_ground_mission(Mission mission)
     auto& committed = missions_.emplace(std::pair{faction, mission_id}, std::move(mission)).first->second;
     reserve_equipment(equipment);
     auto reason = manual ? "player ground order scheduled" : "autonomous ground order scheduled";
-    if (committed.kind == MissionKind::hold && committed.ground_journey->route.legs.empty()) {
+    if (committed.kind == MissionKind::hold && committed.waypoints.empty() &&
+        committed.ground_journey->route.legs.empty()) {
         committed.status = MissionStatus::holding;
         committed.launch_tick = clock_.tick();
         set_equipment_status(equipment_.at(equipment), EquipmentStatus::in_operation, clock_.tick());
@@ -515,19 +541,20 @@ geography::Profile CampaignState::ground_profile(UnitId id) const
     return profile;
 }
 
-geography::Route CampaignState::ground_route(const CombatUnit& combat, geography::Point destination,
+geography::Route CampaignState::ground_route(const CombatUnit& combat, geography::Point origin, geography::Point destination,
                                              const FactionView& view, std::vector<SectorId>& path,
-                                             bool diagnose_fuel) const
+                                             bool diagnose_fuel, std::optional<std::int64_t> fuel_budget) const
 {
     const auto& unit = units_.at(combat.unit);
+    const auto start = static_cast<SectorId>(*movement_map_.sector(origin));
     const auto target = static_cast<SectorId>(*movement_map_.sector(destination));
-    const auto budget = fuel_balance(stockpiles_.at(combat.stores), combat);
+    const auto budget = fuel_budget.value_or(fuel_balance(stockpiles_.at(combat.stores), combat));
     if (authored_geography_) {
         // Restrict the graph with public geography and the faction's reports before choosing the route.
         const geography::SectorAccess allowed = [&](std::int64_t sector) {
             const auto id = static_cast<SectorId>(sector);
             const auto report = view.sectors.find(id);
-            return id == unit.sector || id == target || (report != view.sectors.end() &&
+            return id == start || id == target || (report != view.sectors.end() &&
                 report->second.confidence >= 750 && report->second.estimated_controller == unit.faction);
         };
         const geography::RoadAccess road_allowed = [&](std::uint32_t road) {
@@ -535,16 +562,16 @@ geography::Route CampaignState::ground_route(const CombatUnit& combat, geography
             return report == view.roads.end() || !report->second.confirmed() || !report->second.closed;
         };
         const auto profile = ground_profile(combat.unit);
-        auto route = geography::find_route(movement_map_, profile, *combat.position, destination,
+        auto route = geography::find_route(movement_map_, profile, origin, destination,
             {}, geography::RoutePriority::time, allowed, road_allowed);
         if (route.status == geography::RouteStatus::found && route.fuel_ml > budget) {
-            route = geography::find_route(movement_map_, profile, *combat.position, destination,
+            route = geography::find_route(movement_map_, profile, origin, destination,
                 {}, geography::RoutePriority::fuel, allowed, road_allowed);
         }
         if (route.status == geography::RouteStatus::found) {
             auto trace = geography::begin(route, route.fuel_ml);
             geography::advance(movement_map_, route, trace, route.duration_us);
-            path.push_back(unit.sector);
+            path.push_back(start);
             for (const auto& crossing : trace.crossings) {
                 path.push_back(static_cast<SectorId>(crossing.to));
             }
@@ -554,7 +581,7 @@ geography::Route CampaignState::ground_route(const CombatUnit& combat, geography
 
     const auto cost_per_weight = ground_fuel_per_weight(world_) * litre_ml;
     const auto max_weight = diagnose_fuel ? std::numeric_limits<std::uint64_t>::max() : budget / cost_per_weight;
-    auto corridor = find_ground_path(world_, view, unit.faction, unit.sector, target, max_weight);
+    auto corridor = find_ground_path(world_, view, unit.faction, start, target, max_weight);
     if (corridor.sectors.empty()) {
         geography::Route route{};
         if (corridor.limit_exceeded) {
@@ -563,7 +590,43 @@ geography::Route CampaignState::ground_route(const CombatUnit& combat, geography
         return route;
     }
     path = std::move(corridor.sectors);
-    return legacy_ground_route(*combat.position, path, destination, ground_speed(combat.unit));
+    return legacy_ground_route(origin, path, destination, ground_speed(combat.unit));
+}
+
+geography::Route CampaignState::ground_itinerary(const CombatUnit& combat, geography::Point destination,
+                                                 std::span<const geography::Point> via, const FactionView& view,
+                                                 std::vector<SectorId>& path, std::vector<GroundWaypoint>& waypoints) const
+{
+    geography::Route route{};
+    route.origin = *combat.position;
+    auto origin = route.origin;
+    const auto fuel = fuel_balance(stockpiles_.at(combat.stores), combat);
+    for (std::size_t i = 0; i <= via.size(); ++i) {
+        const auto point = i == via.size() ? destination : via[i];
+        std::vector<SectorId> segment_path;
+        auto segment = ground_route(combat, origin, point, view, segment_path, true,
+                                    std::max<std::int64_t>(0, fuel - route.fuel_ml));
+        if (segment.status != geography::RouteStatus::found) {
+            return segment;
+        }
+        if (segment.duration_us > std::numeric_limits<std::int64_t>::max() - route.duration_us ||
+            segment.fuel_ml > std::numeric_limits<std::int64_t>::max() - route.fuel_ml) {
+            route.status = geography::RouteStatus::limit_exceeded;
+            return route;
+        }
+        route.duration_us += segment.duration_us;
+        route.fuel_ml += segment.fuel_ml;
+        route.raster_expanded += segment.raster_expanded;
+        route.projection_checks += segment.projection_checks;
+        route.road_tile_checks += segment.road_tile_checks;
+        route.legs.insert(route.legs.end(), segment.legs.begin(), segment.legs.end());
+        const auto first_sector = path.empty() ? segment_path.begin() : std::next(segment_path.begin());
+        path.insert(path.end(), first_sector, segment_path.end());
+        waypoints.push_back({point, route.legs.size()});
+        origin = point;
+    }
+    route.status = geography::RouteStatus::found;
+    return route;
 }
 
 geography::Route CampaignState::legacy_ground_route(geography::Point origin, std::span<const SectorId> steps,
@@ -656,7 +719,7 @@ std::optional<GroundMovement> CampaignState::ground_movement(UnitId id, bool fac
 
 CampaignState::GroundStep CampaignState::advance_ground(CombatUnit& combat, GroundJourney& journey, bool withdrawing,
                                                         const geography::SectorAccess& sector_allowed,
-                                                        std::optional<SectorId> observation_target)
+                                                        std::optional<SectorId> observation_target, bool patrol)
 {
     const auto& unit = units_.at(combat.unit);
     auto speed = ground_speed(combat.unit);
@@ -709,8 +772,8 @@ CampaignState::GroundStep CampaignState::advance_ground(CombatUnit& combat, Grou
             journey.planned_speed_kph + speed - 1) / speed);
         record_event(battle_log_, {clock_.tick(), sector, "unit moved", combat.unit, 0, 0, {}, offset});
         if (!withdrawing && operations_.enabled) {
-            observe(unit.faction, sector, sector == observation_target ? ObservationScope::territory :
-                                                                         ObservationScope::sector_survey);
+            observe(unit.faction, sector, patrol || sector == observation_target ?
+                ObservationScope::territory : ObservationScope::sector_survey);
         }
     }
     progress.crossings.clear();
@@ -799,6 +862,35 @@ void CampaignState::update_ground_recon(Mission& mission)
     log(ground_recon_result(mission));
 }
 
+void CampaignState::record_ground_waypoints(Mission& mission)
+{
+    while (mission.waypoints_reached < mission.waypoints.size()) {
+        const auto& waypoint = mission.waypoints[mission.waypoints_reached];
+        if (waypoint.end_leg > mission.ground_journey->progress.leg) {
+            break;
+        }
+        ++mission.waypoints_reached;
+        const auto sector = static_cast<SectorId>(*movement_map_.sector(waypoint.point));
+        auto reason = "ground waypoint " + std::to_string(mission.waypoints_reached) + " reached";
+        if (mission.kind == MissionKind::ground_patrol) {
+            const bool final = mission.waypoints_reached == mission.waypoints.size();
+            if (!position_access(mission.kind, mission.faction, sector_state(sector).controller, final)) {
+                reason += ", observation interrupted by territorial access loss";
+            } else if (ground_opposition(sector, mission.faction)) {
+                reason += ", observation interrupted by combat";
+            } else if (!ground_recon_visibility(waypoint.point, sector)) {
+                observe(mission.faction, sector, ObservationScope::territory);
+                reason += ", territorial report only";
+            } else {
+                const auto detections = observe(mission.faction, sector, ObservationScope::ground_recon);
+                reason += detections ? ", contacts detected (" + std::to_string(detections) + ")" :
+                                       ", no contacts detected";
+            }
+        }
+        record_event(operations_log_, {clock_.tick(), mission.faction, sector, mission.id, std::move(reason)});
+    }
+}
+
 void CampaignState::update_combat()
 {
     const auto tick = clock_.tick();
@@ -836,7 +928,8 @@ void CampaignState::update_combat()
         auto& item = equipment_.at(mission.equipment);
         if (combat.status != GroundStatus::holding || item.status == EquipmentStatus::lost ||
             (mission.status == MissionStatus::scheduled && item.status != EquipmentStatus::reserved) ||
-            (geographic_ground_order(mission.kind) && mission.status != MissionStatus::scheduled &&
+            ((geographic_ground_order(mission.kind) || !mission.waypoints.empty()) &&
+             mission.status != MissionStatus::scheduled &&
              item.status != EquipmentStatus::in_operation)) {
             release_ground_equipment(mission.equipment);
             mission.status = MissionStatus::failed;
@@ -853,10 +946,27 @@ void CampaignState::update_combat()
             record_event(operations_log_, {tick, mission.faction, mission.target, mission.id, "ground operation started"});
         }
         const auto sector = units_.at(combat.unit).sector;
-        const auto allowed = [&](SectorId next) {
-            return position_access(mission.kind, mission.faction, sector_state(next).controller, next == mission.target);
+        const auto next_waypoint = [&]() -> SectorId {
+            if (!mission.waypoints.empty()) {
+                const auto point = std::ranges::upper_bound(mission.waypoints, mission.ground_journey->progress.leg,
+                                                             {}, &GroundWaypoint::end_leg);
+                if (point != mission.waypoints.end()) {
+                    return static_cast<SectorId>(*movement_map_.sector(point->point));
+                }
+            }
+            return mission.target;
         };
-        if (position_order(mission.kind) && sector == mission.target && !allowed(sector)) {
+        const auto allowed = [&](SectorId next) {
+            const bool final_sector = next == mission.target && (mission.waypoints.empty() ||
+                mission.ground_journey->progress.leg >=
+                    (mission.waypoints.size() > 1 ? mission.waypoints[mission.waypoints.size() - 2].end_leg : 0));
+            if (final_sector && mission.kind == MissionKind::attack) {
+                return true;
+            }
+            return position_access(mission.kind, mission.faction, sector_state(next).controller, final_sector);
+        };
+        if ((position_order(mission.kind) || !mission.waypoints.empty()) &&
+            sector == next_waypoint() && !allowed(sector)) {
             observe(mission.faction, sector);
             release_ground_equipment(mission.equipment);
             mission.status = MissionStatus::failed;
@@ -869,20 +979,23 @@ void CampaignState::update_combat()
         }
         if (mission.ground_journey && !ground_opposition(units_.at(combat.unit).sector, mission.faction)) {
             geography::SectorAccess access;
-            if (geographic_ground_order(mission.kind)) {
+            if (geographic_ground_order(mission.kind) || !mission.waypoints.empty()) {
                 access = [&](std::int64_t index) {
                     const auto next = static_cast<SectorId>(index);
                     if (allowed(next)) {
                         return true;
                     }
-                    observe(mission.faction, next, mission.kind == MissionKind::ground_recon ?
+                    observe(mission.faction, next, (mission.kind == MissionKind::ground_recon ||
+                                                   mission.kind == MissionKind::ground_patrol) ?
                         ObservationScope::territory : ObservationScope::sector_survey);
                     return false;
                 };
             }
             const auto observation_target = mission.kind == MissionKind::ground_recon ?
                 std::optional{mission.target} : std::nullopt;
-            const auto step = advance_ground(combat, *mission.ground_journey, false, access, observation_target);
+            const auto step = advance_ground(combat, *mission.ground_journey, false, access, observation_target,
+                                             mission.kind == MissionKind::ground_patrol);
+            record_ground_waypoints(mission);
             if (step == GroundStep::no_fuel || step == GroundStep::blocked || step == GroundStep::territorial_access_lost) {
                 release_ground_equipment(mission.equipment);
                 mission.status = MissionStatus::failed;
@@ -912,7 +1025,12 @@ void CampaignState::update_combat()
         const auto& sector = sector_state(unit.sector);
         if (position_order(mission.kind)) {
             std::string_view reason;
-            if (combat.status != GroundStatus::holding || equipment_.at(mission.equipment).status == EquipmentStatus::lost) {
+            if (mission.kind == MissionKind::ground_patrol && ground_opposition(unit.sector, mission.faction)) {
+                release_ground_equipment(mission.equipment);
+                mission.status = MissionStatus::failed;
+                reason = "ground patrol interrupted by combat";
+            } else if (combat.status != GroundStatus::holding ||
+                       equipment_.at(mission.equipment).status == EquipmentStatus::lost) {
                 release_ground_equipment(mission.equipment);
                 mission.status = MissionStatus::failed;
                 reason = "ground order interrupted: formation or committed equipment unavailable";
@@ -924,7 +1042,8 @@ void CampaignState::update_combat()
                 } else {
                     release_ground_equipment(mission.equipment);
                     mission.status = MissionStatus::completed;
-                    reason = "move destination reached";
+                    reason = mission.kind == MissionKind::ground_patrol ? "ground patrol completed" :
+                                                                        "move destination reached";
                 }
             }
             if (!reason.empty()) {
@@ -935,7 +1054,7 @@ void CampaignState::update_combat()
         if (combat.status == GroundStatus::holding &&
             (combat.position != mission.ground_destination || unit.sector != mission.target ||
              sector.controller != mission.faction ||
-             sector.control == ControlState::contested)) {
+             sector.control == ControlState::contested || mission.waypoints_reached != mission.waypoints.size())) {
             continue;
         }
         release_ground_equipment(mission.equipment);
@@ -1095,7 +1214,7 @@ void CampaignState::resolve_engagements()
                         continue;
                     }
                     std::vector<SectorId> path;
-                    auto route = ground_route(state, ground_anchor(neighbor), view, path);
+                    auto route = ground_route(state, *state.position, ground_anchor(neighbor), view, path);
                     if (route.status != geography::RouteStatus::found || route.fuel_ml > fuel_balance(stores, state)) {
                         continue;
                     }

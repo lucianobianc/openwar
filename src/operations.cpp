@@ -71,6 +71,7 @@ std::string_view mission_name(MissionKind kind)
     case MissionKind::move: return "move";
     case MissionKind::hold: return "hold";
     case MissionKind::ground_recon: return "ground-recon";
+    case MissionKind::ground_patrol: return "ground-patrol";
     }
     throw std::invalid_argument("Unknown mission kind");
 }
@@ -141,7 +142,7 @@ std::vector<MissionKind> CampaignState::available_orders(FactionId actor, UnitId
     std::vector<MissionKind> actions;
     if (combat_.enabled && ground_speed(id)) {
         for (const auto kind : {MissionKind::defend, MissionKind::attack, MissionKind::move, MissionKind::hold,
-                                MissionKind::ground_recon}) {
+                                MissionKind::ground_recon, MissionKind::ground_patrol}) {
             if (ground_order_equipment(id, kind)) {
                 actions.push_back(kind);
             }
@@ -204,7 +205,8 @@ MissionPlan CampaignState::plan_sector_order(FactionId faction, MissionKind kind
         return {{}, "target sector is out of bounds"};
     }
     if (position_order(kind)) {
-        return {{}, "move and hold require an exact geographic destination"};
+        return {{}, kind == MissionKind::ground_patrol ? "ground patrol requires geographic points" :
+                                                        "move and hold require an exact geographic destination"};
     }
     if (kind == MissionKind::attack || kind == MissionKind::ground_recon ||
         (combat_.enabled && kind == MissionKind::defend)) {

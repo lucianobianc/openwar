@@ -225,6 +225,12 @@ O estado acima é conceitual. **A posição atual é única**: pode ser computad
 
 **Militar:** ordens podem manter `SectorId` para objetivos estratégicos, mas devem ser resolvidas em *pontos geográficos relevantes*: ponte, cruzamento, instalação, ponto de reunião ou coordenada. Entrada no setor e captura são eventos distintos. Combate segue inicialmente abstrato no setor, sem inventar geometria de alvo oculto.
 
+An ordered ground itinerary joins the routed legs into a single journey.
+Each waypoint records the leg boundary at its exact coordinates. Movement
+can pass several waypoints in one tick without resetting its fuel or time
+budget. The checkpoint records the reached count so resuming cannot replay
+waypoint events or patrol observations.
+
 **Logística:** a coleta e entrega exigem chegada ao **ponto de acesso do depósito**; estar no mesmo setor não basta. Entregas para formações móveis replanejam desde a posição atual; estoque, reserva, capacidade e carga seguem o modelo econômico existente. O fechamento de uma ponte afeta rotas, não a contabilidade do combustível.
 
 **Infraestrutura e instalações:** as posições são fixas, vinculadas aos estoques como no código atual, salvo alteração explícita de modelo. Um depósito transportado por formação acompanha sua unidade com um único vínculo canônico.

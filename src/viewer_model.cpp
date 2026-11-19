@@ -88,6 +88,10 @@ void add_missions(Snapshot& snapshot, const CampaignState& campaign, std::span<c
             const auto& journey = *mission.ground_journey;
             marker.journey = trace_journey(journey.route, journey.progress, *mission.ground_destination);
             rows.push_back(travel_progress(*marker.journey));
+            if (!mission.waypoints.empty()) {
+                rows.push_back("Waypoints reached " + std::to_string(mission.waypoints_reached) + "/" +
+                    std::to_string(mission.waypoints.size()));
+            }
             if (active_mission(mission)) {
                 const auto movement = campaign.ground_movement(assigned.id, faction_limited);
                 if (journey.progress.leg == journey.route.legs.size()) {

@@ -138,6 +138,30 @@ the observation phase, outcome and survey history needed for resuming. The
 reader accepts previously supported schemas, including schema 8, and keeps
 the existing abstract Recon and other mission states.
 
+### Geographic waypoints and Ground Patrol
+
+Geographic ground orders accept an ordered list of up to 16 points
+including the destination. Intermediate points require confirmed friendly
+control. The final point uses the order's existing destination rules.
+The planner routes consecutive points using faction reports, the formation's
+mobility profile and the remaining fuel estimate. The preview shows the
+combined route, and confirmation validates it again.
+
+Ground Patrol uses available mobile ground equipment and supplies. Its
+final point can be reported friendly or neutral. It visits the points once
+in order, completes at the last one and can be assigned to an explicit
+formation. Patrol has no occupation objective. Travel, unexpected route
+closures, combat, shortages and cancellation use the existing ground
+movement rules. Failed or cancelled patrols retain their progress, fuel
+charges and intelligence. Existing abstract Patrol and automatic campaign
+planning retain their previous behavior.
+
+Route segments are chosen individually. The planner does not optimize fuel
+across the entire list or rearrange the points. Checkpoint schema 10 and
+rules version 9 persist planned points and completed visits alongside the
+travel progress. The reader accepts older supported checkpoints, including
+schema 9, with no waypoint data for their orders.
+
 ## 4. Fluxo de planejamento
 
 1. Receber snapshot de `FactionView`, forças próprias, prontidão e recursos

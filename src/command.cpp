@@ -36,15 +36,18 @@ std::vector<OrderAction> CommandSession::actions_for(UnitId formation) const
 }
 
 OrderPreview CommandSession::preview(MissionKind kind, const OrderTarget& target,
-                                   std::optional<UnitId> formation) const
+                                   std::optional<UnitId> formation, std::span<const geography::Point> via) const
 {
     const auto tick = campaign_.clock().tick();
     if (!permissions().may_issue_orders) {
         return {tick, "player has no authority for this faction"};
     }
-    const auto plan = std::visit([&](auto destination) {
-        return campaign_.preview_order(*faction_, kind, destination, formation);
-    }, target);
+    const auto* point = std::get_if<geography::Point>(&target);
+    if (!point && !via.empty()) {
+        return {tick, "waypoints require an exact geographic destination"};
+    }
+    const auto plan = point ? campaign_.preview_order(*faction_, kind, *point, formation, via) :
+        campaign_.preview_order(*faction_, kind, std::get<SectorId>(target), formation);
     OrderPreview result{tick, plan.reason};
     if (!plan.candidate) {
         return result;
@@ -65,13 +68,16 @@ OrderPreview CommandSession::preview(MissionKind kind, const OrderTarget& target
 }
 
 OrderResult CommandSession::submit(MissionKind kind, const OrderTarget& target,
-                                   std::optional<UnitId> formation)
+                                   std::optional<UnitId> formation, std::span<const geography::Point> via)
 {
     if (!permissions().may_issue_orders) {
         return {{}, "player has no authority for this faction"};
     }
     if (const auto* point = std::get_if<geography::Point>(&target)) {
-        return campaign_.issue_ground_order(*faction_, kind, *point, formation);
+        return campaign_.issue_ground_order(*faction_, kind, *point, formation, via);
+    }
+    if (!via.empty()) {
+        return {{}, "waypoints require an exact geographic destination"};
     }
     return campaign_.issue_order(*faction_, kind, std::get<SectorId>(target), formation);
 }

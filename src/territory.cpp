@@ -89,6 +89,7 @@ void CampaignState::update_territory()
                 const auto& mission = entry.second;
                 if (!mission.ground_unit || mission.faction != faction || mission.target != sector.id ||
                     mission.kind != MissionKind::attack || mission.status != MissionStatus::in_progress ||
+                    mission.waypoints_reached + 1 < mission.waypoints.size() ||
                     units_.at(*mission.ground_unit).sector != sector.id ||
                     combat_units_.at(*mission.ground_unit).status != GroundStatus::holding ||
                     equipment_.at(mission.equipment).status != EquipmentStatus::in_operation) {

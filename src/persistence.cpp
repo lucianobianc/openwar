@@ -12,8 +12,8 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 9;
-constexpr std::uint64_t rules_version = 8;
+constexpr std::uint64_t schema_version = 10;
+constexpr std::uint64_t rules_version = 9;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
 
@@ -249,11 +249,17 @@ template<class A> void fields(A& a, Field<A, InstallationReport>& v)
 template<class A> void fields(A& a, Field<A, RoadReport>& v)
 { a(v.closed, v.observed_tick); }
 
+template<class A> void fields(A& a, Field<A, GroundWaypoint>& v)
+{ a(v.point, v.end_leg); }
+
 template<class A> void fields(A& a, Field<A, Mission>& v)
 {
     a(v.id, v.faction, v.kind, v.target, v.equipment, v.launch_stock, v.fuel, v.duration_ticks, v.status,
       v.launch_tick, v.detections, v.manual, v.relocation, v.ground_unit, v.ground_path);
     if constexpr (A::reading) {
+        if (a.version < 10 && v.kind == MissionKind::ground_patrol) {
+            invalid_checkpoint();
+        }
         if (a.version < 9 && (v.kind == MissionKind::ground_recon || v.status == MissionStatus::observing)) {
             invalid_checkpoint();
         }
@@ -273,6 +279,9 @@ template<class A> void fields(A& a, Field<A, Mission>& v)
     a(v.preparation_reserved, v.earliest_launch_tick, v.ground_destination, v.ground_journey);
     if (a.version >= 9) {
         a(v.recon_result);
+    }
+    if (a.version >= 10) {
+        a(v.waypoints, v.waypoints_reached);
     }
 }
 
@@ -336,7 +345,7 @@ constexpr auto last_value(MilitaryEchelon) { return MilitaryEchelon::division; }
 constexpr auto last_value(EquipmentStatus) { return EquipmentStatus::lost; }
 constexpr auto last_value(ServiceKind) { return ServiceKind::repair; }
 constexpr auto last_value(ForcesEventKind) { return ForcesEventKind::arrival_delayed; }
-constexpr auto last_value(MissionKind) { return MissionKind::ground_recon; }
+constexpr auto last_value(MissionKind) { return MissionKind::ground_patrol; }
 constexpr auto last_value(MissionStatus) { return MissionStatus::observing; }
 constexpr auto last_value(ReconResult) { return ReconResult::observed; }
 constexpr auto last_value(GroundStatus) { return GroundStatus::destroyed; }
@@ -988,6 +997,12 @@ struct CampaignArchive {
                      (mission.detections && mission.recon_result != ReconResult::observed)))) {
                 invalid_checkpoint();
             }
+            if (mission.waypoints_reached > mission.waypoints.size() ||
+                mission.waypoints.size() > max_ground_waypoints ||
+                (mission.kind == MissionKind::ground_patrol && mission.waypoints.empty()) ||
+                (!mission.waypoints.empty() && (!mission.ground_unit || !mission.ground_journey))) {
+                invalid_checkpoint();
+            }
             if (mission.ground_unit) {
                 const bool active = mission_active(mission.status);
                 if (!mission.ground_destination || !map.valid_position(*mission.ground_destination) ||
@@ -1001,6 +1016,24 @@ struct CampaignArchive {
                         invalid_checkpoint();
                     }
                     check_journey(journey.route, journey.progress, *mission.ground_destination);
+                    if (!mission.waypoints.empty()) {
+                        std::size_t previous = 0;
+                        for (std::size_t i = 0; i < mission.waypoints.size(); ++i) {
+                            const auto& point = mission.waypoints[i];
+                            if (point.end_leg < previous || point.end_leg > journey.route.legs.size() ||
+                                (point.end_leg ? journey.route.legs[point.end_leg - 1].to : journey.route.origin) != point.point ||
+                                (i < mission.waypoints_reached && point.end_leg > journey.progress.leg)) {
+                                invalid_checkpoint();
+                            }
+                            previous = point.end_leg;
+                        }
+                        if (previous != journey.route.legs.size() ||
+                            ((mission.status == MissionStatus::completed || mission.status == MissionStatus::holding ||
+                              mission.status == MissionStatus::observing || mission.status == MissionStatus::released) &&
+                             mission.waypoints_reached != mission.waypoints.size())) {
+                            invalid_checkpoint();
+                        }
+                    }
                     if ((mission.status == MissionStatus::holding || mission.status == MissionStatus::released ||
                          mission.recon_result != ReconResult::none ||
                          (mission.kind == MissionKind::move && mission.status == MissionStatus::completed)) &&
@@ -1104,6 +1137,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 9 || rules != 8) &&
         (schema != 8 || rules != 7) &&
         (schema != 7 || rules != 6) &&
         (schema != 6 || rules != 6) &&

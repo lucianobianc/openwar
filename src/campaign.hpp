@@ -444,11 +444,11 @@ public:
     MissionPlan preview_order(FactionId actor, MissionKind kind, SectorId target,
                             std::optional<UnitId> formation = {}) const;
     MissionPlan preview_order(FactionId actor, MissionKind kind, geography::Point destination,
-                            std::optional<UnitId> formation = {}) const;
+                            std::optional<UnitId> formation = {}, std::span<const geography::Point> via = {}) const;
     OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target,
                             std::optional<UnitId> formation = {});
     OrderResult issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination,
-                            std::optional<UnitId> formation = {});
+                            std::optional<UnitId> formation = {}, std::span<const geography::Point> via = {});
     bool can_cancel_order(FactionId actor, MissionId id) const;
     bool cancel_order(FactionId actor, MissionId id);
     bool combat_enabled() const { return combat_.enabled; }
@@ -549,21 +549,27 @@ private:
     void initialize_combat(const ScenarioDefinition& scenario);
     MissionPlan plan_ground_order(FactionId faction, MissionKind kind, SectorId target,
                                   std::optional<geography::Point> destination = {},
-                                  std::optional<UnitId> formation = {}) const;
+                                  std::optional<UnitId> formation = {}, std::span<const geography::Point> via = {}) const;
     std::string_view ground_target_refusal(const FactionView& view, FactionId faction,
                                            MissionKind kind, SectorId target) const;
     std::optional<Mission> plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,
                                               const FactionView& view, std::span<const UnitId> excluded,
                                               std::optional<geography::Point> destination = {},
                                               std::string_view* refusal = nullptr,
-                                              std::optional<UnitId> formation = {}) const;
+                                              std::optional<UnitId> formation = {},
+                                              std::span<const geography::Point> via = {}) const;
     MissionId commit_ground_mission(Mission mission);
     void update_combat();
     void move_combat_unit(CombatUnit& unit, geography::Point position);
     geography::Point ground_anchor(SectorId sector) const;
     geography::Profile ground_profile(UnitId id) const;
-    geography::Route ground_route(const CombatUnit& combat, geography::Point destination, const FactionView& view,
-                                  std::vector<SectorId>& path, bool diagnose_fuel = false) const;
+    geography::Route ground_route(const CombatUnit& combat, geography::Point origin, geography::Point destination,
+                                  const FactionView& view, std::vector<SectorId>& path, bool diagnose_fuel = false,
+                                  std::optional<std::int64_t> fuel_budget = {}) const;
+    geography::Route ground_itinerary(const CombatUnit& combat, geography::Point destination,
+                                      std::span<const geography::Point> via, const FactionView& view,
+                                      std::vector<SectorId>& path, std::vector<GroundWaypoint>& waypoints) const;
+    void record_ground_waypoints(Mission& mission);
     geography::Map movement_geometry() const;
     geography::Route legacy_ground_route(geography::Point origin, std::span<const SectorId> steps,
                                          geography::Point destination, std::uint32_t speed) const;
@@ -574,7 +580,7 @@ private:
     enum class GroundStep { no_fuel, blocked, territorial_access_lost, travelling, arrived };
     GroundStep advance_ground(CombatUnit& unit, GroundJourney& journey, bool withdrawing,
                               const geography::SectorAccess& sector_allowed = {},
-                              std::optional<SectorId> observation_target = {});
+                              std::optional<SectorId> observation_target = {}, bool patrol = false);
     void release_ground_equipment(EquipmentId id);
     void resolve_engagements();
     void update_territory();

@@ -21,13 +21,13 @@ enum class FacilityId : std::uint32_t;
 enum class UnitId : std::uint32_t;
 enum class MissionId : std::uint32_t {};
 enum class ContactId : std::uint32_t {};
-enum class MissionKind { recon, patrol, defend, reposition, attack, move, hold, ground_recon };
+enum class MissionKind { recon, patrol, defend, reposition, attack, move, hold, ground_recon, ground_patrol };
 enum class MissionStatus { scheduled, preparing, in_progress, completed, failed, cancelled, holding, released, observing };
 enum class ReconResult { none, partial, observed };
 
 constexpr bool position_order(MissionKind kind)
 {
-    return kind == MissionKind::move || kind == MissionKind::hold;
+    return kind == MissionKind::move || kind == MissionKind::hold || kind == MissionKind::ground_patrol;
 }
 
 constexpr bool geographic_ground_order(MissionKind kind)
@@ -101,6 +101,14 @@ struct RoadReport {
     bool operator==(const RoadReport&) const = default;
 };
 
+inline constexpr std::size_t max_ground_waypoints = 16;
+
+struct GroundWaypoint {
+    geography::Point point;
+    std::size_t end_leg;
+    bool operator==(const GroundWaypoint&) const = default;
+};
+
 struct Mission {
     MissionId id;
     FactionId faction;
@@ -122,6 +130,8 @@ struct Mission {
     std::optional<geography::Point> ground_destination{};
     std::optional<GroundJourney> ground_journey{};
     ReconResult recon_result = ReconResult::none;
+    std::vector<GroundWaypoint> waypoints{};
+    std::size_t waypoints_reached = 0;
     bool operator==(const Mission&) const = default;
 };
 

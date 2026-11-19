@@ -27,7 +27,8 @@ Options
   --seed N     Override the seed (32-bit for fixed demos, 64-bit for procedural).
   --faction WEST|EAST  Use one faction's view in an operational checkpoint or demo.
   --order TYPE:SECTOR[:UNIT]  Queue recon, patrol, defend, reposition, attack, or ground-recon.
-  --ground-order TYPE:EAST,SOUTH,UP[:UNIT]  Submit attack, defend, move, hold, or ground-recon in millimetres.
+  --ground-order 'TYPE:EAST,SOUTH,UP[;EAST,SOUTH,UP...][:UNIT]'
+                 Submit attack, defend, move, hold, ground-recon, or ground-patrol in millimetres.
   --cancel ID         Cancel an eligible order or release a holding formation before advancing time.
   --help       Show this help.
 
@@ -154,7 +155,15 @@ void apply_order(openwar::CommandSession& session, std::string_view order, bool 
         destination = destination.substr(0, suffix);
     }
     OrderTarget target;
+    std::vector<geography::Point> via;
     if (geographic) {
+        for (auto split = destination.find(';'); split != std::string_view::npos; split = destination.find(';')) {
+            if (via.size() + 1 == max_ground_waypoints) {
+                throw std::invalid_argument("A ground route allows at most 16 points including the destination");
+            }
+            via.push_back(parse_ground_target(destination.substr(0, split)));
+            destination.remove_prefix(split + 1);
+        }
         target = parse_ground_target(destination);
     } else {
         const auto sector = parse_number(destination, "--order sector");
@@ -165,9 +174,9 @@ void apply_order(openwar::CommandSession& session, std::string_view order, bool 
     }
     for (const auto kind : {MissionKind::recon, MissionKind::patrol, MissionKind::defend,
                            MissionKind::reposition, MissionKind::attack, MissionKind::move, MissionKind::hold,
-                           MissionKind::ground_recon}) {
+                           MissionKind::ground_recon, MissionKind::ground_patrol}) {
         if (order.substr(0, separator) == mission_name(kind)) {
-            const auto result = session.submit(kind, target, formation);
+            const auto result = session.submit(kind, target, formation, via);
             if (!result.mission) {
                 throw std::invalid_argument(std::string(result.reason));
             }

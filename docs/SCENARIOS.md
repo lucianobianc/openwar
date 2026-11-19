@@ -136,7 +136,7 @@ identity defaults to unspecified. Cyclic command relationships are invalid.
 Checkpoint schemas from 6 onward store the declared identity for each military
 unit. The reader accepts the previously supported schema and rules versions
 and supplies unspecified identity for older checkpoints. Saving a migrated
-checkpoint writes the current schema 9 with rules version 8. The scenario
+checkpoint writes the current schema 10 with rules version 9. The scenario
 fingerprint includes declared identity.
 
 Faction names are `WEST` and `EAST`. `NEUTRAL` can own sectors and fixed

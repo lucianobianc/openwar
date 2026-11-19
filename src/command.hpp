@@ -46,9 +46,9 @@ public:
     viewer::Snapshot snapshot(std::optional<FactionId> observer_perspective = {}) const;
     std::vector<OrderAction> actions_for(UnitId formation) const;
     OrderPreview preview(MissionKind kind, const OrderTarget& target,
-                         std::optional<UnitId> formation = {}) const;
+                         std::optional<UnitId> formation = {}, std::span<const geography::Point> via = {}) const;
     OrderResult submit(MissionKind kind, const OrderTarget& target,
-                       std::optional<UnitId> formation = {});
+                       std::optional<UnitId> formation = {}, std::span<const geography::Point> via = {});
     bool can_cancel(FactionId owner, MissionId id) const;
     CancelResult cancel(FactionId owner, MissionId id);
 

@@ -683,7 +683,7 @@ void test_command_session()
             "Command perspective switched factions or observer inspection was lost");
     require_throws<std::invalid_argument>([&] { (void)opposing.snapshot(); }, "Unauthorized command snapshot was exposed");
     const auto actions = commander.actions_for(formation);
-    require(actions.size() == 4 && std::ranges::all_of(actions, &OrderAction::geographic_destination) &&
+    require(actions.size() == 5 && std::ranges::all_of(actions, &OrderAction::geographic_destination) &&
             std::ranges::any_of(actions, [](const auto& action) { return action.kind == MissionKind::attack; }),
             "Ground formation did not offer its supported geographic commands");
     const auto rejected = commander.submit(MissionKind::attack, SectorId{2});
@@ -1982,6 +1982,138 @@ void test_ground_position_orders()
             "Move crossed into a destination lost to an opposing Attack");
 }
 
+void test_ground_patrol_waypoints()
+{
+    using geography::Point;
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr UnitId formation{1};
+    constexpr StockpileId stores{10};
+    constexpr SectorId target{1};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr Point waypoint{250'000, 350'000, 0};
+    constexpr Point destination{751'000, 350'000, 0};
+    constexpr std::array via{waypoint};
+    auto scenario = combat_example_scenario(west);
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.victory_objectives.clear();
+    scenario.equipment_types.front().ground_speed_kph = 20;
+    scenario.units.push_back({UnitId{3}, "East site detail", east, target});
+    scenario.equipment.push_back({EquipmentId{4}, EquipmentTypeId{2}, UnitId{3}});
+
+    CampaignState campaign(scenario, 42);
+    CommandSession command(campaign, west);
+    const auto preview = command.preview(MissionKind::ground_patrol, destination, formation, via);
+    require(preview.formation == formation && preview.route && preview.route->destination == destination &&
+            preview.route->fuel_ml == 2000 &&
+            std::ranges::find(preview.route->vertices, waypoint) != preview.route->vertices.end(),
+            "Ground Patrol preview omitted its explicit formation, ordered stop or route fuel");
+    constexpr std::array unsafe{destination};
+    require(!command.submit(MissionKind::ground_patrol, waypoint, formation, unsafe).mission &&
+            !command.submit(MissionKind::ground_patrol, target, formation, via).mission &&
+            campaign.faction_view(west).missions.empty(),
+            "Ground Patrol accepted an unauthorized midpoint or a sector-only order");
+    const auto order = command.submit(MissionKind::ground_patrol, destination, formation, via);
+    require(order.mission.has_value(), "Ground Patrol rejected a feasible itinerary");
+    campaign.advance_ticks(1);
+    const auto partial = campaign.faction_view(west).missions.back();
+    require(partial.ground_unit == formation && partial.status == MissionStatus::in_progress &&
+            partial.waypoints_reached == 1 && partial.waypoints.front().point == waypoint &&
+            campaign.faction_view(west).contacts.empty() &&
+            campaign.combat_units().at(formation).position != destination,
+            "Ground Patrol did not advance through its route and observe only reached points");
+
+    const CheckpointFiles files;
+    const auto midway = files.directory / "patrol-midway.ows";
+    campaign.save(midway);
+    auto resumed = CampaignState::load(midway);
+    auto cancelled = CampaignState::load(midway);
+    const auto stopped = cancelled.combat_units().at(formation).position;
+    require(cancelled.cancel_order(west, *order.mission), "Could not cancel Ground Patrol mid-route");
+    cancelled.advance_ticks(2);
+    require(cancelled.faction_view(west).missions.back().waypoints_reached == 1 &&
+            cancelled.faction_view(west).missions.back().status == MissionStatus::cancelled &&
+            cancelled.combat_units().at(formation).position == stopped && cancelled.faction_view(west).contacts.empty(),
+            "Cancelled patrol continued or forgot its reached point");
+
+    campaign.advance_ticks(2);
+    resumed.advance_ticks(1);
+    resumed.advance_ticks(1);
+    const auto finished = campaign.faction_view(west);
+    const auto& mission = finished.missions.back();
+    require(mission.status == MissionStatus::completed && mission.waypoints_reached == 2 &&
+            campaign.combat_units().at(formation).position == destination &&
+            campaign.stockpiles().at(stores).quantity[fuel] == 18 &&
+            finished.contacts.size() == 1 && !finished.sectors.at(target).surveyed &&
+            campaign.faction_view(east).contacts.empty() &&
+            campaign.sector_state(target).controller == FactionId::neutral && !campaign.sector_state(target).occupier,
+            "Completed patrol lost its point, fuel, observation, or territorial restrictions");
+    require(std::ranges::count_if(finished.events, [](const auto& event) {
+                return event.reason.starts_with("ground waypoint ");
+            }) == 2 &&
+            resumed.faction_view(west).events == finished.events &&
+            resumed.faction_view(west).missions == finished.missions &&
+            resumed.stockpiles().at(stores).quantity == campaign.stockpiles().at(stores).quantity,
+            "Checkpoint resume duplicated or changed waypoint observations or fuel");
+
+    CampaignState moving(scenario, 42);
+    const auto move = moving.issue_ground_order(west, MissionKind::move, destination, formation, via);
+    moving.advance_ticks(2);
+    require(move.mission && moving.faction_view(west).missions.back().waypoints_reached == 2 &&
+            moving.faction_view(west).missions.back().status == MissionStatus::completed &&
+            moving.combat_units().at(formation).position == destination,
+            "A Move order did not use the same waypoint execution");
+
+    constexpr std::array distant_via{Point{250'000, 600'000, 0}};
+    CampaignState dry(scenario, 42);
+    require(dry.issue_ground_order(west, MissionKind::ground_patrol, destination, formation, distant_via).mission.has_value(),
+            "Could not schedule the fuel interruption fixture");
+    dry.advance_ticks(1);
+    ResourceAmounts drained{};
+    drained[fuel] = 19;
+    require(dry.consume(stores, drained), "Could not drain patrol fuel after departure");
+    dry.advance_ticks(2);
+    const auto stranded = dry.faction_view(west);
+    require(stranded.missions.back().status == MissionStatus::failed && stranded.missions.back().waypoints_reached == 1 &&
+            stranded.events.back().reason == "movement stopped: no fuel" &&
+            dry.combat_units().at(formation).position == distant_via.front(),
+            "Insufficient fuel did not stop the patrol at the next unpaid segment");
+    require(!dry.preview_order(west, MissionKind::ground_patrol, destination, formation, via).candidate,
+            "A patrol with insufficient fuel passed route validation");
+
+    auto forest = scenario;
+    std::vector<SectorProperties> terrain(6);
+    terrain[1].terrain = Terrain::forest;
+    forest.world = WorldDefinition(3, 2, 500, terrain);
+    CampaignState obscured(forest, 42);
+    require(obscured.issue_ground_order(west, MissionKind::ground_patrol, destination, formation, via).mission.has_value(),
+            "Could not schedule forest patrol");
+    obscured.advance_ticks(4);
+    const auto obscured_view = obscured.faction_view(west);
+    require(obscured_view.missions.back().status == MissionStatus::completed && obscured_view.contacts.empty() &&
+            std::ranges::any_of(obscured_view.events, [](const auto& event) {
+                return event.reason == "ground waypoint 2 reached, territorial report only";
+            }), "A patrol point in forest exposed contacts");
+
+    auto contested = scenario;
+    contested.units[1].sector = target;
+    contested.units[1].facility.reset();
+    std::ranges::find(contested.stockpiles, StockpileId{11}, &Stockpile::id)->sector = target;
+    contested.combat_units[1].morale = 80;
+    for (auto& type : contested.equipment_types) {
+        type.combat_power = 1;
+    }
+    CampaignState opposed(contested, 42);
+    require(opposed.issue_ground_order(west, MissionKind::ground_patrol, destination, formation, via).mission.has_value(),
+            "Hidden opposition leaked through patrol confirmation");
+    opposed.advance_ticks(3);
+    const auto interrupted = opposed.faction_view(west);
+    require(interrupted.missions.back().status == MissionStatus::failed &&
+            interrupted.missions.back().waypoints_reached == 1 &&
+            interrupted.events.back().reason == "ground patrol interrupted by combat",
+            "Ground Patrol continued through opposition or lost its reached waypoint");
+}
+
 void test_ground_reconnaissance()
 {
     constexpr auto west = FactionId::west;
@@ -2399,6 +2531,24 @@ void test_geographic_ground_operations()
             "Spatial search exhaustion was reported as a physical obstruction");
 
     scenario.operations.installation_half_life_seconds = 60;
+    CampaignState patrol(scenario, 42), blocked_patrol(scenario, 42);
+    blocked_patrol.set_road_closed(1, true);
+    const std::array bridge_approach{map.nodes.front().position};
+    for (auto* state : {&patrol, &blocked_patrol}) {
+        require(state->issue_ground_order(west, MissionKind::ground_patrol, destination, formation,
+                                          bridge_approach).mission.has_value(),
+                "Patrol could not route from an off-road starting point through a bridge approach");
+    }
+    require(patrol.faction_view(west).missions == blocked_patrol.faction_view(west).missions,
+            "Patrol planning exposed a hidden bridge closure");
+    blocked_patrol.advance_ticks(1);
+    const auto stopped_patrol = blocked_patrol.faction_view(west);
+    require(stopped_patrol.missions.back().status == MissionStatus::failed &&
+            stopped_patrol.missions.back().waypoints_reached == 1 &&
+            stopped_patrol.roads.at(1).closed && blocked_patrol.faction_view(east).roads.empty() &&
+            blocked_patrol.combat_units().at(formation).position == bridge_approach.front(),
+            "Patrol failed to retain its geographic waypoint when a bridge stopped travel");
+
     CampaignState unobstructed(scenario, 42), obstructed(scenario, 42);
     obstructed.set_road_closed(1, true);
     plan(unobstructed);
@@ -3189,6 +3339,7 @@ int main()
     test_large_procedural_campaigns();
     test_ground_movement();
     test_ground_position_orders();
+    test_ground_patrol_waypoints();
     test_ground_reconnaissance();
     test_geographic_ground_operations();
     test_geographic_transport();

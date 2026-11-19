@@ -346,6 +346,14 @@ operation. The CLI uses `--ground-order ground-recon:EAST,SOUTH,UP[:UNIT]`
 for an exact point and `--order ground-recon:SECTOR[:UNIT]` for the sector
 anchor. Use `--order recon:SECTOR[:UNIT]` for abstract reconnaissance.
 
+For geographic ground drafts, click the first point, then **Shift-click**
+to add points in order. A regular click updates the last point, and
+**Backspace** removes the last addition. The preview draws the ordered route.
+**Gnd Patrol** visits the specified points and ends at the last one.
+Mission inspection shows waypoint progress and observation events.
+For the CLI, quote a list separated by semicolons, for example
+`--ground-order 'ground-patrol:250000,350000,0;751000,350000,0:1'`.
+
 Phase 1 established draft review with a destination and reported control.
 Phase 3 extends that workflow with an engine preview and mission history.
 
@@ -379,12 +387,10 @@ opposition are outside that estimate. The preview neither creates a mission
 nor reserves stock. Submission plans again against current campaign state
 before assigning equipment or reserving resources.
 
-The engine chooses ground paths and stores them as journey state.
-User-defined waypoints and mission-specific routing constraints need an
-engine command representation plus validation and execution semantics.
-The current interface has a single destination. Mission history and route
-progress already reside in existing checkpoints. Drafts, camera and panel
-selection are local UI state.
+The engine routes between ordered ground points and stores the itinerary
+and progress with the mission. Mission-specific routing constraints and
+air waypoints are outside current command support. Drafts, camera and
+panel selection are local UI state.
 
 ### 6.1 Seleção
 

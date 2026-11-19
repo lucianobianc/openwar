@@ -84,6 +84,7 @@ struct OrderDraft {
     geography::Point pin{};
     SectorId sector{};
     std::optional<OrderPreview> preview{};
+    std::vector<geography::Point> via{};
 
     std::optional<UnitId> requested_formation() const
     {
@@ -319,6 +320,14 @@ void choose_destination(ViewControls& controls, const Snapshot& snapshot, const 
     const auto sector = SectorId{static_cast<std::uint32_t>(south / sector_mm) * snapshot.width +
                                  static_cast<std::uint32_t>(east / sector_mm)};
     auto& draft = *controls.draft;
+    if (draft.action.geographic_destination && draft.target &&
+        (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))) {
+        if (draft.via.size() + 1 == max_ground_waypoints) {
+            controls.feedback = CommandFeedback{"A route allows at most 16 points", false};
+            return;
+        }
+        draft.via.push_back(draft.pin);
+    }
     draft.sector = sector;
     draft.preview.reset();
     if (draft.action.geographic_destination) {
@@ -395,6 +404,17 @@ bool handle_mission_list(ViewControls& controls, const Snapshot& snapshot, const
 void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const GeographicLayers& geography,
                       const Layout& screen)
 {
+    if (controls.draft && !controls.draft->via.empty() && IsKeyPressed(KEY_BACKSPACE)) {
+        auto& draft = *controls.draft;
+        draft.pin = draft.via.back();
+        draft.via.pop_back();
+        draft.target = draft.pin;
+        const auto size = std::int64_t{snapshot.sector_size_m} * 1000;
+        draft.sector = SectorId{static_cast<std::uint32_t>(
+            (draft.pin.south / size) * snapshot.width + draft.pin.east / size)};
+        draft.preview.reset();
+        controls.feedback.reset();
+    }
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
         if (clicked(screen.layers[i])) {
             controls.layers[i] = !controls.layers[i];
@@ -492,6 +512,7 @@ std::string action_label(MissionKind kind)
     case MissionKind::move: return "Move";
     case MissionKind::hold: return "Hold";
     case MissionKind::ground_recon: return "Ground Recon";
+    case MissionKind::ground_patrol: return "Ground Patrol";
     }
     return {};
 }
@@ -544,7 +565,7 @@ bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rect
             return false;
         }
         auto& draft = *controls.draft;
-        const auto result = session.submit(draft.action.kind, *draft.target, draft.requested_formation());
+        const auto result = session.submit(draft.action.kind, *draft.target, draft.requested_formation(), draft.via);
         if (!result.mission) {
             draft.preview.reset();
             controls.feedback = CommandFeedback{std::string(result.reason), false};
@@ -848,6 +869,11 @@ void draw_map(const Snapshot& snapshot, const ViewControls& controls, const Geog
         }
     }
     if (controls.draft && controls.draft->target) {
+        for (std::size_t i = 0; i < controls.draft->via.size(); ++i) {
+            const auto at = GetWorldToScreen2D(map_position(controls.draft->via[i]), controls.camera);
+            DrawCircleLines(std::lround(at.x), std::lround(at.y), 7, route_preview);
+            DrawText(std::to_string(i + 1).c_str(), std::lround(at.x) + 9, std::lround(at.y) - 6, 14, route_preview);
+        }
         const auto pin = GetWorldToScreen2D(map_position(controls.draft->pin), controls.camera);
         DrawCircleLines(std::lround(pin.x), std::lround(pin.y), 10, route_preview);
         DrawLineV({pin.x - 14, pin.y}, {pin.x + 14, pin.y}, route_preview);
@@ -918,7 +944,7 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                         label("Travel " + std::to_string(seconds) + " s / " + std::to_string(preview.route->fuel_ml) +
                               " mL estimated", x, y + 114, 15, ink, width);
                         label("Uses faction reports. Conditions may change.", x, y + 139, 14, muted, width);
-                        label("Ground fuel is drawn during travel.", x, y + 227, 14, muted, width);
+                        label("Shift-click adds a point. Backspace undoes.", x, y + 227, 14, muted, width);
                         label(draft.action.kind == MissionKind::attack ? "Requires supplies and ammunition." :
                               "Requires supplies.", x, y + 248, 14, muted, width);
                         if (position_order(draft.action.kind)) {
@@ -954,6 +980,9 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                 label("Preview at tick " + std::to_string(preview.tick), x, y + 159, 13, muted, width);
             }
             button(review_button(area, true), "Confirm order", true);
+            if (!draft.via.empty()) {
+                label("Route points " + std::to_string(draft.via.size() + 1), x, y + 178, 13, accent, width);
+            }
         } else {
             label(draft.action.geographic_destination ? "Click a destination on the map." :
                   "Click the target sector on the map.", x, y + 71, 16, accent, width);
@@ -1009,7 +1038,8 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
             const auto actions = session.actions_for(UnitId{marker->id});
             for (std::size_t i = 0; i < actions.size(); ++i) {
                 const auto kind = actions[i].kind;
-                button(action_button(area, i), kind == MissionKind::ground_recon ? "Gnd Recon" : action_label(kind).c_str());
+                button(action_button(area, i), kind == MissionKind::ground_recon ? "Gnd Recon" :
+                    kind == MissionKind::ground_patrol ? "Gnd Patrol" : action_label(kind).c_str());
             }
             if (session.permissions().may_issue_orders && actions.empty()) {
                 label("No orders available from this formation.", x, y + 159, 14, muted, width);
@@ -1281,7 +1311,7 @@ void run(CampaignState& campaign, std::optional<FactionId> faction,
         if (controls.draft && controls.draft->target &&
             (!controls.draft->preview || controls.draft->preview->tick != snapshot.tick)) {
             auto& draft = *controls.draft;
-            draft.preview = session.preview(draft.action.kind, *draft.target, draft.requested_formation());
+            draft.preview = session.preview(draft.action.kind, *draft.target, draft.requested_formation(), draft.via);
         }
         if (!mission_click && handle_command_input(controls, snapshot, screen.details, session)) {
             snapshot = session.snapshot(controls.perspective);

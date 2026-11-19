@@ -290,6 +290,9 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
                     out << " (" << mission.detections << ')';
                 }
             }
+            if (!mission.waypoints.empty()) {
+                out << " | waypoints " << mission.waypoints_reached << '/' << mission.waypoints.size();
+            }
             if (mission.status == MissionStatus::completed && mission.kind == MissionKind::recon) {
                 out << " | " << mission.detections << " detected";
             }

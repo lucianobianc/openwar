@@ -108,6 +108,12 @@ superseded. Incidental observation from other movement crossings and
 engagements follows its existing rules. Reports remain with the observing
 faction, including when a later interruption ends the mission.
 
+Ground Patrol reports territorial conditions on sector crossings and
+observes at each waypoint it reaches. Each visit uses the same open or
+forested coverage as Ground Recon without a dedicated observation tick.
+Combat can interrupt observation. Reports belong to the patrolling
+faction. An observation with no detections does not establish sector clearance.
+
 ## 6. Relatórios e comunicações
 
 Uma observação pode ser publicada imediatamente na v0 (default configurável),
