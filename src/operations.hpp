@@ -57,6 +57,7 @@ struct OperationsSettings {
     std::uint32_t coordination_window_ticks = 8;
     // WEST and EAST respectively.
     std::array<StrategicDoctrine, 2> doctrines{};
+    bool autonomous_recovery = false;
 
     bool strategic_planning_enabled(bool combat_enabled) const
     {

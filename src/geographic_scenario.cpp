@@ -513,7 +513,7 @@ ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std
                 line.fail("unknown geographic point '" + name + "'");
             return point->second;
         };
-        if (kind == "timing" || kind == "operations" || kind == "combat") {
+        if (kind == "timing" || kind == "operations" || kind == "combat" || kind == "force_recovery") {
             if (!settings.insert(kind).second)
                 line.fail("duplicate " + kind + " settings");
         }
@@ -535,6 +535,8 @@ ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std
             op.installation_half_life_seconds = line.number(1u);
             if (op.strategy_review_ticks && !op.planner_interval_ticks)
                 line.fail("strategic review requires a positive planning interval");
+        } else if (kind == "force_recovery") {
+            s.operations.autonomous_recovery = line.number(0u, 1u) != 0;
         } else if (kind == "combat") {
             auto& combat = s.combat;
             combat.interval_ticks = line.number(1u);
@@ -676,14 +678,21 @@ ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std
             if (parent == child || senior.faction != unit.faction)
                 line.fail("parent must be another unit of the same faction");
             unit.parent = parent;
-        } else if (kind == "equipment") {
+        } else if (kind == "equipment" || kind == "replacement") {
             const auto id = EquipmentId{line.number(1u)};
             const auto type = EquipmentTypeId{line.number(1u)};
             const auto unit = UnitId{line.number(1u)};
             const auto& profile = require_reference(s.equipment_types, type, line, "equipment type");
-            if (profile.faction != require_reference(s.units, unit, line, "unit").faction)
+            const auto& formation = require_reference(s.units, unit, line, "unit");
+            if (profile.faction != formation.faction)
                 line.fail("equipment and unit belong to different factions");
-            s.equipment.push_back({id, type, unit});
+            std::string source;
+            if (kind == "replacement") {
+                source = line.quoted();
+                if (!formation.facility)
+                    line.fail("replacement requires a reserve source and an assigned facility");
+            }
+            s.equipment.push_back({id, type, unit, std::move(source)});
         } else if (kind == "carrier") {
             const auto id = CarrierId{line.number(1u)};
             const auto faction = line.faction();

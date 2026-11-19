@@ -96,6 +96,29 @@ breaks, recovery rules, and mission eligibility checks. Doctrine choices
 affect autonomous orders and leave equipment, combat and manual orders under
 their existing rules.
 
+### Autonomous force recovery
+
+With `force_recovery 1`, the strategic planner considers uncommitted, mobile
+ground formations with an assigned workshop. A formation with service needs
+or a replacement deficit can use an ordinary Move order to return to its
+workshop. The planner uses faction territorial and road reports, requires a
+confirmed friendly workshop sector, avoids reported threats at both ends,
+and uses the existing route and fuel checks. Return orders use the normal
+autonomous order limit. The workshop must be operational and support the
+equipment needing service or replacement.
+
+A formation at its assigned workshop waits for feasible service and finite
+replacement arrivals before it is selected for another automatic ground
+order. Repair costs, staffing, parts, and transit delays follow the existing
+rules. Operational reserve and existing orders prevent automatic returns and
+replacement dispatch. A formation still needs surviving mobility to return,
+and destroyed or surrendered formations cannot receive replacements.
+Existing player orders use their normal eligibility rules.
+
+Checkpoint schema 14 stores the recovery setting. The Move order, service
+jobs and finite reserve items use the usual checkpoint state. Earlier saves
+and scenarios that omit the setting retain their original planning behavior.
+
 ### Operational reserve
 
 A commander can place any formation under their command in operational reserve

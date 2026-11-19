@@ -562,6 +562,8 @@ private:
     bool update_operations();
     bool update_strategy(FactionId faction);
     void dispatch_reinforcement(FactionId faction, const FactionView& view, const StrategicPlan& plan);
+    std::size_t replacement_deficit(UnitId id) const;
+    bool needs_workshop(UnitId id, const MaintenanceFacility& facility) const;
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
     bool formation_committed(UnitId unit) const;
     std::string_view order_authority_refusal(FactionId actor, std::optional<UnitId> formation) const;

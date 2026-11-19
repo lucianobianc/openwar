@@ -3489,6 +3489,84 @@ void test_operational_reserve()
             "Reserve commands diverged after checkpoint restore or tick batching");
 }
 
+void test_autonomous_force_recovery()
+{
+    constexpr auto west = FactionId::west;
+    constexpr UnitId unit{1};
+    constexpr EquipmentId damaged{4}, lost{5}, replacement{6};
+    constexpr StockpileId stores{10}, workshop{1};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr auto parts = static_cast<std::size_t>(Resource::spare_parts);
+    constexpr geography::Point forward{750'000, 250'000, 0};
+    auto scenario = combat_example_scenario(west);
+    scenario.victory_objectives.clear();
+    scenario.command_objectives.clear();
+    scenario.objectives = {{west, SectorId{4}, 3}};
+    scenario.public_sectors.push_back(SectorId{4});
+    std::ranges::find(scenario.initial_sectors, SectorId{1}, &InitialSectorState::sector)->state.controller = west;
+    scenario.operations.planner_interval_ticks = 1;
+    scenario.operations.strategy_review_ticks = 2;
+    scenario.operations.reinforcement_travel_ticks = 2;
+    scenario.operations.territory_half_life_seconds = 360 * 60;
+    scenario.operations.autonomous_recovery = true;
+    auto& stock = *std::ranges::find(scenario.stockpiles, workshop, &Stockpile::id);
+    stock.capacity[parts] = stock.quantity[parts] = 10;
+    scenario.equipment.push_back({damaged, EquipmentTypeId{1}, unit});
+    scenario.equipment.push_back({lost, EquipmentTypeId{1}, unit});
+    scenario.equipment.push_back({replacement, EquipmentTypeId{1}, unit, "Depot reserve"});
+
+    CampaignState campaign(scenario, 42);
+    CommandSession command(campaign, west);
+    require(command.set_operational_reserve(unit, true) &&
+            command.submit(MissionKind::move, forward, unit).mission,
+            "Could not stage a formation under a manual move order");
+    campaign.advance_ticks(4);
+    require(campaign.units().at(unit).sector == SectorId{1} &&
+            campaign.damage_equipment(damaged, 20) && campaign.lose_equipment(lost),
+            "Could not stage damage and losses away from the workshop");
+    campaign.advance_ticks(2);
+    require(campaign.faction_view(west).missions.size() == 1 &&
+            campaign.equipment().at(replacement).status == EquipmentStatus::reserve,
+            "Autonomous recovery overrode operational reserve");
+
+    const auto hold = command.submit(MissionKind::hold, forward, unit);
+    require(hold.mission && command.set_operational_reserve(unit, false),
+            "Could not establish a manual commitment");
+    campaign.advance_ticks(2);
+    require(campaign.faction_view(west).missions.size() == 2 && command.cancel(west, *hold.mission).cancelled,
+            "Autonomous recovery displaced a manual commitment");
+    const auto before = campaign.stockpiles().at(stores).quantity[fuel];
+    campaign.advance_ticks(1);
+    const auto order = campaign.faction_view(west).missions.back();
+    require(order.kind == MissionKind::move && !order.manual && order.target == SectorId{0} &&
+            order.status == MissionStatus::scheduled && campaign.units().at(unit).sector == SectorId{1},
+            "Recovery did not schedule an ordinary Move to the workshop");
+
+    CheckpointFiles files;
+    const auto path = files.directory / "returning.ows";
+    campaign.save(path);
+    auto restored = CampaignState::load(path);
+    campaign.advance_ticks(12);
+    for (int step = 0; step < 12; ++step) {
+        restored.advance_ticks(1);
+    }
+    require(campaign.stockpiles().at(stores).quantity[fuel] < before &&
+            campaign.stockpiles().at(workshop).quantity[parts] == 9 &&
+            campaign.equipment().at(damaged).damage == 0 &&
+            campaign.equipment().at(lost).status == EquipmentStatus::lost &&
+            campaign.equipment().at(replacement).status == EquipmentStatus::available &&
+            std::ranges::any_of(campaign.faction_view(west).missions, [unit](const auto& mission) {
+                return !mission.manual && mission.kind == MissionKind::attack && mission.ground_unit == unit;
+            }), "Recovery did not pay travel and repair costs, deliver a finite replacement, or resume operations");
+    const auto resumed_path = files.directory / "resumed.ows";
+    campaign.save(path);
+    restored.save(resumed_path);
+    std::ifstream continuous(path, std::ios::binary), replayed(resumed_path, std::ios::binary);
+    require(std::ranges::equal(std::istreambuf_iterator<char>(continuous), std::istreambuf_iterator<char>(),
+                               std::istreambuf_iterator<char>(replayed), std::istreambuf_iterator<char>()),
+            "Autonomous recovery diverged after checkpoint reload");
+}
+
 void test_depleted_withdrawal()
 {
     auto scenario = combat_example_scenario();
@@ -3556,6 +3634,7 @@ int main()
     test_geographic_mobile_delivery();
     test_geographic_transport_control_change();
     test_operational_reserve();
+    test_autonomous_force_recovery();
     test_depleted_withdrawal();
     test_checkpoints();
     test_legacy_road_checkpoint();

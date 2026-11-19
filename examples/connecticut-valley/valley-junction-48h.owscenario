@@ -27,6 +27,7 @@ point east_objective 21283350 15623637 178843
 # Five-minute ticks, 30-minute planning, and 20-minute combat resolution.
 timing 300 6 1 1 172800
 operations 6 12 3 43200 10800 43200
+force_recovery 1
 combat 4 1800 3600 1800 21600 86400
 
 # Each side starts with armor in the center, scouts north, and mechanized forces south.
@@ -153,6 +154,10 @@ equipment 13 4 5
 equipment 14 5 5
 equipment 15 6 6
 equipment 16 6 6
+replacement 17 1 2 "WEST depot reserve"
+replacement 18 1 2 "WEST depot reserve"
+replacement 19 2 3 "WEST depot reserve"
+replacement 20 2 3 "WEST depot reserve"
 
 unit 101 EAST east_hq 110 101 78 "EAST Valley Task Force"
 unit 102 EAST east_armor 111 101 83 "EAST Armor Company"
@@ -189,6 +194,10 @@ equipment 115 104 105
 equipment 116 105 105
 equipment 117 106 106
 equipment 118 106 106
+replacement 119 101 102 "EAST depot reserve"
+replacement 120 101 102 "EAST depot reserve"
+replacement 121 102 103 "EAST depot reserve"
+replacement 122 102 103 "EAST depot reserve"
 
 # Depot carriers share finite lift. Replenishment depends on the recipient remaining accessible.
 carrier 1 WEST west_depot 22 60 valley

@@ -109,12 +109,14 @@ referencing them.
 | `identity UNIT DOMAIN FUNCTION ECHELON` | Optional declared military identity. Use after the unit record. |
 | `parent CHILD PARENT` | Optional existing command relationship. Declare both same-faction units first. |
 | `equipment ID TYPE UNIT` | Assign one starting equipment item. |
+| `replacement ID TYPE UNIT "SOURCE"` | Assign one finite reserve item to a formation with a facility. The source is a label. The item starts in reserve and uses normal reinforcement entry and transit rules. |
 | `carrier ID SIDE POINT CAPACITY FUEL MOBILITY` | Logistics carrier and initial fuel in litres. |
 | `shipment ID ORIGIN DESTINATION RESOURCE QUANTITY PRIORITY` | Initial supply request. |
 | `resupply ORIGIN DESTINATION RESOURCE THRESHOLD TARGET` | Recurring supply policy. |
 | `timing TICK_SECONDS ECONOMY_TICKS LOAD_TICKS UNLOAD_TICKS TIME_LIMIT_SECONDS` | Optional clock and timing record. Zero time limit disables the limit. |
 | `operations PLANNER_TICKS STRATEGY_TICKS MAX_ORDERS TERRITORY_HALF_LIFE CONTACT_HALF_LIFE INSTALLATION_HALF_LIFE` | Optional planning settings. Use 0 to disable an interval. Half-lives use seconds. |
 | `combat INTERVAL_TICKS OCCUPATION_SECONDS CRITICAL_SECONDS STABILIZATION_SECONDS CAPITULATION_SECONDS REINFORCEMENT_HORIZON_SECONDS` | Optional abstract combat settings. |
+| `force_recovery ENABLED` | Optional strategic-planner workshop returns. Use 1 to enable or 0 for the default. |
 
 The optional display comments can appear once each after the world reference.
 Existing OWSCENARIO 1 loaders treat them as comments. The launcher uses the

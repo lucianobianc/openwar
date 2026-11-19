@@ -112,7 +112,7 @@ and routing state.
 ## Valley Junction 48-hour experiment
 
 Choose **Valley Junction (48-hour experiment)** under Connecticut Valley. The
-scenario uses the same world and starting equipment as Valley Junction, with
+scenario uses the same world and active starting equipment as Valley Junction, with
 armor in the center, scouts in the north, and mechanized companies on the
 southern approach. Sector 121 is an intermediate objective. The flanks lead
 to opposing outposts, and the rear depots are eight-hour hold objectives.
@@ -123,7 +123,9 @@ Each tick represents five minutes. Planning runs every 30 simulated minutes
 and combat resolves every 20. Mobilized formations draw from finite depot
 stocks, with two carriers per side, recurring deliveries, and a local
 workshop for each southern mechanized company. The scenario retains the
-existing repair, withdrawal, and replacement rules.
+existing repair, withdrawal, and replacement rules. Eight finite replacement
+items are assigned to the armor and mechanized companies, four per side.
+Autonomous workshop returns use the ordinary Move order.
 
 ```sh
 ./openwar --scenario examples/connecticut-valley/valley-junction-48h.owscenario --seed 42 --ticks 576 --events
@@ -133,7 +135,7 @@ To vary doctrines, use **Campaign settings** in the viewer and start as
 **Observer**. A checkpoint from the observer session can be resumed headlessly
 with `openwar --load FILE --ticks 576 --events`.
 
-### Experimental reference runs
+### Baseline reference runs
 
 All four autonomous runs drew by the time limit at 48:00. Resuming the
 Balanced seed-42 run at hour 24 produced a byte-identical final checkpoint.
@@ -156,6 +158,38 @@ exhausted or held at garrisons over the first eight hours. Depots still had
 ammunition at the time limit. The authored format provides starting
 equipment, and the planner needs surviving eligible formations to exploit
 later objectives.
+
+### Workshop recovery comparison
+
+The baseline is the 48-hour scenario from commit `d15a8f9`, before
+workshop returns and authored replacement inventory. Both versions used
+the same seeds, doctrines, and observer role. Returns below count distinct
+formations that reorganized, received a replacement, or finished a repair
+and then fired or launched an Attack or Defend order.
+
+| Seed | WEST / EAST | Last combat, baseline → recovery | Captures | Repairs / replacements | Returns | Deliveries | Quiet hours |
+|---|---|---|---|---|---|---|---|
+| 7, 42 | Balanced / Balanced | 4:00 → 16:20 | 2 → 7 | 1/0 → 7/5 | 1 → 3 | 14/18 → 25/26 | 43 → 3 |
+| 42 | Offensive / Defensive | 8:00 → 5:20 | 3 → 3 | 0/0 → 2/2 | 0 → 1 | 25/27 → 29/34 | 41 → 42 |
+| 42 | Defensive / Offensive | 7:20 → 12:20 | 3 → 3 | 6/0 → 12/4 | 2 → 4 | 26/30 → 25/30 | 41 → 36 |
+
+Balanced ended in EAST victory by capitulation at 19:40 after WEST lost
+its command sector at 13:40. The two mixed-doctrine runs drew at 48:00.
+Neither fought into day two. With Offensive EAST, all three EAST maneuver
+formations were eventually destroyed. With Defensive EAST, its surviving
+armor and mechanized companies remained on garrison duty while WEST
+ended with a broken armor company and no ready scouts. Both mixed runs
+still had ammunition in rear depots.
+
+Stockpile consumption below excludes transfers between stockpiles and
+fuel drawn directly from carrier tanks. Fuel is in litres. Other columns
+are stock units. Values are baseline → recovery.
+
+| WEST / EAST | Fuel | Materials | Parts | Supplies | Ammunition |
+|---|---:|---:|---:|---:|---:|
+| Balanced / Balanced | 77 → 270 | 68 → 50 | 1 → 7 | 23 → 41 | 23 → 41 |
+| Offensive / Defensive | 340 → 452 | 68 → 68 | 0 → 2 | 27 → 18 | 27 → 18 |
+| Defensive / Offensive | 322 → 339 | 68 → 68 | 6 → 12 | 32 → 43 | 32 → 43 |
 
 ## Source data and reproduction
 

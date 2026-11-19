@@ -89,6 +89,12 @@ void test_discovery(const fs::path& root, const fs::path& bundled)
     require(experiment.world == valley && experiment.commanders == field.commanders &&
             std::ranges::find(experiment.details, "Time limit 48 h") != experiment.details.end(),
             "Launcher omitted the 48-hour variant or its authored time limit");
+    const auto recovery = read_geographic_scenario(bundled / "valley-junction-48h.owscenario");
+    CampaignState recovery_campaign(recovery, 42);
+    const auto& reserve = recovery_campaign.equipment().at(EquipmentId{17});
+    require(recovery.operations.autonomous_recovery && reserve.status == EquipmentStatus::reserve &&
+            reserve.assignment.unit == UnitId{2} && reserve.assignment.reserve_source == "WEST depot reserve",
+            "The authored replacement did not load into the assigned formation's finite reserve");
     require(catalog.add(custom) == other, "Selecting the same world again duplicated its catalog entry");
     try {
         (void)read_geographic_world(other);

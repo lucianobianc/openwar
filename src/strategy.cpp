@@ -66,6 +66,37 @@ std::vector<SectorId> approaches(const WorldDefinition& world, const FactionView
 
 }  // namespace
 
+std::size_t CampaignState::replacement_deficit(UnitId id) const
+{
+    const auto losses = unit_readiness(id).lost;
+    std::size_t replacements = 0;
+    for (const auto& [equipment_id, item] : equipment_) {
+        if (item.assignment.unit == id && !item.assignment.reserve_source.empty()) {
+            if (item.reinforcement_eta) {
+                return 0;
+            }
+            replacements += item.status != EquipmentStatus::reserve;
+        }
+    }
+    // One replacement at a time, with each issued item counted against prior losses.
+    return losses > replacements ? losses - replacements : 0;
+}
+
+bool CampaignState::needs_workshop(UnitId id, const MaintenanceFacility& facility) const
+{
+    const auto deficit = replacement_deficit(id);
+    return std::ranges::any_of(equipment_, [&](const auto& entry) {
+        const auto& item = entry.second;
+        if (item.assignment.unit != id || item.status == EquipmentStatus::lost ||
+            (!facility.supported_types.empty() && std::ranges::find(facility.supported_types,
+             item.assignment.type) == facility.supported_types.end())) {
+            return false;
+        }
+        return item.damage || item.job || item.reinforcement_eta ||
+               (deficit && item.status == EquipmentStatus::reserve);
+    });
+}
+
 void CampaignState::dispatch_reinforcement(FactionId faction, const FactionView& view, const StrategicPlan& plan)
 {
     const auto tick = clock_.tick();
@@ -83,17 +114,11 @@ void CampaignState::dispatch_reinforcement(FactionId faction, const FactionView&
         if (unit.faction != faction || !friendly(view, faction, unit.sector) || !reinforcement_entry_ready(item)) {
             continue;
         }
-        const auto losses = unit_readiness(unit.id).lost;
-        std::size_t replacements = 0;
-        bool incoming = false;
-        for (const auto& [other_id, other] : equipment_) {
-            if (other.assignment.unit == unit.id && !other.assignment.reserve_source.empty()) {
-                replacements += other.status != EquipmentStatus::reserve;
-                incoming = incoming || other.reinforcement_eta.has_value();
-            }
+        if (operations_.autonomous_recovery &&
+            (operational_reserve_.contains(unit.id) || formation_committed(unit.id))) {
+            continue;
         }
-        // A formation gets at most one replacement in transit, and keeps its original inventory identities.
-        const auto deficit = !incoming && losses > replacements ? losses - replacements : 0;
+        const auto deficit = replacement_deficit(unit.id);
         const auto threat = threatened(view, unit.sector) || plan.focus == unit.sector;
         const auto priority = deficit ? deficit * 2 + threat : 0;
         if (priority > greatest_deficit) {
@@ -212,6 +237,33 @@ bool CampaignState::update_strategy(FactionId faction)
         changed = true;
         busy.insert(target);
     };
+    if (operations_.autonomous_recovery) {
+        for (const auto& [id, state] : combat_units_) {
+            const auto& unit = units_.at(id);
+            if (unit.faction != faction || state.status != GroundStatus::holding || !unit.facility ||
+                operational_reserve_.contains(id) || formation_committed(id)) {
+                continue;
+            }
+            const auto& facility = facilities_.at(*unit.facility);
+            const auto& stock = stockpiles_.at(facility.stockpile);
+            if (!facility.operational || stock.owner != faction || !friendly(view, faction, stock.sector) ||
+                !needs_workshop(id, facility)) {
+                continue;
+            }
+            if (unit.sector == stock.sector) {
+                guards.push_back(id);
+                continue;
+            }
+            if (assigned >= limit || threatened(view, stock.sector) || threatened(view, unit.sector)) {
+                continue;
+            }
+            if (auto order = plan_ground_mission(faction, MissionKind::move, stock.sector, view, {},
+                                                stock.access_point, nullptr, id)) {
+                dispatch(std::move(*order), "strategy: return to workshop");
+            }
+        }
+    }
+
     const auto recon = [&](SectorId sector) {
         if (busy.contains(sector) || assigned >= limit) {
             return;
