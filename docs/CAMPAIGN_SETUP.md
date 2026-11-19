@@ -125,12 +125,13 @@ definition before the normal campaign initializer runs.
 | Random seed | Unsigned 32-bit value. Use the same seed, settings, role and commands to reproduce a run. |
 | Time limit | Scenario value or a launcher preset of 1, 2, 4 or 8 hours. The existing time-limit rule runs alongside authored victory conditions. An overridden limit must exceed every authored victory hold period. |
 | Autonomous orders | Scenario value or 1, 2 or 3 active automatic orders per faction. The scenario must enable automatic planning to use an override. |
+| WEST and EAST doctrine | Choose Balanced, Offensive or Defensive independently when the scenario enables strategic planning. Balanced is the default for each side. [Strategic decision rules](OPERATIONS.md#strategic-doctrines) |
 
 A preset with no applicable effect produces a validation message before role
 selection. Combined demos and procedural configurations use their existing
 startup paths. Initial readiness and reserves follow the normal equipment
-initializer. Doctrine, victory objectives, terrain and unit placement are
-outside the settings screen.
+initializer. Victory objectives, terrain and unit placement are outside the
+settings screen.
 
 Checkpoint schema 7 stores custom setup provenance alongside the resolved
 campaign. It identifies the source scenario and its world reference, records
@@ -141,6 +142,9 @@ build. Checkpoints through schema 6 resume without a custom setup record, and
 the normal checkpoint reader resumes custom campaigns offline from resolved
 state. Checkpoint schema 11 with rules version 9 retains the same provenance
 record alongside ground mission progress and player supply requests.
+Checkpoint schema 13 with rules version 11 stores the two doctrine selections
+with the resolved operations settings and shows them for customized campaigns
+on the resume screen. Older checkpoints resume with Balanced for both sides.
 
 ## 3. Origem do mundo e cenário-base
 

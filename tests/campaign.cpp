@@ -1386,6 +1386,36 @@ void test_strategic_command()
     require(response.missions.size() == 2 && response.missions.back().kind == MissionKind::defend &&
             response.missions.back().target == objective, "Strategic defense ignored a reported incursion");
 
+    auto tradeoff = defense;
+    constexpr SectorId expansion{3};
+    tradeoff.public_sectors.push_back(expansion);
+    tradeoff.objectives.push_back({west, expansion, 4});
+    tradeoff.command_objectives.push_back({west, {approach}});
+    tradeoff.operations.max_autonomous_missions = 1;
+    for (auto& sector : tradeoff.initial_sectors) {
+        if (sector.sector == expansion) {
+            sector.state.controller = FactionId::neutral;
+        }
+    }
+    const auto first_autonomous = [&](StrategicDoctrine doctrine) {
+        tradeoff.operations.doctrines[0] = doctrine;
+        CampaignState campaign(tradeoff, 42);
+        require(campaign.issue_order(west, MissionKind::recon, objective).mission.has_value(),
+                "Could not reveal the incursion in the doctrine comparison");
+        campaign.advance_ticks(10);
+        const auto view = campaign.faction_view(west);
+        require(view.missions.size() == 2 && !view.missions.back().manual,
+                "Expected exactly one autonomous decision in the doctrine comparison");
+        return view.missions.back();
+    };
+    const auto balanced = first_autonomous(StrategicDoctrine::balanced);
+    const auto offensive = first_autonomous(StrategicDoctrine::offensive);
+    const auto defensive = first_autonomous(StrategicDoctrine::defensive);
+    require(balanced.kind == MissionKind::defend && balanced.target == objective && balanced.ground_unit == UnitId{3} &&
+            offensive.kind == MissionKind::attack && offensive.target == expansion &&
+            defensive.kind == MissionKind::defend && defensive.target == objective && defensive.ground_unit == UnitId{1},
+            "Doctrines did not change the mission priority or preserve the quiet command-post garrison");
+
     auto staging = combat_example_scenario();
     staging.operations.planner_interval_ticks = 1;
     staging.operations.strategy_review_ticks = 5;
@@ -3344,6 +3374,18 @@ void test_checkpoints()
     auto ended = round_trip(restored_battle);
     ended.advance_ticks(100);
     equal_saves(ended, restored_battle);
+
+    auto doctrine_scenario = combat_example_scenario();
+    doctrine_scenario.operations.strategy_review_ticks = 12;
+    doctrine_scenario.operations.doctrines = {StrategicDoctrine::offensive, StrategicDoctrine::defensive};
+    CampaignState doctrinal(std::move(doctrine_scenario), 42);
+    doctrinal.advance_ticks(3);
+    auto restored_doctrine = round_trip(doctrinal);
+    doctrinal.advance_ticks(24);
+    for (int tick = 0; tick < 24; ++tick) {
+        restored_doctrine.advance_ticks(1);
+    }
+    equal_saves(doctrinal, restored_doctrine);
 
     auto service = maintenance_example_campaign(42);
     service.advance_ticks(7);

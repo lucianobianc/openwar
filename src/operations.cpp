@@ -494,7 +494,7 @@ bool CampaignState::update_operations()
     }
     if (operations_.planner_interval_ticks != 0 && tick % operations_.planner_interval_ticks == 0) {
         for (const auto faction : {FactionId::west, FactionId::east}) {
-            if (combat_.enabled && operations_.strategy_review_ticks) {
+            if (operations_.strategic_planning_enabled(combat_.enabled)) {
                 equipment_changed = update_strategy(faction) || equipment_changed;
                 continue;
             }

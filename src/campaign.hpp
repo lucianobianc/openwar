@@ -356,6 +356,7 @@ struct CampaignOptions {
     std::uint32_t seed = 0;
     std::optional<std::uint32_t> duration_minutes{};
     std::optional<std::uint32_t> autonomous_orders{};
+    std::array<StrategicDoctrine, 2> doctrines{};
     bool operator==(const CampaignOptions&) const = default;
 };
 

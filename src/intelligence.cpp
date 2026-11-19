@@ -35,6 +35,13 @@ std::string_view confidence_name(std::uint16_t confidence)
 void CampaignState::initialize_operations(const ScenarioDefinition& scenario)
 {
     operations_ = scenario.operations;
+    for (const auto doctrine : operations_.doctrines) {
+        if (doctrine < StrategicDoctrine::balanced || doctrine > StrategicDoctrine::defensive ||
+            (doctrine != StrategicDoctrine::balanced &&
+             !operations_.strategic_planning_enabled(scenario.combat.enabled))) {
+            throw std::invalid_argument("Invalid strategic doctrine or disabled strategic planner");
+        }
+    }
     // Carriers can report road conditions in geographic scenarios without military operations.
     if (authored_geography_) {
         intelligence_.try_emplace(FactionId::west);

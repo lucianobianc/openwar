@@ -3,6 +3,7 @@
 
 #include "combat.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -41,6 +42,8 @@ constexpr bool mission_active(MissionStatus status)
            status == MissionStatus::in_progress || status == MissionStatus::holding || status == MissionStatus::observing;
 }
 
+enum class StrategicDoctrine { balanced, offensive, defensive };
+
 struct OperationsSettings {
     bool enabled = false;
     std::uint32_t planner_interval_ticks = 0;
@@ -52,6 +55,13 @@ struct OperationsSettings {
     std::uint32_t strategy_review_ticks = 0;
     std::uint32_t reinforcement_travel_ticks = 30;
     std::uint32_t coordination_window_ticks = 8;
+    // WEST and EAST respectively.
+    std::array<StrategicDoctrine, 2> doctrines{};
+
+    bool strategic_planning_enabled(bool combat_enabled) const
+    {
+        return enabled && planner_interval_ticks && strategy_review_ticks && combat_enabled;
+    }
 };
 
 struct StrategicPlan {

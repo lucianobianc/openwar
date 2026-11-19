@@ -122,6 +122,14 @@ ScenarioDefinition customize_scenario(ScenarioDefinition scenario, const std::fi
         if (options.stocks[i] != StartingPreset::original)
             adjust_stocks(scenario, sides[i], options.stocks[i]);
     }
+    for (const auto doctrine : options.doctrines) {
+        if (doctrine < StrategicDoctrine::balanced || doctrine > StrategicDoctrine::defensive)
+            throw std::invalid_argument("Unknown strategic doctrine");
+    }
+    if (options.doctrines != decltype(options.doctrines){} &&
+        !scenario.operations.strategic_planning_enabled(scenario.combat.enabled))
+        throw std::invalid_argument("Strategic doctrines require an enabled strategic planner");
+    scenario.operations.doctrines = options.doctrines;
     if (options != CampaignOptions{}) {
         const auto reference = referenced_military_world(source);
         const auto world = std::filesystem::absolute(reference).lexically_normal();

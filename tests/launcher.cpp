@@ -247,6 +247,20 @@ void test_campaign_settings(const fs::path& root, const fs::path& bundled)
             "Customized campaign diverged after resumption");
     require(bytes(path) == scenario_before && bytes(world) == world_before, "Campaign settings edited a source file");
 
+    CampaignOptions doctrines;
+    doctrines.seed = 42;
+    doctrines.doctrines = {StrategicDoctrine::offensive, StrategicDoctrine::defensive};
+    auto doctrinal_setup = customize_scenario(base, path, doctrines);
+    require(doctrinal_setup.operations.doctrines == doctrines.doctrines &&
+            rejects(without_planner, path, doctrines),
+            "Doctrine choices were not applied independently or accepted a disabled planner");
+    CampaignState doctrinal(std::move(doctrinal_setup), doctrines.seed);
+    const auto doctrine_checkpoint = save_new_checkpoint(doctrinal, saves);
+    auto resumed_doctrine = CampaignState::load(doctrine_checkpoint);
+    require(resumed_doctrine.setup() && resumed_doctrine.setup()->options == doctrines &&
+            bytes(doctrine_checkpoint) == bytes(save_new_checkpoint(resumed_doctrine, saves)),
+            "Checkpoint lost doctrine selections");
+
     CampaignOptions seed_only;
     seed_only.seed = 22;
     auto direct = open_campaign_scenario(path, {}, seed_only.seed);

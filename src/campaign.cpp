@@ -105,7 +105,8 @@ CampaignState::CampaignState(ScenarioDefinition scenario, std::uint32_t seed,
       minimum_integrity_(scenario.minimum_integrity), loading_ticks_(scenario.loading_ticks),
       unloading_ticks_(scenario.unloading_ticks)
 {
-    if (setup_ && (setup_->options.seed != seed_ || !scenario.geographic_world || generator_version_))
+    if (setup_ && (setup_->options.seed != seed_ || !scenario.geographic_world || generator_version_ ||
+                   setup_->options.doctrines != scenario.operations.doctrines))
         throw std::invalid_argument("Campaign setup does not match the resolved scenario or seed");
     random_words_.front() = seed;
     for (std::uint32_t i = 1; i < random_words_.size(); ++i) {

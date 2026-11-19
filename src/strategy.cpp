@@ -113,6 +113,7 @@ bool CampaignState::update_strategy(FactionId faction)
 {
     const auto tick = clock_.tick();
     auto view = faction_view(faction, false);
+    const auto doctrine = operations_.doctrines[faction == FactionId::west ? 0 : 1];
     std::map<SectorId, std::uint64_t> priorities;
     for (const auto& objective : view.objectives) {
         priorities[objective.sector] = std::max<std::uint64_t>(priorities[objective.sector], objective.priority);
@@ -152,7 +153,8 @@ bool CampaignState::update_strategy(FactionId faction)
             }));
             ready += strength;
             garrisons[unit.sector] += strength;
-            if (friendly(view, faction, unit.sector) && threatened(view, unit.sector) &&
+            if (friendly(view, faction, unit.sector) &&
+                (doctrine == StrategicDoctrine::defensive || threatened(view, unit.sector)) &&
                 (priorities.contains(unit.sector) || command_sites.contains(unit.sector))) {
                 guards.push_back(id);
             }
@@ -224,89 +226,103 @@ bool CampaignState::update_strategy(FactionId faction)
         }
     };
 
-    std::vector<SectorId> defenses;
-    for (const auto& [sector, report] : view.sectors) {
-        if ((priorities.contains(sector) || command_sites.contains(sector)) &&
-            friendly(view, faction, sector) && threatened(view, sector)) {
-            defenses.push_back(sector);
-        }
-    }
-    std::ranges::stable_sort(defenses, [&](SectorId left, SectorId right) {
-        return command_sites.contains(left) > command_sites.contains(right);
-    });
-    for (const auto target : defenses) {
+    const auto defend = [&] {
         if (assigned >= limit) {
-            break;
+            return;
         }
-        const auto& report = view.sectors.at(target);
-        const auto opposition = static_cast<std::size_t>(std::ranges::count_if(view.contacts, [&](const auto& contact) {
-            return contact.classification == "ground" && contact.confidence >= 350 && current_contact(contact, report);
-        }));
-        if (busy.contains(target) || garrisons[target] >= std::max<std::size_t>(1, opposition)) {
-            continue;
-        }
-        if (auto order = plan_ground_mission(faction, MissionKind::defend, target, view, guards)) {
-            dispatch(std::move(*order), "strategy: defend reported threat");
-        }
-    }
-    if (plan.recovering || assigned >= limit) {
-        return changed;
-    }
-
-    // Try the persistent focus first, then usable staging sectors and secondary objectives.
-    std::vector<SectorId> targets = plan.focus ? approaches(world_, view, faction, *plan.focus) :
-                                               std::vector<SectorId>{};
-    std::vector<SectorId> secondary;
-    for (const auto& [sector, priority] : priorities) {
-        if (!friendly(view, faction, sector) && passable(world_.sector(sector))) {
-            secondary.push_back(sector);
-        }
-    }
-    std::ranges::stable_sort(secondary, [&](SectorId left, SectorId right) {
-        return priorities.at(left) > priorities.at(right);
-    });
-    targets.insert(targets.end(), secondary.begin(), secondary.end());
-    std::set<SectorId> tried;
-    for (const auto target : targets) {
-        if (assigned >= limit) {
-            break;
-        }
-        if (busy.contains(target) || !tried.insert(target).second) {
-            continue;
-        }
-        const auto report = view.sectors.find(target);
-        const bool stale_contact = report != view.sectors.end() &&
-            std::ranges::any_of(view.contacts, [&](const auto& contact) {
-                return current_contact(contact, report->second) && contact.confidence < 750;
-            });
-        if (stale_contact || !ground_target_refusal(view, faction, MissionKind::attack, target).empty()) {
-            if (!friendly(view, faction, target)) {
-                recon(target);
+        std::vector<SectorId> defenses;
+        for (const auto& [sector, report] : view.sectors) {
+            if ((priorities.contains(sector) || command_sites.contains(sector)) &&
+                friendly(view, faction, sector) && threatened(view, sector)) {
+                defenses.push_back(sector);
             }
-            continue;
         }
-        auto lead = plan_ground_mission(faction, MissionKind::attack, target, view, guards);
-        if (!lead) {
-            continue;
-        }
-        // Two formations can support the same objective within the configured arrival window.
-        if (threatened(view, target) && assigned + 1 < limit) {
-            auto exclusions = guards;
-            exclusions.push_back(*lead->ground_unit);
-            auto support = plan_ground_mission(faction, MissionKind::attack, target, view, exclusions);
-            if (support && support->duration_ticks >= lead->duration_ticks &&
-                support->duration_ticks - lead->duration_ticks <= operations_.coordination_window_ticks &&
-                support->duration_ticks < std::numeric_limits<std::uint64_t>::max() - tick) {
-                lead->earliest_launch_tick = tick + 1 + support->duration_ticks - lead->duration_ticks;
-                dispatch(std::move(*lead), "strategy: coordinated offensive");
-                dispatch(std::move(*support), "strategy: coordinated support");
+        std::ranges::stable_sort(defenses, [&](SectorId left, SectorId right) {
+            return command_sites.contains(left) > command_sites.contains(right);
+        });
+        for (const auto target : defenses) {
+            if (assigned >= limit) {
+                break;
+            }
+            const auto& report = view.sectors.at(target);
+            const auto opposition = static_cast<std::size_t>(std::ranges::count_if(view.contacts, [&](const auto& contact) {
+                return contact.classification == "ground" && contact.confidence >= 350 && current_contact(contact, report);
+            }));
+            if (busy.contains(target) || garrisons[target] >= std::max<std::size_t>(1, opposition)) {
                 continue;
             }
+            if (auto order = plan_ground_mission(faction, MissionKind::defend, target, view, guards)) {
+                dispatch(std::move(*order), "strategy: defend reported threat");
+            }
         }
-        dispatch(std::move(*lead), target == plan.focus ? "strategy: advance campaign objective" :
-                                                        "strategy: advance on another front");
+    };
+    const auto advance = [&] {
+        if (plan.recovering || assigned >= limit) {
+            return;
+        }
+
+        // Try the persistent focus first, then usable staging sectors and secondary objectives.
+        std::vector<SectorId> targets = plan.focus ? approaches(world_, view, faction, *plan.focus) :
+                                                   std::vector<SectorId>{};
+        std::vector<SectorId> secondary;
+        for (const auto& [sector, priority] : priorities) {
+            if (!friendly(view, faction, sector) && passable(world_.sector(sector))) {
+                secondary.push_back(sector);
+            }
+        }
+        std::ranges::stable_sort(secondary, [&](SectorId left, SectorId right) {
+            return priorities.at(left) > priorities.at(right);
+        });
+        targets.insert(targets.end(), secondary.begin(), secondary.end());
+        std::set<SectorId> tried;
+        for (const auto target : targets) {
+            if (assigned >= limit) {
+                break;
+            }
+            if (busy.contains(target) || !tried.insert(target).second) {
+                continue;
+            }
+            const auto report = view.sectors.find(target);
+            const bool stale_contact = report != view.sectors.end() &&
+                std::ranges::any_of(view.contacts, [&](const auto& contact) {
+                    return current_contact(contact, report->second) && contact.confidence < 750;
+                });
+            if (stale_contact || !ground_target_refusal(view, faction, MissionKind::attack, target).empty()) {
+                if (!friendly(view, faction, target)) {
+                    recon(target);
+                }
+                continue;
+            }
+            auto lead = plan_ground_mission(faction, MissionKind::attack, target, view, guards);
+            if (!lead) {
+                continue;
+            }
+            // Two formations can support the same objective within the configured arrival window.
+            if (threatened(view, target) && assigned + 1 < limit) {
+                auto exclusions = guards;
+                exclusions.push_back(*lead->ground_unit);
+                auto support = plan_ground_mission(faction, MissionKind::attack, target, view, exclusions);
+                if (support && support->duration_ticks >= lead->duration_ticks &&
+                    support->duration_ticks - lead->duration_ticks <= operations_.coordination_window_ticks &&
+                    support->duration_ticks < std::numeric_limits<std::uint64_t>::max() - tick) {
+                    lead->earliest_launch_tick = tick + 1 + support->duration_ticks - lead->duration_ticks;
+                    dispatch(std::move(*lead), "strategy: coordinated offensive");
+                    dispatch(std::move(*support), "strategy: coordinated support");
+                    continue;
+                }
+            }
+            dispatch(std::move(*lead), target == plan.focus ? "strategy: advance campaign objective" :
+                                                            "strategy: advance on another front");
+        }
+    };
+    if (doctrine == StrategicDoctrine::offensive) {
+        advance();
+        defend();
+    } else {
+        defend();
+        advance();
     }
-    if (!changed && review_due && plan.focus) {
+    if (!changed && !plan.recovering && assigned < limit && review_due && plan.focus) {
         record_event(operations_log_, {tick, faction, *plan.focus, {}, "strategy: waiting for a viable operation"});
     }
     return changed;

@@ -279,7 +279,11 @@ stock, readiness and manual order checks still apply. After losses, command
 can dispatch one existing replacement per review from a friendly functional
 entry point. Heavy losses can pause new offensives until forces recover.
 The demo prints each faction's current focus and review tick. Use `--events`
-to see strategic decisions alongside operations and logistics.
+to see strategic decisions alongside operations and logistics. In an authored
+campaign with strategic planning, choose a WEST and EAST doctrine in
+**Campaign settings**. Balanced keeps defense-first planning, Offensive tries
+advances first, and Defensive keeps garrisons at important friendly positions
+even when they are quiet. The selections persist in checkpoints.
 
 ## Procedural scenarios
 

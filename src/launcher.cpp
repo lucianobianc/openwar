@@ -335,6 +335,8 @@ fs::path browse(fs::path directory, bool checkpoint)
     return {};
 }
 
+constexpr std::array doctrine_labels{"Balanced", "Offensive", "Defensive"};
+
 std::string_view strength_label(StartingPreset preset)
 {
     constexpr std::array names{"Scenario original", "Reduced", "Reinforced"};
@@ -394,6 +396,8 @@ std::optional<LaunchSelection> continue_campaign(const fs::path& saves, fs::path
                 "EAST strength / " + std::string(strength_label(options.strength[1])),
                 "WEST stocks / " + std::string(stock_label(options.stocks[0])),
                 "EAST stocks / " + std::string(stock_label(options.stocks[1]))};
+            settings.push_back(std::string("WEST doctrine / ") + doctrine_labels.at(static_cast<std::size_t>(options.doctrines[0])));
+            settings.push_back(std::string("EAST doctrine / ") + doctrine_labels.at(static_cast<std::size_t>(options.doctrines[1])));
             if (options.duration_minutes)
                 settings.push_back("Time limit " + std::to_string(*options.duration_minutes) + " min");
             if (options.autonomous_orders)
@@ -425,6 +429,7 @@ std::optional<LaunchSelection> start_with_settings(const Entry& entry, const Sce
 {
     const auto base = read_geographic_scenario(entry.path);
     const auto planner = base.operations.enabled && base.operations.planner_interval_ticks;
+    const bool strategy = base.operations.strategic_planning_enabled(base.combat.enabled);
     CampaignOptions options;
     std::string error;
     std::size_t focus = 0;
@@ -452,6 +457,12 @@ std::optional<LaunchSelection> start_with_settings(const Entry& entry, const Sce
             Entry{"Time limit / " + duration, {"Sets the maximum simulated duration. Victory can occur earlier."}},
             Entry{"Autonomous orders / " + orders, {planner ? "Sets the maximum active automatic orders per faction." :
                 "Automatic planning is disabled for this scenario."}},
+            Entry{std::string("WEST doctrine / ") + (strategy ?
+                doctrine_labels.at(static_cast<std::size_t>(options.doctrines[0])) : "Unavailable"),
+                {strategy ? "Sets WEST strategic mission priorities." : "The strategic planner is disabled."}},
+            Entry{std::string("EAST doctrine / ") + (strategy ?
+                doctrine_labels.at(static_cast<std::size_t>(options.doctrines[1])) : "Unavailable"),
+                {strategy ? "Sets EAST strategic mission priorities." : "The strategic planner is disabled."}},
             Entry{"Restore scenario defaults", {"Reset every setting on this screen."}}
         };
         const auto choice = menu("Campaign settings", entry.title, entries, error, true, focus);
@@ -511,6 +522,20 @@ std::optional<LaunchSelection> start_with_settings(const Entry& entry, const Sce
                 break;
             }
             case 8:
+            case 9: {
+                if (!strategy)
+                    break;
+                const std::array choices{
+                    Entry{doctrine_labels[0], {"Respond to reported threats before advancing."}},
+                    Entry{doctrine_labels[1], {"Try to advance before dispatching defensive missions."}},
+                    Entry{doctrine_labels[2], {"Keep garrisons at friendly objectives and command posts."}}};
+                auto& doctrine = options.doctrines[focus - 8];
+                if (const auto selected = menu("Strategic doctrine", focus == 8 ? "WEST" : "EAST",
+                                               choices, {}, true, static_cast<std::size_t>(doctrine)).row)
+                    doctrine = static_cast<StrategicDoctrine>(*selected);
+                break;
+            }
+            case 10:
                 options = {};
                 focus = 0;
                 break;

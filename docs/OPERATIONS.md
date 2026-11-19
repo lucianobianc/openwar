@@ -76,6 +76,26 @@ Confirmation repeats the same checks before reserving resources. The existing
 scenario and checkpoint formats already represent the committed formation
 or equipment assignment.
 
+### Strategic doctrines
+
+Authored campaigns with strategic planning enabled can select a doctrine for
+each faction in Campaign settings. Both factions use Balanced by default.
+
+- **Balanced** dispatches defenses against reported threats to objectives and
+  command posts before trying advances. It keeps local garrisons at threatened
+  objectives and command posts.
+- **Offensive** tries the existing advance and approach-survey priorities first.
+  Remaining order slots can respond to reported threats. Garrisons at
+  threatened objectives and command posts remain in place.
+- **Defensive** dispatches defenses first and keeps local garrisons at confirmed
+  friendly objectives and command posts even when they are quiet. Other
+  eligible formations can respond to threats or advance using spare order slots.
+
+All three use the same faction reports, objective scores, deterministic tie
+breaks, recovery rules, and mission eligibility checks. Doctrine choices
+affect autonomous orders and leave equipment, combat and manual orders under
+their existing rules.
+
 ### Operational reserve
 
 A commander can place any formation under their command in operational reserve

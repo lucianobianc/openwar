@@ -12,8 +12,8 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 12;
-constexpr std::uint64_t rules_version = 10;
+constexpr std::uint64_t schema_version = 13;
+constexpr std::uint64_t rules_version = 11;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
 
@@ -199,7 +199,12 @@ template<class A> void fields(A& a, Field<A, MilitaryUnit>& v)
 }
 
 template<class A> void fields(A& a, Field<A, CampaignOptions>& v)
-{ a(v.strength, v.stocks, v.seed, v.duration_minutes, v.autonomous_orders); }
+{
+    a(v.strength, v.stocks, v.seed, v.duration_minutes, v.autonomous_orders);
+    if (a.version >= 13) {
+        a(v.doctrines);
+    }
+}
 
 template<class A> void fields(A& a, Field<A, CampaignSetupRecord>& v)
 { a(v.scenario, v.world, v.options); }
@@ -341,6 +346,7 @@ constexpr auto last_value(ShipmentStatus) { return ShipmentStatus::lost; }
 constexpr auto last_value(LogisticsDelay) { return LogisticsDelay::closed; }
 constexpr auto last_value(LogisticsEventKind) { return LogisticsEventKind::crossed; }
 constexpr auto last_value(EquipmentCategory) { return EquipmentCategory::air_defense_team; }
+constexpr auto last_value(StrategicDoctrine) { return StrategicDoctrine::defensive; }
 constexpr auto last_value(StartingPreset) { return StartingPreset::increased; }
 constexpr auto last_value(MilitaryDomain) { return MilitaryDomain::sea; }
 constexpr auto last_value(MilitaryFunction) { return MilitaryFunction::support; }
@@ -670,6 +676,9 @@ struct CampaignArchive {
         if (a.version >= 12) {
             a(v.operational_reserve_);
         }
+        if (a.version >= 13) {
+            a(v.operations_.doctrines);
+        }
     }
 
     static void restore_legacy_movement(CampaignState& v, const Reader& archive)
@@ -773,11 +782,16 @@ struct CampaignArchive {
                 invalid_checkpoint();
             }
         }
+        if (v.operations_.doctrines != decltype(v.operations_.doctrines){} &&
+            !v.operations_.strategic_planning_enabled(v.combat_.enabled)) {
+            invalid_checkpoint();
+        }
         if (v.setup_) {
             const auto& setup = *v.setup_;
             const auto& options = setup.options;
             if (!v.authored_geography_ || v.generator_version_ || setup.scenario.empty() || setup.world.empty() ||
                 options.seed != v.seed_ || options == CampaignOptions{} ||
+                options.doctrines != v.operations_.doctrines ||
                 (options.duration_minutes && std::uint64_t{*options.duration_minutes} * 60 != v.combat_.time_limit_seconds) ||
                 (options.autonomous_orders && *options.autonomous_orders != v.operations_.max_autonomous_missions)) {
                 invalid_checkpoint();
@@ -1104,6 +1118,10 @@ std::uint64_t CampaignState::scenario_fingerprint(const ScenarioDefinition& s)
       s.facilities, s.units, s.equipment, s.operations, s.objectives, s.combat, s.combat_units,
       s.public_sectors, s.victory_objectives, s.command_objectives, s.resupply, s.initial_supply_requests,
       s.geographic_world, s.ground_destinations);
+    // Keep the existing fingerprint for scenarios using the original strategy.
+    if (s.operations.doctrines != decltype(s.operations.doctrines){}) {
+        a(s.operations.doctrines);
+    }
     return fingerprint(a.bytes);
 }
 
@@ -1150,6 +1168,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 12 || rules != 10) &&
         (schema != 11 || rules != 9) &&
         (schema != 10 || rules != 9) &&
         (schema != 9 || rules != 8) &&
