@@ -1,5 +1,7 @@
 OWSCENARIO 1
 world "valley-world.owgeo"
+# @name "Connecticut Valley - Autonomous Campaign"
+# @description "The factions deploy in opposite corridors. Both can plan operations autonomously."
 
 # The factions deploy in opposite corridors. Both can plan operations autonomously.
 point east_base 16928913 15314927 105778

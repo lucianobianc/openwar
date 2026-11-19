@@ -1,4 +1,6 @@
 #include "command.hpp"
+#include "launcher.hpp"
+#include "launcher_model.hpp"
 #include "viewer_geography.hpp"
 #include "viewer_model.hpp"
 #include "viewer_symbols.hpp"
@@ -50,6 +52,8 @@ struct Layout {
     Rectangle faster;
     Rectangle fit;
     Rectangle missions;
+    Rectangle save;
+    Rectangle menu;
     std::array<Rectangle, layer_count> layers;
 };
 
@@ -63,7 +67,8 @@ Layout layout()
                   {width - side - 16, 150, side, details_height},
                   {width - side - 16, 163 + details_height, side, height - details_height - 205},
                   {{{width - 294, 19, 108, 32}, {width - 178, 19, 76, 32}, {width - 94, 19, 78, 32}}},
-                  {16, 65, 98, 32}, {126, 65, 37, 32}, {230, 65, 37, 32}, {16, 108, 73, 31}, {366, 19, 124, 32}, {}};
+                  {16, 65, 98, 32}, {126, 65, 37, 32}, {230, 65, 37, 32}, {16, 108, 73, 31}, {366, 19, 124, 32},
+                  {width - 213, 65, 104, 32}, {width - 101, 65, 85, 32}, {}};
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
         screen.layers[i] = {100 + static_cast<float>(i) * 87, 108, 81, 31};
     }
@@ -1055,7 +1060,7 @@ void draw_events(const Snapshot& snapshot, const ViewControls& controls, Rectang
 }
 
 void draw(const Snapshot& snapshot, const ViewControls& controls, const GeographicLayers& geography,
-          const TerritoryLayer& control, const CommandSession& session, const Layout& screen, bool ended)
+          const TerritoryLayer& control, const CommandSession& session, const Layout& screen, bool ended, bool launched_from_menu)
 {
     BeginDrawing();
     ClearBackground(background);
@@ -1076,7 +1081,11 @@ void draw(const Snapshot& snapshot, const ViewControls& controls, const Geograph
     const auto clock = "Tick " + std::to_string(snapshot.tick) + "  /  " +
                        std::to_string(snapshot.elapsed_seconds) + " s  /  " +
                        std::string(war_status_name(snapshot.war.status));
-    label(clock, 289, 74, 17, ink, GetScreenWidth() - 305);
+    label(clock, 289, 74, 17, ink, launched_from_menu ? screen.save.x - 299 : GetScreenWidth() - 305);
+    if (launched_from_menu) {
+        button(screen.save, "Save (F5)");
+        button(screen.menu, "Menu");
+    }
     button(screen.fit, "Fit (R)");
     button(screen.missions, "Missions (M)", controls.show_missions);
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
@@ -1128,10 +1137,11 @@ public:
     ~Window() { CloseWindow(); }
 };
 
-void run(CampaignState& campaign, std::optional<FactionId> faction)
+void run(CampaignState& campaign, std::optional<FactionId> faction,
+         const std::optional<std::filesystem::path>& saves = {})
 {
     using Clock = std::chrono::steady_clock;
-    const Window window;
+    SetWindowTitle("OpenWar Campaign Viewer");
     const GeographicLayers geography(campaign.geographic_world(), campaign.world());
     TerritoryLayer territory_layer;
     ViewControls controls;
@@ -1168,6 +1178,17 @@ void run(CampaignState& campaign, std::optional<FactionId> faction)
         }
         previous = now;
         const auto screen = layout();
+        if (saves && clicked(screen.menu)) {
+            break;
+        }
+        if (saves && (IsKeyPressed(KEY_F5) || clicked(screen.save))) {
+            try {
+                const auto checkpoint = save_new_checkpoint(campaign, *saves);
+                controls.feedback = CommandFeedback{"Saved " + checkpoint.filename().string(), true};
+            } catch (const std::exception& error) {
+                controls.feedback = CommandFeedback{error.what(), false};
+            }
+        }
         const auto old_perspective = controls.perspective;
         handle_playback(controls, screen, campaign.war_ended(), !faction);
         if (snapshot.tick != campaign.clock().tick() || old_perspective != controls.perspective) {
@@ -1196,7 +1217,7 @@ void run(CampaignState& campaign, std::optional<FactionId> faction)
             snapshot = session.snapshot(controls.perspective);
             controls.event_offset = 0;
         }
-        draw(snapshot, controls, geography, territory_layer, session, screen, campaign.war_ended());
+        draw(snapshot, controls, geography, territory_layer, session, screen, campaign.war_ended(), saves.has_value());
     }
 }
 
@@ -1205,6 +1226,23 @@ void run(CampaignState& campaign, std::optional<FactionId> faction)
 int main(int argc, char* argv[])
 {
     try {
+        if (argc == 1) {
+            const Window window;
+            const auto data_directory = launcher_data_directory();
+            std::string startup_error;
+            while (!WindowShouldClose()) {
+                SetWindowTitle("OpenWar");
+                auto selection = show_launcher(data_directory, std::exchange(startup_error, {}));
+                if (!selection)
+                    break;
+                try {
+                    run(selection->campaign, selection->faction, data_directory / "saves");
+                } catch (const std::exception& error) {
+                    startup_error = error.what();
+                }
+            }
+            return 0;
+        }
         std::optional<std::uint64_t> seed_override;
         std::optional<std::filesystem::path> scenario_path;
         std::optional<std::filesystem::path> load_path;
@@ -1222,6 +1260,7 @@ int main(int argc, char* argv[])
             if (option == "--help") {
                 std::cout << "Usage: openwar-gui [--demo NAME | --scenario FILE | --load FILE] "
                              "[--seed N] [--faction WEST|EAST] [--save FILE]\n"
+                             "With no arguments, open the campaign launcher.\n"
                              "Demos: combat, operations, campaign, procedural.\n"
                              "Use --load to resume and --save to write a checkpoint when the window closes.\n";
                 return 0;
@@ -1276,13 +1315,10 @@ int main(int argc, char* argv[])
             if (load_path) {
                 return CampaignState::load(*load_path);
             }
-            if (scenario_path && is_geographic_scenario_file(*scenario_path)) {
-                const auto seed = seed_override.value_or(0);
-                if (seed > UINT32_MAX)
-                    throw std::out_of_range("Seed must fit in 32 bits");
-                return CampaignState(read_geographic_scenario(*scenario_path, faction), static_cast<std::uint32_t>(seed));
+            if (scenario_path) {
+                return open_campaign_scenario(*scenario_path, faction, seed_override);
             }
-            auto settings = scenario_path ? read_procedural_settings(*scenario_path) : ProceduralSettings{};
+            auto settings = ProceduralSettings{};
             settings.seed = seed_override.value_or(settings.seed);
             const auto scenario = demo.value_or("combat");
             if (scenario != "procedural" && settings.seed > UINT32_MAX) {
@@ -1300,9 +1336,10 @@ int main(int argc, char* argv[])
             }
             return operations_example_campaign(seed, faction);
         }();
-        if (faction && (!campaign.has_operational_view() || campaign.player_faction() != faction)) {
+        if (!CommandSession(campaign, faction).allows_perspective()) {
             throw std::invalid_argument("Campaign does not grant command authority to that faction");
         }
+        const Window window;
         run(campaign, faction);
         if (save_path) {
             campaign.save(*save_path);

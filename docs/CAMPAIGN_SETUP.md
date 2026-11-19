@@ -89,6 +89,27 @@ Retornar ao simplificado **não descarta** ajustes detalhados: mostrar indicador
 sobrescreva campos. O botão **Iniciar campanha** fica inativo diante de erros;
 avisos não bloqueiam por padrão.
 
+### Phase 4 launcher
+
+The raylib application opens a launcher with no arguments. For new campaigns
+it lists reusable geographic worlds, then the authored military scenarios that
+reference each world. Combined demos and procedural configurations have a
+separate list. The launcher shows declared description and objective metadata
+when available. Full parsing and campaign initialization are shared with
+direct startup.
+
+A continued campaign uses the resolved checkpoint and the existing command
+session. It offers Observer and the command role granted by the checkpoint.
+New campaigns can select a participating commander when the scenario format
+supports command. Procedural configurations retain their observer-only startup
+behavior.
+
+The launcher can open local content through an in-app browser, a pasted path,
+file drop, or an optional Unix system dialog. Save and Menu in the viewer
+write a numbered checkpoint and return to the launcher, respectively.
+The [viewer guide](../README.md#campaign-viewer) documents install and user
+data paths.
+
 ## 3. Origem do mundo e cenário-base
 
 The world source and military composition are separate decisions. The current

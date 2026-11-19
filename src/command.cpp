@@ -9,9 +9,14 @@ CommandPermissions CommandSession::permissions() const
     return {faction_, faction_ && campaign_.can_issue_orders(*faction_)};
 }
 
+bool CommandSession::allows_perspective() const
+{
+    return !faction_ || (campaign_.has_operational_view() && campaign_.player_faction() == faction_);
+}
+
 viewer::Snapshot CommandSession::snapshot(std::optional<FactionId> observer_perspective) const
 {
-    if (faction_ && (!campaign_.has_operational_view() || campaign_.player_faction() != faction_)) {
+    if (!allows_perspective()) {
         throw std::invalid_argument("campaign does not grant access to that command faction");
     }
     return viewer::read_snapshot(campaign_, faction_ ? faction_ : observer_perspective);

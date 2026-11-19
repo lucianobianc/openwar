@@ -355,14 +355,10 @@ int main(int argc, char* argv[])
             if (load_path) {
                 return openwar::CampaignState::load(*load_path);
             }
-            if (geographic) {
-                const auto seed = seed_override.value_or(0);
-                if (seed > UINT32_MAX)
-                    throw std::out_of_range("Seed must fit in 32 bits");
-                return openwar::CampaignState(openwar::read_geographic_scenario(*scenario_path, faction),
-                    static_cast<std::uint32_t>(seed));
+            if (scenario_path) {
+                return openwar::open_campaign_scenario(*scenario_path, faction, seed_override);
             }
-            auto settings = scenario_path ? openwar::read_procedural_settings(*scenario_path) : openwar::ProceduralSettings{};
+            auto settings = openwar::ProceduralSettings{};
             settings.seed = seed_override.value_or(settings.seed);
             if (demo != Demo::procedural && settings.seed > UINT32_MAX) {
                 throw std::out_of_range("Seed must fit in 32 bits");

@@ -35,11 +35,30 @@ struct GeographicWorld {
     geography::Map map;
 };
 
+struct GeographicHeader {
+    int version;
+    std::int64_t columns, rows, sector_mm, tile_mm;
+    std::string provenance;
+};
+
+struct MilitaryScenarioSummary {
+    std::filesystem::path world;
+    std::string name;
+    std::string description;
+    std::set<FactionId> factions;
+    std::vector<std::pair<FactionId, std::string>> objectives;
+    std::optional<std::uint64_t> time_limit_seconds;
+};
+
+GeographicHeader inspect_geographic_header(const std::filesystem::path& path);
+MilitaryScenarioSummary inspect_military_scenario(const std::filesystem::path& path);
 GeographicWorld read_geographic_world(const std::filesystem::path& path);
 bool is_geographic_scenario_file(const std::filesystem::path& path);
 ScenarioDefinition read_geographic_scenario(const std::filesystem::path& path,
     std::optional<FactionId> player = {});
 
+CampaignState open_campaign_scenario(const std::filesystem::path& path, std::optional<FactionId> player = {},
+                                     std::optional<std::uint64_t> seed = {});
 ProceduralSettings read_procedural_settings(const std::filesystem::path& path);
 ScenarioDefinition resolve_procedural_scenario(const ProceduralSettings& settings);
 CampaignState procedural_campaign(const ProceduralSettings& settings);

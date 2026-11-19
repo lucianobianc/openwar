@@ -1,5 +1,7 @@
 OWSCENARIO 1
 world "valley-world.owgeo"
+# @name "Connecticut Valley - Field Deployment"
+# @description "Both factions begin in separate corridors with field depots and supply shipments."
 
 # The original Connecticut Valley deployments in local east, south and up millimetres.
 point west_base 16928913 15314927 105778

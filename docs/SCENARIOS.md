@@ -93,6 +93,8 @@ referencing them.
 
 | Record and fields in order | Meaning |
 |---|---|
+| `# @name "TITLE"` | Optional launcher title, up to 120 UTF-8 bytes. |
+| `# @description "TEXT"` | Optional launcher description, up to 1024 UTF-8 bytes. |
 | `point NAME E S UP` | Named geographic location. All coordinates are local millimetres. East and south start at the northwest origin. |
 | `control SECTOR SIDE POINTS` | Initial controller and objective points. Unlisted sectors start neutral. |
 | `public SECTOR` | Add the initial territorial report to both factions. Each faction already receives reports about its own sectors and installations. |
@@ -113,6 +115,11 @@ referencing them.
 | `timing TICK_SECONDS ECONOMY_TICKS LOAD_TICKS UNLOAD_TICKS TIME_LIMIT_SECONDS` | Optional clock and timing record. Zero time limit disables the limit. |
 | `operations PLANNER_TICKS STRATEGY_TICKS MAX_ORDERS TERRITORY_HALF_LIFE CONTACT_HALF_LIFE INSTALLATION_HALF_LIFE` | Optional planning settings. Use 0 to disable an interval. Half-lives use seconds. |
 | `combat INTERVAL_TICKS OCCUPATION_SECONDS CRITICAL_SECONDS STABILIZATION_SECONDS CAPITULATION_SECONDS REINFORCEMENT_HORIZON_SECONDS` | Optional abstract combat settings. |
+
+The optional display comments can appear once each after the world reference.
+Existing OWSCENARIO 1 loaders treat them as comments. The launcher uses the
+file name when a title is absent. These fields do not enter the campaign
+fingerprint or checkpoint.
 
 Identity fields accept the following case-sensitive values.
 

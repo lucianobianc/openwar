@@ -420,8 +420,42 @@ On Windows, the executable is named `openwar-gui.exe`.
 For a raylib installation outside `pkg-config`, pass its include and link
 flags through `RAYLIB_CFLAGS` and `RAYLIB_LIBS` when running `configure`.
 
-Open the bundled geographic scenario with
+Run `./openwar-gui` to open the campaign launcher. **New campaign** lists
+geographic worlds and the military scenarios that reference each world.
+**Continue saved campaign** opens a checkpoint from disk. Use the mouse or
+Up, Down, Enter and Esc to navigate. **Browse for content** can open files
+outside the search locations. It supports typing or pasting a path and
+dropping a file onto the window. On Unix desktops with Zenity installed,
+the browser also offers a system file picker.
+
+The launcher discovers `.owgeo`, `.owscenario`, and procedural `.toml` files
+recursively in these locations.
+
+- User `scenarios` directory under `$XDG_DATA_HOME/openwar` or
+  `$HOME/.local/share/openwar` on Unix, or `%LOCALAPPDATA%/OpenWar` on Windows.
+- An optional directory named by the `OPENWAR_DATA_DIR` environment variable.
+- A `data` directory alongside the executable.
+- Packaged content under the executable's adjacent `../share/openwar` or the
+  configured package data directory. A build with no installed data falls
+  back to the source checkout's `examples` directory.
+
+`make install` installs the runnable examples and Connecticut Valley
+attribution with the graphical application. Discovery reads world headers
+and scenario summaries. Full terrain and military validation run when the
+campaign is started. Combined OWGEO 1 demonstrations and procedural
+configurations are listed separately from reusable geographic worlds.
+
+Choose **Observer**, or a commander role supported by the selected scenario.
+A checkpoint retains the command faction it was created with. The launcher
+can resume it in that command role or as a read-only observer. In campaigns
+opened through the launcher, **Save** (F5) writes a numbered checkpoint to
+the user's OpenWar `saves` directory. Use **Save** before returning to
+**Menu** to retain progress.
+
+For direct startup, use
 `./openwar-gui --scenario examples/connecticut-valley/valley-demo.owscenario`.
+`--load`, `--faction`, `--seed`, `--demo`, and `--save` remain available for
+automation.
 The map shows shaded elevation, roads and bridges, surface water, and
 geographic sites. The layer buttons also control sector boundaries,
 territory, formations, and carriers. Zoom in to see smaller geographic sites.

@@ -41,6 +41,7 @@ public:
         : campaign_(campaign), faction_(faction) {}
 
     CommandPermissions permissions() const;
+    bool allows_perspective() const;
     // Only observer sessions may switch their inspection perspective.
     viewer::Snapshot snapshot(std::optional<FactionId> observer_perspective = {}) const;
     std::vector<OrderAction> actions_for(UnitId formation) const;

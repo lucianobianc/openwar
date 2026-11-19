@@ -81,10 +81,35 @@ Point read_point(GeographicFile& file, const geography::Map& map)
         file.number<std::int64_t>(-20'000'000, 30'000'000)};
 }
 
-GeographicWorld read_map(GeographicFile& file, int expected_version)
+int read_geographic_version(GeographicFile& file)
 {
     file.expect("OWGEO");
-    const auto version = file.number(1, 65535);
+    return file.number(1, 65535);
+}
+
+GeographicHeader read_geographic_header(GeographicFile& file, int version)
+{
+    file.expect("grid");
+    GeographicHeader header{version, file.number(1, 128), file.number(1, 128),
+        file.number<std::int64_t>(1000, 100'000'000), 0, {}};
+    header.tile_mm = file.number<std::int64_t>(1000, header.sector_mm);
+    if (header.sector_mm % 1000 != 0 || header.sector_mm % header.tile_mm != 0)
+        file.fail("tile size must divide sector size");
+    file.expect("provenance");
+    header.provenance = file.quoted(512 * 1024);
+    if (header.provenance.empty())
+        file.fail("missing geographic provenance");
+
+    const auto tiles_per_sector = header.sector_mm / header.tile_mm;
+    if (header.columns * header.rows * tiles_per_sector * tiles_per_sector > 2'000'000)
+        file.fail("terrain grid exceeds 2 million tiles");
+    file.expect("tiles");
+    return header;
+}
+
+GeographicWorld read_map(GeographicFile& file, int expected_version)
+{
+    const auto version = read_geographic_version(file);
     if (version != expected_version) {
         if (version == 2 && expected_version == 1)
             file.fail("OWGEO 2 is a geographic world; use an .owscenario file to start a campaign");
@@ -92,25 +117,17 @@ GeographicWorld read_map(GeographicFile& file, int expected_version)
             file.fail("expected an OWGEO 2 geographic world; OWGEO 1 is a combined demonstration");
         file.fail("unsupported geographic schema " + std::to_string(version));
     }
-    file.expect("grid");
+    auto header = read_geographic_header(file, version);
     geography::Map map{};
-    map.columns = file.number(1, 128);
-    map.rows = file.number(1, 128);
-    map.sector_mm = file.number<std::int64_t>(1000, 100'000'000);
-    map.tile_mm = file.number<std::int64_t>(1000, map.sector_mm);
-    if (map.sector_mm % 1000 != 0 || map.sector_mm % map.tile_mm != 0)
-        file.fail("tile size must divide sector size");
-    file.expect("provenance");
-    map.provenance = file.quoted(512 * 1024);
-    if (map.provenance.empty())
-        file.fail("missing geographic provenance");
+    map.columns = header.columns;
+    map.rows = header.rows;
+    map.sector_mm = header.sector_mm;
+    map.tile_mm = header.tile_mm;
+    map.provenance = std::move(header.provenance);
 
     const auto tiles_per_sector = map.sector_mm / map.tile_mm;
     const auto columns = map.columns * tiles_per_sector;
     const auto rows = map.rows * tiles_per_sector;
-    if (columns * rows > 2'000'000)
-        file.fail("terrain grid exceeds 2 million tiles");
-    file.expect("tiles");
     std::vector<std::array<std::size_t, 4>> covers(map.columns * map.rows);
     for (std::int64_t y = 0; y < rows; ++y) {
         for (std::int64_t x = 0; x < columns; ++x) {
@@ -406,23 +423,21 @@ auto& require_reference(Entries& entries, Id id, ScenarioLine& line, std::string
     return *found;
 }
 
-ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std::optional<FactionId> player)
+std::ifstream open_scenario_file(const std::filesystem::path& path)
 {
     std::ifstream input(path);
     std::error_code size_error;
     const auto size = std::filesystem::file_size(path, size_error);
     if (!input || size_error || size > 1024 * 1024)
         throw std::runtime_error(path.string() + ": cannot read scenario or file exceeds 1 MiB");
+    return input;
+}
 
-    std::optional<ScenarioDefinition> scenario;
-    std::map<std::string, Point> points;
-    std::map<StockpileId, std::string> unassigned_mobile_stock;
-    std::set<SectorId> control;
-    std::set<std::string> settings;
+std::filesystem::path read_scenario_world(std::ifstream& input, const std::filesystem::path& path,
+                                          std::size_t& line_number)
+{
     bool header = false;
     std::string text;
-    std::size_t line_number = 0;
-    std::set<UnitId> declared_identities;
     while (std::getline(input, text)) {
         ScenarioLine line(text, path, ++line_number);
         const auto kind = line.keyword();
@@ -431,31 +446,62 @@ ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std
         if (!header) {
             if (kind != "OWSCENARIO" || line.number() != 1)
                 line.fail("expected OWSCENARIO 1");
-            line.finish();
             header = true;
-            continue;
-        }
-        if (!scenario) {
+        } else {
             if (kind != "world")
                 line.fail("expected a world reference after OWSCENARIO 1");
-            const auto world_path = path.parent_path() / line.quoted();
+            auto world = path.parent_path() / line.quoted();
             line.finish();
-            GeographicWorld world = [&] {
-                try {
-                    return read_geographic_world(world_path);
-                } catch (const std::exception& error) {
-                    line.fail("cannot load scenario world: " + std::string(error.what()));
-                }
-            }();
-            scenario.emplace(ScenarioDefinition{std::move(world.grid), {}});
-            scenario->geographic_world = std::move(world.map);
-            scenario->operations.enabled = true;
-            scenario->operations.player = player;
-            scenario->combat.enabled = true;
-            continue;
+            return world;
         }
+        line.finish();
+    }
+    throw std::runtime_error(path.string() + ": missing OWSCENARIO 1 header or world reference");
+}
 
-        auto& s = *scenario;
+void read_display_record(std::string_view kind, ScenarioLine& line, MilitaryScenarioSummary& summary)
+{
+    if (kind != "name" && kind != "description")
+        return;
+    auto& field = kind == "name" ? summary.name : summary.description;
+    if (!field.empty())
+        line.fail("duplicate " + std::string(kind));
+    field = line.quoted();
+    if (field.size() > (kind == "name" ? 120u : 1024u))
+        line.fail("oversized " + std::string(kind));
+    line.finish();
+}
+
+ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std::optional<FactionId> player)
+{
+    auto input = open_scenario_file(path);
+    std::size_t line_number = 0;
+    const auto world_path = read_scenario_world(input, path, line_number);
+    auto world = [&] {
+        try {
+            return read_geographic_world(world_path);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(path.string() + ":" + std::to_string(line_number) +
+                ": cannot load scenario world: " + error.what());
+        }
+    }();
+    ScenarioDefinition s{std::move(world.grid), {}};
+    s.geographic_world = std::move(world.map);
+    s.operations.enabled = true;
+    s.operations.player = player;
+    s.combat.enabled = true;
+
+    std::map<std::string, Point> points;
+    std::map<StockpileId, std::string> unassigned_mobile_stock;
+    std::set<SectorId> control;
+    std::set<std::string> settings;
+    std::set<UnitId> declared_identities;
+    std::string text;
+    while (std::getline(input, text)) {
+        ScenarioLine line(text, path, ++line_number);
+        const auto kind = line.keyword();
+        if (kind.empty())
+            continue;
         const auto& map = *s.geographic_world;
         const auto sector_at = [&](Point point) { return static_cast<SectorId>(*map.sector(point)); };
         const auto read_sector = [&] {
@@ -669,17 +715,61 @@ ScenarioDefinition read_military_scenario(const std::filesystem::path& path, std
     }
     if (input.bad())
         throw std::runtime_error(path.string() + ": failed while reading scenario");
-    if (!scenario)
-        throw std::runtime_error(path.string() + ": missing OWSCENARIO 1 header or world reference");
     if (!unassigned_mobile_stock.empty()) {
         const auto& [id, location] = *unassigned_mobile_stock.begin();
         throw std::runtime_error(location + "mobile stockpile #" +
             std::to_string(static_cast<std::uint32_t>(id)) + " is not assigned to a unit");
     }
-    return std::move(*scenario);
+    return s;
 }
 
 }  // namespace
+
+GeographicHeader inspect_geographic_header(const std::filesystem::path& path)
+{
+    GeographicFile file(path);
+    const auto version = read_geographic_version(file);
+    if (version != 1 && version != 2)
+        file.fail("unsupported geographic schema " + std::to_string(version));
+    return read_geographic_header(file, version);
+}
+
+MilitaryScenarioSummary inspect_military_scenario(const std::filesystem::path& path)
+{
+    auto input = open_scenario_file(path);
+    std::size_t line_number = 0;
+    MilitaryScenarioSummary summary{};
+    summary.world = read_scenario_world(input, path, line_number);
+    std::string text;
+    while (std::getline(input, text)) {
+        ++line_number;
+        const auto first = text.find_first_not_of(" \t\r");
+        if (first != std::string::npos && text.compare(first, 3, "# @") == 0) {
+            ScenarioLine metadata(text.substr(first + 3), path, line_number);
+            read_display_record(metadata.keyword(), metadata, summary);
+            continue;
+        }
+        ScenarioLine line(text, path, line_number);
+        const auto kind = line.keyword();
+        if (kind == "unit") {
+            line.number(1u);
+            summary.factions.insert(line.faction());
+        } else if (kind == "objective") {
+            const auto side = line.faction();
+            summary.objectives.emplace_back(side, line.word());
+            line.number(1u);
+            line.finish();
+        } else if (kind == "timing") {
+            for (int i = 0; i < 4; ++i)
+                line.number(1u);
+            summary.time_limit_seconds = line.number<std::uint64_t>();
+            line.finish();
+        }
+    }
+    if (input.bad())
+        throw std::runtime_error(path.string() + ": failed while reading scenario");
+    return summary;
+}
 
 GeographicWorld read_geographic_world(const std::filesystem::path& path)
 {
