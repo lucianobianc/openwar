@@ -91,6 +91,21 @@ adotar regra determinística simples: maior `observed_at`, depois confiança,
 depois `source_id`, e adicionar trilha de auditoria. Evitar qualquer verdade
 oculta para desempatar o que a facção acredita.
 
+### Strategic reconnaissance scheduling
+
+The geographic strategic planner favors authored objectives whose territorial
+reports are missing or below 750 when assigning air surveys. Within that
+group it keeps its existing target order. A recently refreshed territorial
+report can still leave the objective unverified for attack, particularly in
+forest. The lower scheduling priority for a repeat survey gives other
+objectives a chance to receive a report.
+
+Automatic ground surveys require a scout outside sectors that its faction
+currently reports as contested. Unreported opposition can still interrupt
+the mission in execution. Flight range, readiness, stock, visibility and
+geographic route checks continue to apply. Rules version 15 applies the
+scheduling change when older checkpoints resume.
+
 ### Ground reconnaissance reports
 
 Ground Recon uses the existing faction intelligence store and its confidence

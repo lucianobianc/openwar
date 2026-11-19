@@ -277,6 +277,48 @@ available for an otherwise valid target at 121. EAST had two attack-ready
 formations, but neither could reach eligible targets at 104 or 136 under
 the existing route and fuel checks. No run fought into the second day.
 
+### Reconnaissance scheduling comparison
+
+The baseline is `734f74c`, using the same 48-hour scenario. In the
+Offensive/Defensive run, the completed air surveys concentrated on
+WEST's sector 137 (36 of 50) and EAST's sector 121 (40 of 46).
+Both are forest sectors. A partial survey refreshes control without
+providing the contact or complete survey needed for an enemy attack
+target, so the planner repeatedly requested the same survey. The
+territorial reports it rarely revisited fell below 750, leaving
+seven stale objectives per faction at hour 47 in this baseline.
+All eight authored objectives per faction are within the flight's
+range from its starting base.
+
+The first ground survey crossed into sector 121 on tick 85 and met
+opposition before completing observation. The same formation was
+still in sector 121 when the second survey started on tick 91.
+Opposition blocked movement at departure. The revised planner screens
+known contested starting sectors using the faction report. A first
+encounter with unreported opposition can still interrupt Ground Recon.
+
+| Seeds | WEST / EAST | Completed air surveys | Completed / failed ground surveys | Attack launches | Captures | Last combat | Outcome |
+|---|---|---|---|---|---|---|---|
+| 7, 42 | Balanced / Balanced | 24 → 24 | 0/0 → 0/0 | 20 → 19 | 7 → 6 | 16:20 → 12:00 | EAST by capitulation, 19:40 → 18:40 |
+| 42 | Offensive / Defensive | 96 → 99 | 0/2 → 0/1 | 8 → 8 | 3 → 3 | 8:20 → 8:20 | 48:00 time-limit draw in both |
+| 42 | Defensive / Offensive | 24 → 24 | 0/0 → 0/0 | 20 → 19 | 7 → 6 | 16:20 → 12:00 | EAST by capitulation, 19:40 → 18:40 |
+
+In Offensive/Defensive, the number of distinct authored sectors surveyed
+by WEST/EAST rose from 4/5 to 8/8. At hour 47, confirmed authored territory
+reports rose from 2 to 10 of 16. WEST still had four enemy objectives without
+a verified contact or complete survey. EAST had two attack-ready formations
+and two candidates that passed the intelligence checks, at 104 and 136.
+Neither candidate had a feasible route for those formations. The only
+ground survey in that run was the first encounter at 121.
+
+A focused regression verifies that a successful air survey can unlock the
+next attack on an authored target. In the 48-hour draw, there was no attack
+launch within 30 minutes of completing a same-sector air survey in either
+version. In each of the other matchups, EAST had five such launches in the
+baseline and two in the revised run. This proximity measure records timing,
+and the regression tests the actual transition from missing intelligence to
+an eligible attack. No run fought into a second day.
+
 ## Source data and reproduction
 
 - `valley.osm.pbf` is a fixed, filtered OSM extract obtained on 18 November 2026

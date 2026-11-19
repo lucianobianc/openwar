@@ -2410,6 +2410,28 @@ void test_strategic_follow_on_objectives()
             priority.missions.back().target == authored,
             "A reported follow-on displaced a feasible authored objective");
 
+    auto rotation = scenario;
+    std::vector<SectorProperties> terrain(6);
+    terrain[1].terrain = Terrain::forest;
+    rotation.world = WorldDefinition(3, 2, 500, terrain);
+    rotation.objectives = {{west, reported, 9}, {west, authored, 1}};
+    rotation.public_sectors.clear();
+    CampaignState refreshing(rotation, 42);
+    require(refreshing.issue_order(west, MissionKind::recon, reported).mission.has_value(),
+            "Could not establish a recent partial survey of the strategic focus");
+    refreshing.advance_ticks(10);
+    const auto refresh = refreshing.faction_view(west);
+    require(refresh.sectors.at(reported).confidence >= 750 && !refresh.sectors.at(reported).surveyed &&
+            refresh.missions.size() == 2 && refresh.missions.back().kind == MissionKind::recon &&
+            refresh.missions.back().target == authored,
+            "A repeat partial survey displaced the unobserved authored objective");
+    refreshing.advance_ticks(10);
+    const auto refreshed = refreshing.faction_view(west);
+    require(refreshed.sectors.at(authored).surveyed &&
+            refreshed.missions.at(1).status == MissionStatus::completed &&
+            refreshed.missions.back().kind == MissionKind::attack && refreshed.missions.back().target == authored,
+            "The successful survey did not make the authored target available for attack");
+
     scenario.objectives = {{west, reported, 1}};
     scenario.public_sectors.clear();
     scenario.units.pop_back();
@@ -2426,6 +2448,21 @@ void test_strategic_follow_on_objectives()
     require(reserve.set_operational_reserve(west, UnitId{1}, true), "Could not reserve the ground scouts");
     reserve.advance_ticks(10);
     require(reserve.faction_view(west).missions.empty(), "Fallback reconnaissance selected an operational reserve");
+
+    scenario.units.at(1).sector = SectorId{0};
+    std::ranges::find(scenario.stockpiles, StockpileId{11}, &Stockpile::id)->sector = SectorId{0};
+    scenario.operations.planner_interval_ticks = 1;
+    scenario.combat_units.at(1).morale = 80;
+    scenario.equipment.push_back({EquipmentId{4}, EquipmentTypeId{1}, UnitId{1}});
+    for (auto& type : scenario.equipment_types) {
+        type.combat_power = 1;
+    }
+    CampaignState contested(scenario, 42);
+    contested.advance_ticks(1);
+    require(contested.faction_view(west).sectors.at(SectorId{0}).contested &&
+            contested.combat_units().at(UnitId{1}).status == GroundStatus::holding &&
+            contested.faction_view(west).missions.empty(),
+            "The planner dispatched ground reconnaissance from a reported contested sector");
 }
 
 void test_geographic_ground_operations()

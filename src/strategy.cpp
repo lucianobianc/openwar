@@ -391,7 +391,7 @@ bool CampaignState::update_strategy(FactionId faction)
                 }));
         };
         std::set<SectorId> tried;
-        std::vector<SectorId> ground_surveys;
+        std::vector<SectorId> surveys;
         for (const auto target : targets) {
             if (assigned >= limit) {
                 break;
@@ -401,9 +401,10 @@ bool CampaignState::update_strategy(FactionId faction)
             }
             if (needs_survey(target)) {
                 if (!friendly(view, faction, target)) {
-                    recon(target);
-                    if (priorities.contains(target) && !busy.contains(target)) {
-                        ground_surveys.push_back(target);
+                    if (authored_geography_) {
+                        surveys.push_back(target);
+                    } else {
+                        recon(target);
                     }
                 }
                 continue;
@@ -428,6 +429,16 @@ bool CampaignState::update_strategy(FactionId faction)
             }
             dispatch(std::move(*lead), target == plan.focus ? "strategy: advance campaign objective" :
                                                             "strategy: advance on another front");
+        }
+
+        // Refresh missing or aged authored territory before repeating a survey of
+        // a sector whose control is already known. Preserve order within each group.
+        std::ranges::stable_partition(surveys, [&](SectorId target) {
+            const auto report = view.sectors.find(target);
+            return priorities.contains(target) && (report == view.sectors.end() || report->second.confidence < 750);
+        });
+        for (const auto target : surveys) {
+            recon(target);
         }
 
         if (!authored_geography_ || assigned >= limit ||
@@ -470,8 +481,20 @@ bool CampaignState::update_strategy(FactionId faction)
                 return;
             }
         }
-        for (const auto target : ground_surveys) {
-            if (auto order = plan_ground_mission(faction, MissionKind::ground_recon, target, view, guards)) {
+        auto scout_exclusions = guards;
+        for (const auto& [id, state] : combat_units_) {
+            const auto& unit = units_.at(id);
+            const auto report = view.sectors.find(unit.sector);
+            if (unit.faction == faction && report != view.sectors.end() &&
+                report->second.contested && report->second.confidence >= 350) {
+                scout_exclusions.push_back(id);
+            }
+        }
+        for (const auto target : surveys) {
+            if (!priorities.contains(target) || busy.contains(target)) {
+                continue;
+            }
+            if (auto order = plan_ground_mission(faction, MissionKind::ground_recon, target, view, scout_exclusions)) {
                 dispatch(std::move(*order), "strategy: survey authored objective with ground scouts");
                 return;
             }
