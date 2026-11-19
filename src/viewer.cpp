@@ -10,6 +10,7 @@
 #include <raylib.h>
 
 #include <algorithm>
+#include <charconv>
 #include <array>
 #include <charconv>
 #include <chrono>
@@ -52,6 +53,7 @@ struct Layout {
     Rectangle faster;
     Rectangle fit;
     Rectangle missions;
+    Rectangle supplies;
     Rectangle save;
     Rectangle menu;
     std::array<Rectangle, layer_count> layers;
@@ -68,6 +70,7 @@ Layout layout()
                   {width - side - 16, 163 + details_height, side, height - details_height - 205},
                   {{{width - 294, 19, 108, 32}, {width - 178, 19, 76, 32}, {width - 94, 19, 78, 32}}},
                   {16, 65, 98, 32}, {126, 65, 37, 32}, {230, 65, 37, 32}, {16, 108, 73, 31}, {366, 19, 124, 32},
+                  {278, 65, 118, 32},
                   {width - 213, 65, 104, 32}, {width - 101, 65, 85, 32}, {}};
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
         screen.layers[i] = {100 + static_cast<float>(i) * 87, 108, 81, 31};
@@ -97,6 +100,29 @@ struct CommandFeedback {
     bool accepted;
 };
 
+struct SupplyDraft {
+    StockpileId destination;
+    Resource resource = Resource::supplies;
+    std::string quantity = "1";
+    std::optional<SupplyOrderPreview> preview{};
+    std::uint64_t preview_tick = 0;
+
+    std::uint64_t amount() const
+    {
+        std::uint64_t value{};
+        const auto [end, error] = std::from_chars(quantity.data(), quantity.data() + quantity.size(), value);
+        return error == std::errc{} && end == quantity.data() + quantity.size() ? value : 0;
+    }
+};
+
+struct SupplyPanel {
+    bool open = false;
+    std::optional<SupplyDraft> draft{};
+    std::optional<ShipmentId> selected{};
+    bool confirm_cancel = false;
+    std::size_t offset = 0;
+};
+
 struct ViewControls {
     std::optional<FactionId> perspective;
     std::optional<SectorId> selected;
@@ -104,6 +130,7 @@ struct ViewControls {
     std::optional<OrderDraft> draft;
     std::optional<MarkerKey> cancel_prompt;
     std::optional<CommandFeedback> feedback;
+    SupplyPanel supply;
     std::array<bool, layer_count> layers{false, true, true, true, true, true, true, true};
     bool show_missions = false;
     std::size_t mission_offset = 0;
@@ -370,10 +397,11 @@ std::size_t mission_max_offset(const Snapshot& snapshot, Rectangle area)
 
 bool handle_mission_list(ViewControls& controls, const Snapshot& snapshot, const Layout& screen)
 {
-    if (controls.draft || controls.cancel_prompt) {
+    if (controls.draft || controls.cancel_prompt || controls.supply.draft || controls.supply.confirm_cancel) {
         return false;
     }
     if (clicked(screen.missions) || IsKeyPressed(KEY_M)) {
+        controls.supply.open = false;
         controls.show_missions = !controls.show_missions;
         return true;
     }
@@ -435,7 +463,7 @@ void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const Ge
         controls.event_offset = static_cast<std::size_t>(std::clamp(
             offset, 0LL, snapshot.events.empty() ? 0LL : static_cast<long long>(snapshot.events.size() - 1)));
     }
-    if (!controls.show_missions && CheckCollisionPointRec(mouse, screen.details) && wheel != 0) {
+    if (!controls.show_missions && !controls.supply.open && CheckCollisionPointRec(mouse, screen.details) && wheel != 0) {
         const auto* marker = selected_marker(snapshot, controls);
         const auto last = marker ? static_cast<std::ptrdiff_t>(inspection_max_offset(*marker, screen.details)) :
             controls.selected && !controls.object ? std::max<std::ptrdiff_t>(0, visible_marker_count(snapshot, controls) - 1) : 0;
@@ -458,8 +486,9 @@ void handle_map_input(ViewControls& controls, const Snapshot& snapshot, const Ge
         if (clicked(screen.map)) {
             if (controls.draft) {
                 choose_destination(controls, snapshot, geography, mouse);
-            } else {
+            } else if (!controls.supply.draft && !controls.supply.confirm_cancel) {
                 controls.cancel_prompt.reset();
+                controls.supply.selected.reset();
                 select_at(controls, snapshot, geography, mouse);
             }
         }
@@ -501,6 +530,206 @@ Rectangle cancel_mission_button(Rectangle area)
     return {area.x + 15, area.y + 169, 146, 29};
 }
 
+Rectangle new_supply_button(Rectangle area)
+{
+    return {area.x + 170, area.y + 27, 163, 30};
+}
+
+Rectangle supply_resource_button(Rectangle area, bool next)
+{
+    return {area.x + (next ? 296 : 15), area.y + 60, 36, 27};
+}
+
+constexpr std::array supply_resources{Resource::crude_oil, Resource::fuel, Resource::materials,
+    Resource::spare_parts, Resource::supplies, Resource::ammunition};
+
+const SupplyOrderSummary* selected_supply(const Snapshot& snapshot, const SupplyPanel& panel)
+{
+    const auto found = std::ranges::find_if(snapshot.supply_requests, [&](const auto& order) {
+        return order.request.id == panel.selected;
+    });
+    return found == snapshot.supply_requests.end() ? nullptr : &*found;
+}
+
+bool handle_supply_input(ViewControls& controls, const Snapshot& snapshot, const Layout& screen, CommandSession& session)
+{
+    auto& supply = controls.supply;
+    const auto area = screen.details;
+    if (!controls.draft && !controls.cancel_prompt && !supply.draft && !supply.confirm_cancel &&
+        (clicked(screen.supplies) || IsKeyPressed(KEY_L))) {
+        supply.open = !supply.open;
+        controls.show_missions = false;
+        controls.feedback.reset();
+    }
+    if (!supply.open) {
+        return false;
+    }
+    if (supply.draft) {
+        if (clicked(review_button(area, false))) {
+            supply.draft.reset();
+            controls.feedback.reset();
+            return false;
+        }
+        auto& draft = *supply.draft;
+        const auto delta = clicked(supply_resource_button(area, true)) - clicked(supply_resource_button(area, false));
+        if (delta) {
+            const auto index = std::ranges::find(supply_resources, draft.resource) - supply_resources.begin();
+            const auto count = static_cast<std::ptrdiff_t>(supply_resources.size());
+            draft.resource = supply_resources[(index + delta + count) % count];
+            draft.preview.reset();
+        }
+        if (IsKeyPressed(KEY_BACKSPACE) && !draft.quantity.empty()) {
+            draft.quantity.pop_back();
+            draft.preview.reset();
+        }
+        for (int digit = GetCharPressed(); digit; digit = GetCharPressed()) {
+            if (digit >= '0' && digit <= '9' && draft.quantity.size() < 20) {
+                draft.quantity.push_back(static_cast<char>(digit));
+                draft.preview.reset();
+            }
+        }
+        if (!draft.preview || draft.preview_tick != snapshot.tick) {
+            draft.preview = session.preview_supply(draft.destination, draft.resource, draft.amount());
+            draft.preview_tick = snapshot.tick;
+        }
+        if (draft.preview->source && clicked(review_button(area, true))) {
+            const auto result = session.submit_supply(draft.destination, draft.resource, draft.amount());
+            controls.feedback = CommandFeedback{std::string(result.reason), result.shipment.has_value()};
+            if (result.shipment) {
+                supply.selected = result.shipment;
+                supply.draft.reset();
+                return true;
+            }
+            draft.preview.reset();
+        }
+        return false;
+    }
+    if (const auto* order = selected_supply(snapshot, supply)) {
+        if (supply.confirm_cancel) {
+            if (clicked(review_button(area, false))) {
+                supply.confirm_cancel = false;
+            } else if (clicked(review_button(area, true))) {
+                const auto result = session.cancel_supply(order->request.id);
+                supply.confirm_cancel = false;
+                controls.feedback = CommandFeedback{std::string(result.reason), result.cancelled};
+                return result.cancelled;
+            }
+        } else if (clicked(new_supply_button(area))) {
+            supply.selected.reset();
+        } else if (clicked(cancel_mission_button(area)) && session.can_cancel_supply(order->request.id)) {
+            supply.confirm_cancel = true;
+        }
+        return false;
+    }
+    if (const auto* marker = selected_marker(snapshot, controls); marker && marker->supply_stock &&
+        session.permissions().may_issue_orders && session.permissions().faction == marker->faction &&
+        clicked(new_supply_button(area))) {
+        supply.draft = SupplyDraft{*marker->supply_stock};
+        controls.feedback.reset();
+        return false;
+    }
+    const auto size = snapshot.supply_requests.size();
+    const auto visible = mission_rows(area);
+    const auto wheel = CheckCollisionPointRec(GetMousePosition(), area) ? GetMouseWheelMove() : 0.f;
+    const auto last = size > visible ? size - visible : 0;
+    supply.offset = static_cast<std::size_t>(std::clamp(static_cast<std::ptrdiff_t>(supply.offset) +
+        (wheel > 0 ? -1 : wheel < 0 ? 1 : 0), std::ptrdiff_t{0}, static_cast<std::ptrdiff_t>(last)));
+    for (std::size_t row = 0; row < visible && supply.offset + row < size; ++row) {
+        if (clicked(mission_row(area, row))) {
+            supply.selected = snapshot.supply_requests[size - 1 - supply.offset - row].request.id;
+            controls.feedback.reset();
+            break;
+        }
+    }
+    return false;
+}
+
+void draw_supply_panel(const Snapshot& snapshot, const ViewControls& controls, const CommandSession& session,
+                       Rectangle area)
+{
+    const auto& supply = controls.supply;
+    const float x = area.x + 15;
+    const float y = area.y + 14;
+    const float width = area.width - 30;
+    if (supply.draft) {
+        const auto& draft = *supply.draft;
+        label("Supply request", x, y, 21, ink, width);
+        label("Destination stockpile #" + std::to_string(static_cast<std::uint32_t>(draft.destination)),
+              x, y + 29, 15, accent, width);
+        button(supply_resource_button(area, false), "<");
+        button(supply_resource_button(area, true), ">");
+        label(std::string(resource_name(draft.resource)), x + 46, y + 52, 16, ink, width - 92);
+        DrawRectangleLinesEx({x, y + 86, width, 29}, 1, accent);
+        label("Quantity " + draft.quantity + "_", x + 8, y + 93, 16, ink, width - 16);
+        if (draft.preview) {
+            const auto& preview = *draft.preview;
+            if (preview.destination) {
+                label("Space " + std::to_string(preview.room) + " / Source stock " +
+                      std::to_string(preview.source_available), x, y + 121, 15, ink, width);
+            }
+            wrapped_label(std::string(preview.reason), x, y + 145, 14, preview.source ? accent : muted, width);
+            if (preview.source) {
+                button(review_button(area, true), "Confirm request", true);
+                label("Source #" + std::to_string(static_cast<std::uint32_t>(*preview.source)) +
+                      " / Idle carrier capacity " + std::to_string(preview.idle_capacity), x, y + 222, 14, muted, width);
+                label("Dispatch checks routes and fuel.", x, y + 242, 14, muted, width);
+            }
+        }
+        button(review_button(area, false), "Discard draft");
+        return;
+    }
+    if (const auto* order = selected_supply(snapshot, supply)) {
+        const auto& request = order->request;
+        label("Shipment #" + std::to_string(static_cast<std::uint32_t>(request.id)), x, y, 21, ink, width);
+        if (supply.confirm_cancel) {
+            label("Cancel this supply request?", x, y + 35, 16, accent, width);
+            wrapped_label("Fuel already spent stays spent. Loaded cargo stays with the carrier.",
+                          x, y + 62, 15, muted, width);
+            button(review_button(area, false), "Back");
+            button(review_button(area, true), "Confirm cancellation", true);
+            return;
+        }
+        button(new_supply_button(area), "Back to requests");
+        label(std::string(faction_name(order->requester)) + " / " + std::string(shipment_status_name(order->status)),
+              x, y + 58, 16, accent, width);
+        label(std::to_string(request.quantity) + " " + std::string(resource_name(request.resource)),
+              x, y + 82, 16, ink, width);
+        label("Source stockpile #" + std::to_string(static_cast<std::uint32_t>(request.origin)),
+              x, y + 104, 15, muted, width);
+        label("Destination stockpile #" + std::to_string(static_cast<std::uint32_t>(request.destination)),
+              x, y + 122, 15, muted, width);
+        if (order->carrier) {
+            label("Carrier #" + std::to_string(static_cast<std::uint32_t>(*order->carrier)) +
+                  " / Cargo " + std::to_string(order->cargo), x, y + 142, 15, ink, width);
+        }
+        if (session.can_cancel_supply(request.id)) {
+            button(cancel_mission_button(area), "Cancel request");
+        }
+        return;
+    }
+    label("Supply requests", x, y, 21, ink, width);
+    const auto* marker = selected_marker(snapshot, controls);
+    if (marker && marker->supply_stock && session.permissions().may_issue_orders &&
+        session.permissions().faction == marker->faction) {
+        button(new_supply_button(area), "Request supply");
+        label(marker->label, x, y + 29, 14, muted, 150);
+    } else if (session.permissions().may_issue_orders) {
+        label("Select a friendly stockpile or formation.", x, y + 29, 14, muted, width);
+    }
+    const auto size = snapshot.supply_requests.size();
+    for (std::size_t row = 0; row < mission_rows(area) && supply.offset + row < size; ++row) {
+        const auto& order = snapshot.supply_requests[size - 1 - supply.offset - row];
+        const auto bounds = mission_row(area, row);
+        DrawRectangleRec(bounds, CheckCollisionPointRec(GetMousePosition(), bounds) ? border : background);
+        label("#" + std::to_string(static_cast<std::uint32_t>(order.request.id)) + " / " +
+              std::string(resource_name(order.request.resource)) + " / " + std::string(shipment_status_name(order.status)),
+              bounds.x + 7, bounds.y + 6, 15, ink, bounds.width - 14);
+    }
+    if (size == 0) {
+        label("No player supply requests.", x, y + 69, 15, muted, width);
+    }
+}
+
 std::string action_label(MissionKind kind)
 {
     switch (kind) {
@@ -520,7 +749,7 @@ std::string action_label(MissionKind kind)
 bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rectangle panel,
                           CommandSession& session)
 {
-    if (controls.show_missions || !IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (controls.show_missions || controls.supply.open || !IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         return false;
     }
     if (controls.draft || controls.cancel_prompt) {
@@ -914,6 +1143,10 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                   const CommandSession& session, Rectangle area)
 {
     DrawRectangleRec(area, panel);
+    if (controls.supply.open) {
+        draw_supply_panel(snapshot, controls, session, area);
+        return;
+    }
     const float x = area.x + 15;
     float y = area.y + 14;
     const float width = area.width - 30;
@@ -1177,13 +1410,14 @@ void draw(const Snapshot& snapshot, const ViewControls& controls, const Geograph
     const auto clock = "Tick " + std::to_string(snapshot.tick) + "  /  " +
                        std::to_string(snapshot.elapsed_seconds) + " s  /  " +
                        std::string(war_status_name(snapshot.war.status));
-    label(clock, 289, 74, 17, ink, launched_from_menu ? screen.save.x - 299 : GetScreenWidth() - 305);
+    label(clock, 410, 74, 17, ink, launched_from_menu ? screen.save.x - 420 : GetScreenWidth() - 426);
     if (launched_from_menu) {
         button(screen.save, "Save (F5)");
         button(screen.menu, "Menu");
     }
     button(screen.fit, "Fit (R)");
     button(screen.missions, "Missions (M)", controls.show_missions);
+    button(screen.supplies, "Supplies (L)", controls.supply.open);
     for (std::size_t i = 0; i < screen.layers.size(); ++i) {
         button(screen.layers[i], layer_names[i], controls.layers[i]);
     }
@@ -1253,7 +1487,15 @@ void run(CampaignState& campaign, std::optional<FactionId> faction,
     std::chrono::duration<long double> simulated{};
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) {
-            if (!controls.draft && !controls.cancel_prompt) {
+            if (controls.supply.open) {
+                if (controls.supply.draft || controls.supply.confirm_cancel) {
+                    controls.supply.draft.reset();
+                    controls.supply.confirm_cancel = false;
+                } else {
+                    controls.supply.open = false;
+                    controls.supply.selected.reset();
+                }
+            } else if (!controls.draft && !controls.cancel_prompt) {
                 if (!controls.show_missions) {
                     // The launcher shares this input context with the viewer.
                     if (saves)
@@ -1313,7 +1555,8 @@ void run(CampaignState& campaign, std::optional<FactionId> faction,
             auto& draft = *controls.draft;
             draft.preview = session.preview(draft.action.kind, *draft.target, draft.requested_formation(), draft.via);
         }
-        if (!mission_click && handle_command_input(controls, snapshot, screen.details, session)) {
+        if (!mission_click && (handle_supply_input(controls, snapshot, screen, session) ||
+                              handle_command_input(controls, snapshot, screen.details, session))) {
             snapshot = session.snapshot(controls.perspective);
             controls.event_offset = 0;
         }

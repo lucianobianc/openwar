@@ -178,6 +178,128 @@ void CampaignState::request_supply(SupplyRequest request)
     queue_supply(request, clock_.tick());
 }
 
+SupplyOrderPreview CampaignState::preview_supply(FactionId actor, SupplyTarget target, Resource resource,
+                                                  std::uint64_t quantity) const
+{
+    if (!can_issue_orders(actor)) {
+        return {"player has no authority to request supplies"};
+    }
+    const auto index = static_cast<std::size_t>(resource);
+    if (resource == Resource::oil_reserve || index >= ResourceAmounts{}.size()) {
+        return {"resource cannot be transported"};
+    }
+    if (quantity == 0) {
+        return {"quantity must be positive"};
+    }
+    std::optional<StockpileId> destination;
+    if (const auto* stock = std::get_if<StockpileId>(&target)) {
+        destination = *stock;
+    } else {
+        const auto unit = units_.find(std::get<UnitId>(target));
+        if (unit != units_.end() && unit->second.faction == actor) {
+            if (const auto formation = combat_units_.find(unit->first); formation != combat_units_.end()) {
+                destination = formation->second.stores;
+            } else if (unit->second.facility) {
+                destination = facilities_.at(*unit->second.facility).stockpile;
+            }
+        }
+    }
+    if (!destination || !stockpiles_.contains(*destination) || stockpiles_.at(*destination).owner != actor) {
+        return {"destination is not an eligible friendly stockpile"};
+    }
+    const auto& stock = stockpiles_.at(*destination);
+    if (unavailable(recipient_status(*destination)) || recipient_status(*destination) == GroundStatus::withdrawing) {
+        return {"recipient is unavailable"};
+    }
+
+    SupplyOrderPreview preview{"shipment can be queued", destination};
+    preview.room = stock.capacity[index] - stock.quantity[index];
+    for (const auto& [id, shipment] : shipments_) {
+        if (shipment.request.destination == *destination && shipment.request.resource == resource &&
+            !terminal(shipment.status) && stockpiles_.at(shipment.request.origin).owner == actor) {
+            const auto remaining = shipment.cargo ? shipment.cargo : shipment.request.quantity;
+            preview.room -= std::min(remaining, preview.room);
+        }
+    }
+    std::uint64_t fleet_capacity = 0;
+    for (const auto& [id, carrier] : carriers_) {
+        if (carrier.faction == actor && !carrier.lost) {
+            fleet_capacity = std::max(fleet_capacity, carrier.capacity);
+            if (!carrier.shipment) {
+                preview.idle_capacity = std::max(preview.idle_capacity, carrier.capacity);
+            }
+        }
+    }
+    const auto point = stockpile_position(*destination);
+    std::optional<std::tuple<bool, std::int64_t, StockpileId>> best;
+    std::optional<StockpileId> source;
+    for (const auto& [id, candidate] : stockpiles_) {
+        if (id == *destination || candidate.owner != actor || recipient_status(id) != GroundStatus::holding) {
+            continue;
+        }
+        const auto available = candidate.quantity[index] - candidate.reserved[index];
+        preview.source_available = std::max(preview.source_available, available);
+        if (available >= quantity) {
+            const auto rank = std::tuple{mobile_stocks_.contains(id),
+                geography::horizontal_distance(stockpile_position(id), point), id};
+            if (!best || rank < *best) {
+                best = rank;
+                source = id;
+            }
+        }
+    }
+    if (quantity > preview.room) {
+        preview.reason = "destination lacks uncommitted storage space";
+    } else if (!source) {
+        preview.reason = "no friendly source has enough unreserved stock";
+    } else if (quantity > fleet_capacity) {
+        preview.reason = "no friendly carrier can hold that quantity";
+    } else if (!shipments_.empty() && shipments_.rbegin()->first == ShipmentId{UINT32_MAX}) {
+        preview.reason = "shipment ID limit reached";
+    } else {
+        preview.source = source;
+        preview.source_available = stockpiles_.at(*source).quantity[index] - stockpiles_.at(*source).reserved[index];
+    }
+    return preview;
+}
+
+SupplyOrderResult CampaignState::submit_supply(FactionId actor, SupplyTarget target, Resource resource,
+                                                std::uint64_t quantity)
+{
+    const auto preview = preview_supply(actor, target, resource, quantity);
+    if (!preview.source) {
+        return {{}, preview.reason};
+    }
+    const auto last = shipments_.empty() ? 0 : static_cast<std::uint32_t>(shipments_.rbegin()->first);
+    const ShipmentId id{last + 1};
+    request_supply({id, *preview.source, *preview.destination, resource, quantity});
+    shipments_.at(id).requester = actor;
+    return {id, "supply request queued"};
+}
+
+bool CampaignState::can_cancel_supply(FactionId actor, ShipmentId id) const
+{
+    const auto shipment = shipments_.find(id);
+    return can_issue_orders(actor) && shipment != shipments_.end() &&
+        shipment->second.requester == actor && !terminal(shipment->second.status);
+}
+
+bool CampaignState::cancel_supply(FactionId actor, ShipmentId id)
+{
+    return can_cancel_supply(actor, id) && cancel_shipment(id);
+}
+
+std::vector<SupplyOrderSummary> CampaignState::supply_orders(std::optional<FactionId> perspective) const
+{
+    std::vector<SupplyOrderSummary> orders;
+    for (const auto& [id, shipment] : shipments_) {
+        if (shipment.requester && (!perspective || shipment.requester == perspective)) {
+            orders.push_back({*shipment.requester, shipment.request, shipment.status, shipment.carrier, shipment.cargo});
+        }
+    }
+    return orders;
+}
+
 void CampaignState::queue_supply(SupplyRequest request, std::uint64_t tick)
 {
     const auto& origin = stockpiles_.at(request.origin);

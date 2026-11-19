@@ -204,6 +204,26 @@ void report_strategy(std::ostream& out, FactionId faction, const StrategicPlan& 
     out << " | ground losses " << strategy.ground_losses << " | reviewed tick " << strategy.reviewed_tick << '\n';
 }
 
+void report_supply_orders(std::ostream& out, const CampaignState& campaign,
+                          std::optional<FactionId> perspective, bool compact)
+{
+    const auto orders = campaign.supply_orders(perspective);
+    const auto first = compact && orders.size() > 4 ? orders.size() - 4 : 0;
+    for (std::size_t i = first; i < orders.size(); ++i) {
+        const auto& order = orders[i];
+        const auto& request = order.request;
+        out << "Supply request #" << static_cast<std::uint32_t>(request.id)
+            << " | " << faction_name(order.requester) << " | " << request.quantity << ' ' << resource_name(request.resource)
+            << " | stockpile #" << static_cast<std::uint32_t>(request.origin)
+            << " to #" << static_cast<std::uint32_t>(request.destination)
+            << " | shipment " << shipment_status_name(order.status);
+        if (order.carrier) {
+            out << " | carrier #" << static_cast<std::uint32_t>(*order.carrier) << " | cargo " << order.cargo;
+        }
+        out << '\n';
+    }
+}
+
 void report_operations(std::ostream& out, const CampaignState& campaign, FactionId perspective, bool compact)
 {
     if (perspective == FactionId::neutral) {
@@ -299,6 +319,8 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
             out << '\n';
         }
     }
+    report_supply_orders(out, campaign, perspective == FactionId::neutral ? std::nullopt : std::optional{perspective},
+                          compact);
 }
 
 template<class Output>
@@ -554,6 +576,7 @@ void print_campaign_summary(std::ostream& out, const CampaignState& campaign, st
     out << '\n' << "Shipments delivered: " << std::ranges::count_if(campaign.shipments(), [](const auto& entry) {
         return entry.second.status == ShipmentStatus::delivered;
     }) << '/' << campaign.shipments().size() << '\n';
+    report_supply_orders(out, campaign, {}, false);
     for (const auto& [id, combat] : campaign.combat_units()) {
         if (const auto movement = campaign.ground_movement(id)) {
             const auto& unit = campaign.units().at(id);

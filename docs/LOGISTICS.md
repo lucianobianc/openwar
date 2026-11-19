@@ -92,6 +92,34 @@ inteligência, com interceptação resolvida pelo sistema apropriado.
 
 ## 7. Integração e interfaces
 
+### Player supply requests
+
+An authorized commander can request one transportable resource and a positive
+quantity for a friendly stockpile. A ground formation resolves to its
+mobile stores. An eligible formation without mobile stores uses its
+assigned facility's friendly stockpile.
+
+The preview shows space remaining after friendly incoming shipments,
+unreserved source stock and the largest idle friendly carrier capacity.
+Confirmation revalidates the request. The proposed supplier prefers fixed
+stockpiles, then shortest geographic distance, then stockpile ID. A single
+supplier must have enough cargo and a single surviving friendly carrier must
+be able to hold it. The existing dispatcher selects the carrier and checks
+route, fuel and pickup availability at dispatch. Preview and confirmation
+are based on friendly inventory and capacities. A queued shipment may wait
+for a carrier, a route or fuel.
+
+Each request uses one shipment ID and the normal priority and reservation
+rules. Its recorded requester controls command visibility and cancellation.
+An authorized commander can cancel their nonterminal requests. The existing
+shipment rules release pickup reservations as appropriate, keep any committed
+empty leg and retain loaded cargo with the carrier. A cancelled loaded
+carrier remains tied to the shipment. Fuel already consumed stays spent.
+
+Checkpoint schema 11 with rules version 9 stores the requester. Earlier
+checkpoints load their existing shipments as ordinary logistics orders.
+
+
 - ECONOMY possui os estoques e ledger de entrada/saída; LOGISTICS possui a
   carga em trânsito e progresso dos transportadores.
 - OPERATIONS emite pedidos/prioridades e escoltas; não credita recursos.

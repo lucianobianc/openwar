@@ -31,7 +31,8 @@ AM_TESTS_ENVIRONMENT = OPENWAR=./openwar$(EXEEXT); export OPENWAR; \
 	LEGACY_SETUP_CHECKPOINT="$(srcdir)/tests/fixtures/campaign-schema6.ows"; export LEGACY_SETUP_CHECKPOINT; \
 	LEGACY_DEFEND_CHECKPOINT="$(srcdir)/tests/fixtures/defend-schema7.ows"; export LEGACY_DEFEND_CHECKPOINT; \
 	LEGACY_HOLD_CHECKPOINT="$(srcdir)/tests/fixtures/hold-schema8.ows"; export LEGACY_HOLD_CHECKPOINT; \
-	LEGACY_MOVE_CHECKPOINT="$(srcdir)/tests/fixtures/move-schema9.ows"; export LEGACY_MOVE_CHECKPOINT;
+	LEGACY_MOVE_CHECKPOINT="$(srcdir)/tests/fixtures/move-schema9.ows"; export LEGACY_MOVE_CHECKPOINT; \
+	LEGACY_SHIPMENT_CHECKPOINT="$(srcdir)/tests/fixtures/shipment-schema10.ows"; export LEGACY_SHIPMENT_CHECKPOINT;
 TESTS = campaign-tests$(EXEEXT) tests/cli.sh geographic-movement-tests$(EXEEXT) viewer-model-tests$(EXEEXT) launcher-tests$(EXEEXT)
 
 if BUILD_VIEWER
@@ -52,7 +53,7 @@ endif
 
 EXTRA_DIST = tests/cli.sh tests/fixtures/closed-bridge-schema4.ows tests/fixtures/military-unit-schema5.ows \
 	tests/fixtures/campaign-schema6.ows tests/fixtures/defend-schema7.ows tests/fixtures/hold-schema8.ows \
-	tests/fixtures/move-schema9.ows AGENTS.md LICENSE \
+	tests/fixtures/move-schema9.ows tests/fixtures/shipment-schema10.ows AGENTS.md LICENSE \
 	docs/DESIGN.md docs/TERRITORY.md docs/ANNEXES_README.md \
 	docs/ECONOMY.md docs/LOGISTICS.md docs/MAINTENANCE.md \
 	docs/MILITARY_FORCES.md docs/INTELLIGENCE.md docs/OPERATIONS.md \

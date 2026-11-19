@@ -98,4 +98,29 @@ CancelResult CommandSession::cancel(FactionId owner, MissionId id)
     return {true, "order cancelled"};
 }
 
+SupplyOrderPreview CommandSession::preview_supply(SupplyTarget target, Resource resource, std::uint64_t quantity) const
+{
+    return faction_ ? campaign_.preview_supply(*faction_, target, resource, quantity) :
+                      SupplyOrderPreview{"player has no authority to request supplies"};
+}
+
+SupplyOrderResult CommandSession::submit_supply(SupplyTarget target, Resource resource, std::uint64_t quantity)
+{
+    return faction_ ? campaign_.submit_supply(*faction_, target, resource, quantity) :
+                      SupplyOrderResult{{}, "player has no authority to request supplies"};
+}
+
+bool CommandSession::can_cancel_supply(ShipmentId id) const
+{
+    return faction_ && campaign_.can_cancel_supply(*faction_, id);
+}
+
+CancelResult CommandSession::cancel_supply(ShipmentId id)
+{
+    if (!faction_ || !campaign_.cancel_supply(*faction_, id)) {
+        return {false, "supply request is not eligible for cancellation"};
+    }
+    return {true, "supply request cancelled"};
+}
+
 }  // namespace openwar

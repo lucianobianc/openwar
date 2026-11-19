@@ -51,6 +51,10 @@ public:
                        std::optional<UnitId> formation = {}, std::span<const geography::Point> via = {});
     bool can_cancel(FactionId owner, MissionId id) const;
     CancelResult cancel(FactionId owner, MissionId id);
+    SupplyOrderPreview preview_supply(SupplyTarget target, Resource resource, std::uint64_t quantity) const;
+    SupplyOrderResult submit_supply(SupplyTarget target, Resource resource, std::uint64_t quantity);
+    bool can_cancel_supply(ShipmentId id) const;
+    CancelResult cancel_supply(ShipmentId id);
 
 private:
     CampaignState& campaign_;

@@ -61,6 +61,7 @@ struct Marker {
     std::vector<std::string> inspection{};
     std::optional<MissionStatus> mission_status{};
     std::optional<RouteTrace> journey{};
+    std::optional<StockpileId> supply_stock{};
 
     MarkerKey key() const { return {kind, faction, id}; }
 };
@@ -83,6 +84,7 @@ struct Snapshot {
     std::vector<Event> events;
     std::map<std::uint32_t, RoadReport> roads{};
     std::vector<std::size_t> mission_markers{};  // Indices into markers, in operational list order.
+    std::vector<SupplyOrderSummary> supply_requests{};
 
     geography::Point sector_center(SectorId sector) const;
 };

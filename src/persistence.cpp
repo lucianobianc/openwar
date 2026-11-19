@@ -12,7 +12,7 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 10;
+constexpr std::uint64_t schema_version = 11;
 constexpr std::uint64_t rules_version = 9;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
@@ -86,6 +86,9 @@ template<class A> void fields(A& a, Field<A, Shipment>& v)
     a(v.request, v.status, v.carrier, v.edge, v.remaining_ticks, v.cargo, v.pickup_fuel);
     if (a.version >= 3) {
         a(v.journey, v.road, v.delay);
+    }
+    if (a.version >= 11) {
+        a(v.requester);
     }
 }
 
@@ -906,7 +909,8 @@ struct CampaignArchive {
         for (const auto& [id, shipment] : v.shipments_) {
             (void)v.stockpiles_.at(shipment.request.origin);
             (void)v.stockpiles_.at(shipment.request.destination);
-            if (id != shipment.request.id || (shipment.edge && !v.routes_.contains(*shipment.edge)) ||
+            if (id != shipment.request.id || shipment.requester == FactionId::neutral ||
+                (shipment.edge && !v.routes_.contains(*shipment.edge)) ||
                 (shipment.carrier && !v.carriers_.contains(*shipment.carrier))) {
                 invalid_checkpoint();
             }
@@ -1137,6 +1141,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 10 || rules != 9) &&
         (schema != 9 || rules != 8) &&
         (schema != 8 || rules != 7) &&
         (schema != 7 || rules != 6) &&

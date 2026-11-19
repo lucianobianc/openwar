@@ -2,6 +2,8 @@
 #include "command.hpp"
 #include "realtime.hpp"
 
+#include <algorithm>
+#include <array>
 #include <charconv>
 #include <exception>
 #include <iostream>
@@ -30,6 +32,9 @@ Options
   --ground-order 'TYPE:EAST,SOUTH,UP[;EAST,SOUTH,UP...][:UNIT]'
                  Submit attack, defend, move, hold, ground-recon, or ground-patrol in millimetres.
   --cancel ID         Cancel an eligible order or release a holding formation before advancing time.
+  --preview-supply TARGET:ID:RESOURCE:QUANTITY  Check a request without queuing it.
+  --request-supply TARGET:ID:RESOURCE:QUANTITY  Queue delivery to a stockpile or unit.
+  --cancel-supply ID  Cancel a player-issued supply request by shipment ID.
   --help       Show this help.
 
 Examples
@@ -186,6 +191,54 @@ void apply_order(openwar::CommandSession& session, std::string_view order, bool 
     throw std::invalid_argument("Unknown order type");
 }
 
+void apply_supply_order(openwar::CommandSession& session, std::string_view value, bool preview_only)
+{
+    using namespace openwar;
+    std::array<std::string_view, 4> fields;
+    for (auto& field : fields) {
+        const auto split = value.find(':');
+        if ((&field == &fields.back()) != (split == std::string_view::npos)) {
+            throw std::invalid_argument("Expected TARGET:ID:RESOURCE:QUANTITY");
+        }
+        field = value.substr(0, split);
+        if (split != std::string_view::npos) {
+            value.remove_prefix(split + 1);
+        }
+    }
+    const auto id = parse_number(fields[1], "supply target");
+    if (id > UINT32_MAX || (fields[0] != "stockpile" && fields[0] != "unit")) {
+        throw std::invalid_argument("Supply target must be stockpile or unit with a 32-bit ID");
+    }
+    const auto number = static_cast<std::uint32_t>(id);
+    const SupplyTarget target = fields[0] == "stockpile" ? SupplyTarget{StockpileId{number}} : SupplyTarget{UnitId{number}};
+    constexpr std::array names{"oil_reserve", "crude_oil", "fuel", "materials", "spare_parts", "supplies", "ammunition"};
+    const auto name = std::ranges::find(names, fields[2]);
+    if (name == names.end()) {
+        throw std::invalid_argument("Unknown supply resource");
+    }
+    const auto resource = static_cast<Resource>(name - names.begin());
+    const auto quantity = parse_number(fields[3], "supply quantity");
+    if (preview_only) {
+        const auto preview = session.preview_supply(target, resource, quantity);
+        std::cout << "Supply preview | " << preview.reason;
+        if (preview.destination) {
+            std::cout << " | destination #" << static_cast<std::uint32_t>(*preview.destination)
+                      << " | uncommitted space " << preview.room << " | source stock " << preview.source_available
+                      << " | idle carrier capacity " << preview.idle_capacity;
+        }
+        if (preview.source) {
+            std::cout << " | source #" << static_cast<std::uint32_t>(*preview.source);
+        }
+        std::cout << '\n';
+        return;
+    }
+    const auto result = session.submit_supply(target, resource, quantity);
+    if (!result.shipment) {
+        throw std::invalid_argument(std::string(result.reason));
+    }
+    std::cout << "Supply request queued as shipment #" << static_cast<std::uint32_t>(*result.shipment) << '\n';
+}
+
 void report(const openwar::CampaignState& campaign, std::uint64_t seed)
 {
     const auto& world = campaign.world();
@@ -304,6 +357,7 @@ int main(int argc, char* argv[])
             }
             if (option != "--demo" && option != "--seed" && option != "--ticks" && option != "--speed" &&
                 option != "--faction" && option != "--order" && option != "--ground-order" && option != "--cancel" && option != "--scenario" &&
+                option != "--preview-supply" && option != "--request-supply" && option != "--cancel-supply" &&
                 option != "--load" && option != "--save" && option != "--inspect-world") {
                 throw std::invalid_argument("Unknown option: " + std::string(option));
             }
@@ -341,7 +395,8 @@ int main(int argc, char* argv[])
                 }
                 continue;
             }
-            if (option == "--order" || option == "--ground-order" || option == "--cancel") {
+            if (option == "--order" || option == "--ground-order" || option == "--cancel" ||
+                option == "--preview-supply" || option == "--request-supply" || option == "--cancel-supply") {
                 commands.emplace_back(option, argv[i]);
                 continue;
             }
@@ -406,8 +461,22 @@ int main(int argc, char* argv[])
             report_procedural_world(campaign, ticks == 0);
         }
         openwar::CommandSession operator_session(campaign, faction);
+        if (faction && !operator_session.allows_perspective()) {
+            throw std::invalid_argument("Campaign does not grant access to that command faction");
+        }
         for (const auto& [command, value] : commands) {
-            if (command != "--cancel") {
+            if (command == "--preview-supply" || command == "--request-supply") {
+                apply_supply_order(operator_session, value, command == "--preview-supply");
+            } else if (command == "--cancel-supply") {
+                const auto id = parse_number(value, command);
+                if (id > UINT32_MAX) {
+                    throw std::out_of_range("Shipment ID must fit in 32 bits");
+                }
+                const auto result = operator_session.cancel_supply(openwar::ShipmentId{static_cast<std::uint32_t>(id)});
+                if (!result.cancelled) {
+                    throw std::invalid_argument(std::string(result.reason));
+                }
+            } else if (command != "--cancel") {
                 apply_order(operator_session, value, command == "--ground-order");
             } else {
                 const auto id = parse_number(value, "--cancel");

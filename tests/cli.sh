@@ -173,6 +173,8 @@ legacy_hold=${LEGACY_HOLD_CHECKPOINT:-tests/fixtures/hold-schema8.ows}
 "$openwar" --load "$legacy_hold" --faction WEST --cancel 1 --ticks 0 | grep -F 'Mission 1 hold to sector 0 | released'
 legacy_move=${LEGACY_MOVE_CHECKPOINT:-tests/fixtures/move-schema9.ows}
 "$openwar" --load "$legacy_move" --faction WEST --ticks 2 | grep -F 'Mission 1 move to sector 1 | completed'
+legacy_shipment=${LEGACY_SHIPMENT_CHECKPOINT:-tests/fixtures/shipment-schema10.ows}
+"$openwar" --load "$legacy_shipment" --ticks 0 | grep -F 'Shipment 1: loading, cargo on carrier: 0'
 patrolled=$("$openwar" --demo combat --faction WEST \
     --ground-order 'ground-patrol:250000,350000,0;751000,350000,0:1' --ticks 2 --events)
 printf '%s\n' "$patrolled" | grep -E 'Mission 1 ground-patrol to sector 1 \| completed .* \| waypoints 2/2'
@@ -269,6 +271,16 @@ EOF
     reject --load "$scratch/point-order.ows" --faction WEST --ground-order defend:20266672,15133974 --ticks 0
 
     valley=${VALLEY_FIXTURES:-examples/connecticut-valley}
+    "$openwar" --scenario "$valley/valley-junction.owscenario" --faction WEST --ticks 0 \
+        --preview-supply unit:2:supplies:1 | grep -F 'Supply preview | shipment can be queued | destination #11'
+    "$openwar" --scenario "$valley/valley-junction.owscenario" --faction WEST --ticks 0 \
+        --request-supply unit:2:supplies:1 --save "$scratch/supply.ows" |
+        grep -E '^Supply request #105 .*to #11 \| shipment pending'
+    "$openwar" --load "$scratch/supply.ows" --faction WEST --ticks 0 --cancel-supply 105 |
+        grep -E '^Supply request #105 .*\| shipment cancelled'
+    reject --load "$scratch/supply.ows" --faction EAST --cancel-supply 105 --ticks 0
+    reject --load "$scratch/supply.ows" --faction WEST --cancel-supply 1 --ticks 0
+    reject --load "$scratch/supply.ows" --faction WEST --request-supply stockpile:111:supplies:1 --ticks 0
     "$openwar" --scenario "$valley/valley-junction.owscenario" --faction WEST \
         --ground-order ground-recon:17454172,13440584,80700:4 --ticks 1 --save "$scratch/recon.ows" |
         grep -F 'Mission 1 ground-recon to sector 104 | observing'

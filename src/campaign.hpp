@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace openwar {
@@ -204,6 +205,7 @@ struct Shipment {
     std::optional<TransportJourney> journey{};
     std::optional<std::uint32_t> road{};  // Authored segment capacity commitment.
     LogisticsDelay delay = LogisticsDelay::none;
+    std::optional<FactionId> requester{};
 };
 
 enum class LogisticsEventKind {
@@ -222,6 +224,29 @@ struct LogisticsEvent {
 };
 
 enum class UnitId : std::uint32_t {};
+using SupplyTarget = std::variant<StockpileId, UnitId>;
+
+struct SupplyOrderPreview {
+    std::string_view reason;
+    std::optional<StockpileId> destination{};
+    std::optional<StockpileId> source{};
+    std::uint64_t room = 0;
+    std::uint64_t source_available = 0;
+    std::uint64_t idle_capacity = 0;
+};
+
+struct SupplyOrderResult {
+    std::optional<ShipmentId> shipment;
+    std::string_view reason;
+};
+
+struct SupplyOrderSummary {
+    FactionId requester;
+    SupplyRequest request;
+    ShipmentStatus status;
+    std::optional<CarrierId> carrier;
+    std::uint64_t cargo;
+};
 enum class EquipmentTypeId : std::uint32_t {};
 enum class FacilityId : std::uint32_t {};
 enum class EquipmentCategory { helicopter, tank, transport, air_defense_vehicle, air_defense_team };
@@ -413,6 +438,12 @@ public:
     void set_operating_conditions(InstallationId id, bool has_power, std::uint32_t workers,
                                   std::uint32_t integrity);
     void request_supply(SupplyRequest request);
+    SupplyOrderPreview preview_supply(FactionId actor, SupplyTarget target, Resource resource,
+                                      std::uint64_t quantity) const;
+    SupplyOrderResult submit_supply(FactionId actor, SupplyTarget target, Resource resource, std::uint64_t quantity);
+    bool can_cancel_supply(FactionId actor, ShipmentId id) const;
+    bool cancel_supply(FactionId actor, ShipmentId id);
+    std::vector<SupplyOrderSummary> supply_orders(std::optional<FactionId> perspective) const;
     void set_route_passable(RouteId id, bool passable);
     void set_road_closed(std::uint32_t id, bool closed);
     const auto& closed_roads() const { return closed_roads_; }

@@ -2847,6 +2847,94 @@ void test_geographic_transport()
             "A long tick could not advance through multiple route legs and sector crossings");
 }
 
+void test_player_supply_requests()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr auto supplies = static_cast<std::size_t>(Resource::supplies);
+    constexpr StockpileId source{1}, destination{2}, foreign{3};
+    constexpr CarrierId carrier{1};
+    auto scenario = geographic_transport_scenario();
+    scenario.operations.enabled = true;
+    scenario.operations.player = west;
+    scenario.loading_ticks = 2;
+    scenario.carriers.front().position = scenario.stockpiles.front().access_point;
+    auto opposing_stock = scenario.stockpiles.back();
+    opposing_stock.id = foreign;
+    opposing_stock.owner = east;
+    scenario.stockpiles.push_back(opposing_stock);
+    auto competing_stock = scenario.stockpiles.front();
+    competing_stock.id = StockpileId{4};
+    scenario.stockpiles.push_back(competing_stock);
+    CampaignState campaign(scenario, 42);
+    CommandSession commander(campaign, west), opposing(campaign, east), observer(campaign);
+    const auto preview = commander.preview_supply(destination, Resource::supplies, 10);
+    require(preview.source == source && preview.destination == destination && preview.source_available == 40 &&
+            preview.room == 60 && preview.idle_capacity == 50 &&
+            !opposing.preview_supply(destination, Resource::supplies, 10).destination &&
+            !observer.submit_supply(destination, Resource::supplies, 10).shipment &&
+            commander.preview_supply(foreign, Resource::supplies, 10).reason ==
+                commander.preview_supply(StockpileId{99}, Resource::supplies, 10).reason &&
+            !commander.submit_supply(destination, Resource::oil_reserve, 1).shipment &&
+            !commander.submit_supply(destination, Resource::supplies, 0).shipment &&
+            !commander.submit_supply(destination, Resource::supplies, 61).shipment &&
+            campaign.shipments().empty() && campaign.logistics_log().empty(),
+            "Supply preview leaked a stock, accepted an invalid order or changed campaign state");
+    auto with_closure = campaign;
+    with_closure.set_road_closed(1, true);
+    require(with_closure.preview_supply(west, destination, Resource::supplies, 10).source == preview.source &&
+            with_closure.preview_supply(west, destination, Resource::supplies, 10).reason == preview.reason,
+            "Supply preview disclosed an unobserved road closure");
+
+    const auto request = commander.submit_supply(destination, Resource::supplies, 35);
+    require(request.shipment == ShipmentId{1} && campaign.shipments().at(*request.shipment).status == ShipmentStatus::pending &&
+            !campaign.shipments().at(*request.shipment).carrier && campaign.stockpiles().at(source).reserved[supplies] == 0 &&
+            !commander.submit_supply(destination, Resource::supplies, 30).shipment &&
+            !opposing.cancel_supply(*request.shipment).cancelled &&
+            observer.snapshot(east).supply_requests.empty() && commander.snapshot().supply_requests.size() == 1,
+            "A queued request reserved cargo, exceeded room, or escaped its faction");
+    auto loaded_cancellation = campaign;
+    campaign.advance_ticks(1);
+    require(campaign.stockpiles().at(source).reserved[supplies] == 35 &&
+            commander.cancel_supply(*request.shipment).cancelled &&
+            campaign.stockpiles().at(source).reserved[supplies] == 0 &&
+            campaign.stockpiles().at(source).quantity[supplies] == 40 &&
+            !campaign.carriers().at(carrier).shipment,
+            "Cancelling a reservation did not use existing logistics release");
+
+    auto delivery = loaded_cancellation;
+    delivery.advance_ticks(5);
+    const CheckpointFiles files;
+    const auto midway = files.directory / "player-supply.ows";
+    delivery.save(midway);
+    auto resumed = CampaignState::load(midway);
+    require(resumed.supply_orders(west).size() == 1 && resumed.supply_orders(east).empty(),
+            "Checkpoint changed the identity of the supply requester");
+    delivery.advance_ticks(40);
+    resumed.advance_ticks(40);
+    require(delivery.shipments().at(*request.shipment).status == ShipmentStatus::delivered &&
+            delivery.stockpiles().at(destination).quantity[supplies] == 75 &&
+            delivery.stockpiles().at(source).quantity[supplies] == 5 &&
+            resumed.stockpiles().at(destination).quantity == delivery.stockpiles().at(destination).quantity &&
+            std::ranges::equal(resumed.logistics_log(), delivery.logistics_log()) &&
+            !delivery.cancel_supply(west, *request.shipment),
+            "Player delivery diverged after a checkpoint or violated cargo conservation");
+
+    loaded_cancellation.advance_ticks(5);
+    const auto spent = loaded_cancellation.carriers().at(carrier).spent_ml;
+    require(loaded_cancellation.shipments().at(*request.shipment).cargo == 35 &&
+            loaded_cancellation.cancel_supply(west, *request.shipment), "A loaded player request could not cancel");
+    loaded_cancellation.advance_ticks(20);
+    require(loaded_cancellation.shipments().at(*request.shipment).cargo == 35 &&
+            loaded_cancellation.carriers().at(carrier).shipment == request.shipment &&
+            loaded_cancellation.carriers().at(carrier).spent_ml == spent &&
+            loaded_cancellation.stockpiles().at(destination).quantity[supplies] == 40,
+            "Cancellation erased committed cargo, spent fuel, or delivered a cancelled shipment");
+    campaign.request_supply({ShipmentId{2}, source, destination, Resource::supplies, 1});
+    require(!commander.can_cancel_supply(ShipmentId{2}) && !commander.cancel_supply(ShipmentId{2}).cancelled,
+            "Player cancellation affected an ordinary logistics request");
+}
+
 void test_geographic_mobile_delivery()
 {
     using namespace geography;
@@ -2880,7 +2968,11 @@ void test_geographic_mobile_delivery()
     scenario.carriers.front().position = pickup;
 
     CampaignState initial(scenario, 42);
-    initial.request_supply(request);
+    CommandSession supply(initial, west);
+    require(supply.preview_supply(formation, Resource::supplies, 5).destination == deployed &&
+            supply.submit_supply(formation, Resource::supplies, 5).shipment == delivery &&
+            initial.shipments().at(delivery).request.origin == depot,
+            "Player request did not resolve the formation's mobile stores");
     initial.advance_ticks(2);
     require(initial.shipments().at(delivery).cargo == 5 &&
             initial.stockpile_position(deployed) == start &&
@@ -3343,6 +3435,7 @@ int main()
     test_ground_reconnaissance();
     test_geographic_ground_operations();
     test_geographic_transport();
+    test_player_supply_requests();
     test_geographic_mobile_delivery();
     test_geographic_transport_control_change();
     test_depleted_withdrawal();

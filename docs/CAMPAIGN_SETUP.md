@@ -139,8 +139,8 @@ simulation rules version. The launcher shows the record on the resume screen.
 Default settings produce the same checkpoint as direct launch in the same
 build. Checkpoints through schema 6 resume without a custom setup record, and
 the normal checkpoint reader resumes custom campaigns offline from resolved
-state. Checkpoint schema 10 with rules version 9 retains the same provenance
-record alongside geographic ground waypoint and patrol progress.
+state. Checkpoint schema 11 with rules version 9 retains the same provenance
+record alongside ground mission progress and player supply requests.
 
 ## 3. Origem do mundo e cenário-base
 

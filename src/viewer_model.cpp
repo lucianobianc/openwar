@@ -250,6 +250,7 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
             {"Production installation", number_label("Supply stockpile", stock.id),
              "Workers " + std::to_string(installation.workers),
              "Reactivation remaining " + std::to_string(state.reactivation_seconds) + " s"}});
+        snapshot.markers.back().supply_stock = stock.id;
         for (std::size_t i = 0; i < installation.recipe.outputs.size(); ++i) {
             if (const auto quantity = installation.recipe.outputs[i]) {
                 snapshot.markers.back().inspection.push_back("Produces " + std::to_string(quantity) + " " +
@@ -267,6 +268,7 @@ void add_logistics(Snapshot& snapshot, const CampaignState& campaign, std::optio
             false, "Stockpile #" + std::to_string(number), std::string(faction_name(stock.owner)), {},
             MilitarySymbol{relative_affiliation(stock.owner, perspective), {MilitaryDomain::land}},
             {"Supply stockpile"}});
+        snapshot.markers.back().supply_stock = id;
         add_maintenance(id);
     }
 }
@@ -386,6 +388,14 @@ void add_formations(Snapshot& snapshot, const CampaignState& campaign, std::opti
             std::move(detail), std::move(movement_detail),
             MilitarySymbol{relative_affiliation(unit.faction, perspective), identity, status}, std::move(inspection)
         });
+        if (combat != campaign.combat_units().end()) {
+            snapshot.markers.back().supply_stock = combat->second.stores;
+        } else if (unit.facility) {
+            const auto stock = campaign.facilities().at(*unit.facility).stockpile;
+            if (campaign.stockpiles().at(stock).owner == unit.faction) {
+                snapshot.markers.back().supply_stock = stock;
+            }
+        }
         if (combat != campaign.combat_units().end() && combat->second.withdrawal_journey) {
             const auto& journey = *combat->second.withdrawal_journey;
             const auto destination = journey.route.legs.empty() ? journey.route.origin : journey.route.legs.back().to;
@@ -436,6 +446,7 @@ Snapshot read_snapshot(const CampaignState& campaign, std::optional<FactionId> p
     const auto& clock = campaign.clock();
     Snapshot snapshot{world.width(), world.height(), world.sector_size_m(), clock.tick(),
                       clock.elapsed_seconds(), campaign.war_result(), {}, {}, {}};
+    snapshot.supply_requests = campaign.supply_orders(perspective);
     snapshot.tiles.reserve(world.sectors().size());
     const auto view = perspective && (campaign.has_operational_view() || campaign.geographic_world()) ?
         campaign.faction_view(*perspective) : FactionView{};

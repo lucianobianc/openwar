@@ -394,6 +394,19 @@ panel selection are local UI state.
 
 ### 6.1 Seleção
 
+Open **Supplies (L)** after selecting a friendly stockpile, installation or
+formation, then choose **Request supply**. Use the arrows to select a
+resource and type the quantity. **Backspace** edits the quantity. The
+preview shows capacity and stock. **Confirm request** queues one shipment.
+The same tab lists the commander's requests, including shipment status
+and carrier when assigned. Select a row to inspect or cancel the request.
+
+CLI examples are `--preview-supply unit:2:supplies:1 --ticks 0` and
+`--request-supply stockpile:11:supplies:1 --ticks 0`, with the appropriate
+`--faction` and campaign. `--cancel-supply ID` uses the shipment ID,
+independently of military order IDs. Resource tokens are `crude_oil`,
+`fuel`, `materials`, `spare_parts`, `supplies` and `ammunition`.
+
 Um clique seleciona unidade, contato, ponto geográfico, via ou instalação visível. O painel deve comunicar `tipo`, `fonte`, `última atualização`, `situação conhecida` e `ações possíveis`. Seleção múltipla pode agrupar ordens compatíveis; operações sobre entidades de facções distintas são rejeitadas. Em áreas de sobreposição visual, oferecer menu de candidatos filtrados e ordenados estavelmente.
 
 ### 6.2 Emissão de ordens
