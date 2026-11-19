@@ -110,6 +110,34 @@ checkpoints, including schema 7 with rules version 6. Stored Defend orders
 retain their kind and completion rule. Older builds cannot read the new
 checkpoint version. Hold currently has no duration option.
 
+### Ground reconnaissance
+
+Ground Recon is a geographic order for a deployed formation whose scenario
+identity declares the land reconnaissance function. The formation must be
+available and have ready mobile ground equipment, unreserved supplies and
+enough fuel for the journey. The role is declared in scenario data. The
+symbol renderer has no part in eligibility. Unspecified legacy formations
+keep their prior eligibility for other missions.
+
+The order accepts an exact point or the usual authored sector anchor.
+Automatic assignment considers eligible scouts in deterministic route order.
+The objective can have unknown or hostile control. Transit uses reported
+friendly sectors and known roads, while execution checks actual access and
+obstructions. Ground Recon has no occupation objective and uses the normal
+combat and withdrawal rules. Autonomous planners continue to issue their
+existing orders, including abstract Recon.
+
+Arriving at the exact point reports territorial conditions and enters
+`observing`. A formation that remains operational, supplied and free of
+opposition for the next simulation tick completes the observation. The
+mission reports contacts detected, no contacts detected, or partial
+observation in restricted terrain. Cancellation, combat and failure retain
+fuel already spent and reports already received. A finished formation stays
+where the operation leaves it. Checkpoint schema 9 and rules version 8 store
+the observation phase, outcome and survey history needed for resuming. The
+reader accepts previously supported schemas, including schema 8, and keeps
+the existing abstract Recon and other mission states.
+
 ## 4. Fluxo de planejamento
 
 1. Receber snapshot de `FactionView`, forças próprias, prontidão e recursos

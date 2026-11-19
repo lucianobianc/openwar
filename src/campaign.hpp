@@ -538,7 +538,10 @@ private:
     OrderResult commit_order(MissionPlan plan, bool manual);
     void release_unspent_mission_stock(Mission& mission);
     void release_air_mission_equipment(const Mission& mission, EquipmentStatus standby);
-    std::uint32_t observe(FactionId faction, SectorId sector);
+    enum class ObservationScope { sector_survey, territory, ground_recon };
+    std::uint32_t observe(FactionId faction, SectorId sector, ObservationScope scope = ObservationScope::sector_survey);
+    bool ground_recon_visibility(geography::Point point, SectorId sector) const;
+    void update_ground_recon(Mission& mission);
     bool observe_road(FactionId faction, std::uint32_t road, SectorId sector, std::uint64_t tick);
     RoadReport aged_road_report(RoadReport report) const;
     bool road_known_closed(FactionId faction, std::uint32_t road) const;
@@ -570,7 +573,8 @@ private:
     bool ground_opposition(SectorId sector, FactionId faction) const;
     enum class GroundStep { no_fuel, blocked, territorial_access_lost, travelling, arrived };
     GroundStep advance_ground(CombatUnit& unit, GroundJourney& journey, bool withdrawing,
-                              const geography::SectorAccess& sector_allowed = {});
+                              const geography::SectorAccess& sector_allowed = {},
+                              std::optional<SectorId> observation_target = {});
     void release_ground_equipment(EquipmentId id);
     void resolve_engagements();
     void update_territory();

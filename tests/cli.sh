@@ -169,6 +169,8 @@ held=$("$openwar" --demo combat --faction WEST --ground-order hold:250000,250000
 printf '%s\n' "$held" | grep -F 'Mission 1 hold to sector 0 | holding | equipment 1 in operation'
 released=$("$openwar" --demo combat --faction WEST --ground-order hold:250000,250000,0:1 --cancel 1 --ticks 0)
 printf '%s\n' "$released" | grep -F 'Mission 1 hold to sector 0 | released | equipment 1 (historical assignment)'
+legacy_hold=${LEGACY_HOLD_CHECKPOINT:-tests/fixtures/hold-schema8.ows}
+"$openwar" --load "$legacy_hold" --faction WEST --cancel 1 --ticks 0 | grep -F 'Mission 1 hold to sector 0 | released'
 
 campaign=$("$openwar" --demo campaign --seed 42 --ticks 3000 --events)
 printf '%s\n' "$campaign" | grep -Fx 'Campaign summary | seed 42'
@@ -260,6 +262,13 @@ EOF
     reject --load "$scratch/point-order.ows" --faction WEST --ground-order defend:20266672,15133974 --ticks 0
 
     valley=${VALLEY_FIXTURES:-examples/connecticut-valley}
+    "$openwar" --scenario "$valley/valley-junction.owscenario" --faction WEST \
+        --ground-order ground-recon:17454172,13440584,80700:4 --ticks 1 --save "$scratch/recon.ows" |
+        grep -F 'Mission 1 ground-recon to sector 104 | observing'
+    "$openwar" --load "$scratch/recon.ows" --faction WEST --ticks 1 |
+        grep -F 'Mission 1 ground-recon to sector 104 | completed'
+    reject --scenario "$valley/valley-junction.owscenario" --faction WEST \
+        --ground-order ground-recon:17454172,13440584,80700:2 --ticks 0
     world="$valley/valley-world.owgeo"
     "$openwar" --inspect-world "$world" | grep -F 'Geographic world: 16x16 sectors, 9342 road segments'
     reject --inspect-world "$geographic"

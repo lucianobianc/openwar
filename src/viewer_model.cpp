@@ -134,6 +134,15 @@ void add_missions(Snapshot& snapshot, const CampaignState& campaign, std::span<c
             rows.push_back(number_label("Committed equipment", mission.equipment));
             rows.push_back(number_label("Mission stockpile", mission.launch_stock));
         }
+        if (mission.kind == MissionKind::ground_recon) {
+            if (mission.recon_result != ReconResult::none || !active_mission(mission)) {
+                auto result = std::string(ground_recon_result(mission));
+                if (mission.detections) {
+                    result += " / " + std::to_string(mission.detections);
+                }
+                rows.push_back(std::move(result));
+            }
+        }
         if (history != by_mission.end()) {
             const auto& entries = history->second;
             rows.push_back("Mission events, newest first");

@@ -26,8 +26,8 @@ Options
   --events     Show timestamped campaign events.
   --seed N     Override the seed (32-bit for fixed demos, 64-bit for procedural).
   --faction WEST|EAST  Use one faction's view in an operational checkpoint or demo.
-  --order TYPE:SECTOR[:UNIT]  Queue a recon, patrol, defend, reposition, or attack order.
-  --ground-order TYPE:EAST,SOUTH,UP[:UNIT]  Submit an attack, defend, move, or hold at a point in millimetres.
+  --order TYPE:SECTOR[:UNIT]  Queue recon, patrol, defend, reposition, attack, or ground-recon.
+  --ground-order TYPE:EAST,SOUTH,UP[:UNIT]  Submit attack, defend, move, hold, or ground-recon in millimetres.
   --cancel ID         Cancel an eligible order or release a holding formation before advancing time.
   --help       Show this help.
 
@@ -164,7 +164,8 @@ void apply_order(openwar::CommandSession& session, std::string_view order, bool 
         target = SectorId{static_cast<std::uint32_t>(sector)};
     }
     for (const auto kind : {MissionKind::recon, MissionKind::patrol, MissionKind::defend,
-                           MissionKind::reposition, MissionKind::attack, MissionKind::move, MissionKind::hold}) {
+                           MissionKind::reposition, MissionKind::attack, MissionKind::move, MissionKind::hold,
+                           MissionKind::ground_recon}) {
         if (order.substr(0, separator) == mission_name(kind)) {
             const auto result = session.submit(kind, target, formation);
             if (!result.mission) {

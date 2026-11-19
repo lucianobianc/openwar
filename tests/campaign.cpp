@@ -1982,6 +1982,171 @@ void test_ground_position_orders()
             "Move crossed into a destination lost to an opposing Attack");
 }
 
+void test_ground_reconnaissance()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr SectorId target{1};
+    constexpr UnitId scout{1};
+    constexpr StockpileId stores{10};
+    constexpr geography::Point objective{730'000, 260'000, 0};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    auto scenario = combat_example_scenario(west);
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.operations.contact_half_life_seconds = 120;
+    scenario.command_objectives.clear();
+    scenario.victory_objectives.clear();
+    const auto expected = [&](CampaignState& campaign, MissionStatus status, ReconResult result) {
+        const auto missions = campaign.faction_view(west).missions;
+        require(missions.size() == 1 && missions.front().ground_unit == scout &&
+                missions.front().status == status && missions.front().recon_result == result,
+                "Ground reconnaissance mission had an unexpected assignment, phase or result");
+        return missions.front();
+    };
+    CampaignState untrained(scenario, 42);
+    require(untrained.issue_ground_order(west, MissionKind::ground_recon, objective, scout).reason ==
+                "selected formation has no ground reconnaissance role",
+            "Ground Recon assigned an ordinary combat formation");
+    scenario.units.front().identity = {MilitaryDomain::land, MilitaryFunction::reconnaissance, MilitaryEchelon::platoon};
+    scenario.public_sectors.clear();
+    scenario.equipment_types.front().ground_speed_kph = 20;
+    scenario.units.push_back({UnitId{3}, "East site detail", east, target});
+    scenario.equipment.push_back({EquipmentId{4}, EquipmentTypeId{2}, UnitId{3}});
+
+    CampaignState campaign(scenario, 42);
+    CommandSession session(campaign, west);
+    const auto actions = session.actions_for(scout);
+    require(std::ranges::any_of(actions, [](const auto& action) {
+        return action.kind == MissionKind::ground_recon && action.geographic_destination;
+    }), "A ready scout did not offer a geographic Ground Recon action");
+    const auto preview = session.preview(MissionKind::ground_recon, objective, scout);
+    require(preview.formation == scout && preview.route && preview.route->destination == objective &&
+            preview.route->fuel_ml == 1000 && !campaign.faction_view(west).sectors.contains(target),
+            "Ground Recon could not preview a point with unknown control or exposed its report");
+    const auto order = session.submit(MissionKind::ground_recon, objective, scout);
+    require(order.mission.has_value(), "Ground Recon confirmation rejected an eligible explicit assignment");
+    campaign.advance_ticks(1);
+    require(expected(campaign, MissionStatus::in_progress, ReconResult::none).detections == 0 &&
+            campaign.combat_units().at(scout).position != objective,
+            "Ground Recon did not execute geographic travel before observing");
+
+    const CheckpointFiles files;
+    const auto travelling = files.directory / "scout-travelling.ows";
+    const auto observing = files.directory / "scout-observing.ows";
+    campaign.save(travelling);
+    auto resumed_travel = CampaignState::load(travelling);
+    campaign.advance_ticks(1);
+    expected(campaign, MissionStatus::observing, ReconResult::partial);
+    require(campaign.combat_units().at(scout).position == objective && session.actions_for(scout).empty() &&
+            session.can_cancel(west, *order.mission) && campaign.faction_view(west).contacts.empty() &&
+            campaign.faction_view(west).sectors.at(target).observed_tick == 2,
+            "Recon arrival skipped the territorial report, observation phase or formation commitment");
+    const auto frame = session.snapshot();
+    require(frame.mission_markers.size() == 1 &&
+            frame.markers.at(frame.mission_markers.front()).mission_status == MissionStatus::observing,
+            "The command snapshot did not expose the observation phase");
+    campaign.save(observing);
+    auto resumed_observation = CampaignState::load(observing);
+    resumed_travel.advance_ticks(2);
+    resumed_observation.advance_ticks(1);
+    campaign.advance_ticks(1);
+    const auto bytes = [&](const CampaignState& state, const char* name) {
+        const auto path = files.directory / name;
+        state.save(path);
+        std::ifstream input(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(input), {});
+    };
+    require(bytes(campaign, "continuous.ows") == bytes(resumed_travel, "resumed-travel.ows") &&
+            bytes(campaign, "continuous.ows") == bytes(resumed_observation, "resumed-observation.ows"),
+            "Ground Recon diverged after resuming either active phase");
+    const auto completed = expected(campaign, MissionStatus::completed, ReconResult::observed);
+    const auto view = campaign.faction_view(west);
+    require(completed.detections == 1 && view.contacts.size() == 1 && view.contacts.front().confidence == 1000 &&
+            !view.sectors.at(target).surveyed && campaign.faction_view(east).contacts.empty() &&
+            campaign.faction_view(east).events.empty() && campaign.faction_view(east).missions.empty() &&
+            campaign.combat_units().at(scout).position == objective &&
+            campaign.stockpiles().at(stores).quantity[fuel] == 19 &&
+            campaign.sector_state(target).controller == FactionId::neutral && !campaign.sector_state(target).occupier &&
+            !session.cancel(west, *order.mission).cancelled,
+            "Recon completion leaked, captured the objective, moved the scout back or misreported contacts");
+    campaign.advance_ticks(2);
+    require(campaign.faction_view(west).contacts.front().confidence == 500,
+            "Ground Recon contacts did not use existing intelligence aging");
+
+    for (const auto* path : {&travelling, &observing}) {
+        auto abandoned = CampaignState::load(*path);
+        const auto position = abandoned.combat_units().at(scout).position;
+        require(abandoned.cancel_order(west, *order.mission), "Could not cancel Ground Recon during travel or observation");
+        abandoned.advance_ticks(2);
+        expected(abandoned, MissionStatus::cancelled, path == &observing ? ReconResult::partial : ReconResult::none);
+        require(abandoned.combat_units().at(scout).position == position &&
+                abandoned.stockpiles().at(stores).quantity[fuel] == 19 &&
+                abandoned.faction_view(west).contacts.empty(),
+                "Cancelled Recon spent new resources or continued to observe");
+        if (path == &observing) {
+            require(abandoned.faction_view(west).sectors.at(target).observed_tick == 2,
+                    "Cancellation discarded the existing territorial report");
+        }
+    }
+
+    auto forest = scenario;
+    std::vector<SectorProperties> terrain(6);
+    terrain[1].terrain = Terrain::forest;
+    forest.world = WorldDefinition(3, 2, 500, terrain);
+    CampaignState obscured(forest, 42);
+    require(obscured.issue_order(west, MissionKind::ground_recon, target).mission.has_value(),
+            "Automatic Ground Recon did not select a scout for a sector order");
+    obscured.advance_ticks(5);
+    require(expected(obscured, MissionStatus::completed, ReconResult::partial).detections == 0 &&
+            obscured.faction_view(west).contacts.empty() &&
+            !obscured.faction_view(west).sectors.at(target).surveyed,
+            "Forest observation exposed enemy equipment or claimed a complete survey");
+
+    auto clear = scenario;
+    clear.units.pop_back();
+    clear.equipment.pop_back();
+    CampaignState empty(clear, 42);
+    require(empty.issue_ground_order(west, MissionKind::ground_recon, objective).mission.has_value(),
+            "Automatic Ground Recon did not select an eligible scout");
+    empty.advance_ticks(3);
+    require(expected(empty, MissionStatus::completed, ReconResult::observed).detections == 0 &&
+            !empty.faction_view(west).sectors.at(target).surveyed,
+            "Zero detections were treated as confirmed sector clearance");
+
+    auto contact = clear;
+    contact.equipment_types.front().ground_speed_kph = 30;
+    for (auto& type : contact.equipment_types) {
+        type.combat_power = 1;
+    }
+    contact.combat_units[1].morale = 80;
+    contact.operations.planner_interval_ticks = 1;
+    contact.public_sectors = {target};
+    contact.objectives = {{east, target, 3}};
+    CampaignState interrupted(contact, 42);
+    require(interrupted.issue_ground_order(west, MissionKind::ground_recon, objective, scout).mission.has_value(),
+            "Could not start the contested reconnaissance fixture");
+    interrupted.advance_ticks(1);
+    expected(interrupted, MissionStatus::observing, ReconResult::partial);
+    interrupted.advance_ticks(1);
+    expected(interrupted, MissionStatus::failed, ReconResult::partial);
+    require(std::ranges::any_of(interrupted.observer_battle_log(), [](const auto& event) {
+                return event.reason == "engagement";
+            }), "Ground Recon escaped existing combat while observing");
+
+    CampaignState dry(scenario, 42);
+    ResourceAmounts drained{};
+    drained[fuel] = 20;
+    require(dry.consume(stores, drained) &&
+            dry.issue_ground_order(west, MissionKind::ground_recon, objective, scout).reason ==
+                "selected formation has insufficient fuel for the route",
+            "An unaffordable recon order was accepted or reported as inaccessible");
+    terrain[1].traversable = false;
+    scenario.world = WorldDefinition(3, 2, 500, terrain);
+    CampaignState inaccessible(scenario, 42);
+    require(!inaccessible.issue_ground_order(west, MissionKind::ground_recon, objective, scout).mission,
+            "Ground Recon entered an inaccessible objective");
+}
+
 void test_geographic_ground_operations()
 {
     using namespace geography;
@@ -3024,6 +3189,7 @@ int main()
     test_large_procedural_campaigns();
     test_ground_movement();
     test_ground_position_orders();
+    test_ground_reconnaissance();
     test_geographic_ground_operations();
     test_geographic_transport();
     test_geographic_mobile_delivery();

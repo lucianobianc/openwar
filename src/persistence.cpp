@@ -12,8 +12,8 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 8;
-constexpr std::uint64_t rules_version = 7;
+constexpr std::uint64_t schema_version = 9;
+constexpr std::uint64_t rules_version = 8;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
 
@@ -230,7 +230,15 @@ template<class A> void fields(A& a, Field<A, Objective>& v)
 { a(v.faction, v.sector, v.priority); }
 
 template<class A> void fields(A& a, Field<A, SectorReport>& v)
-{ a(v.sector, v.estimated_controller, v.observed_tick, v.confidence, v.internal, v.contested, v.surveyed); }
+{
+    a(v.sector, v.estimated_controller, v.observed_tick, v.confidence, v.internal, v.contested, v.surveyed);
+    if (a.version >= 9) {
+        a(v.earlier_survey_tick);
+        if (v.earlier_survey_tick && (v.surveyed || *v.earlier_survey_tick >= v.observed_tick)) {
+            invalid_checkpoint();
+        }
+    }
+}
 
 template<class A> void fields(A& a, Field<A, ContactReport>& v)
 { a(v.id, v.estimated_sector, v.classification, v.observed_tick, v.confidence); }
@@ -246,6 +254,9 @@ template<class A> void fields(A& a, Field<A, Mission>& v)
     a(v.id, v.faction, v.kind, v.target, v.equipment, v.launch_stock, v.fuel, v.duration_ticks, v.status,
       v.launch_tick, v.detections, v.manual, v.relocation, v.ground_unit, v.ground_path);
     if constexpr (A::reading) {
+        if (a.version < 9 && (v.kind == MissionKind::ground_recon || v.status == MissionStatus::observing)) {
+            invalid_checkpoint();
+        }
         if (a.version < 8 && (position_order(v.kind) || v.status > MissionStatus::cancelled)) {
             invalid_checkpoint();
         }
@@ -260,6 +271,9 @@ template<class A> void fields(A& a, Field<A, Mission>& v)
         }
     }
     a(v.preparation_reserved, v.earliest_launch_tick, v.ground_destination, v.ground_journey);
+    if (a.version >= 9) {
+        a(v.recon_result);
+    }
 }
 
 template<class A> void fields(A& a, Field<A, OperationsEvent>& v)
@@ -322,8 +336,9 @@ constexpr auto last_value(MilitaryEchelon) { return MilitaryEchelon::division; }
 constexpr auto last_value(EquipmentStatus) { return EquipmentStatus::lost; }
 constexpr auto last_value(ServiceKind) { return ServiceKind::repair; }
 constexpr auto last_value(ForcesEventKind) { return ForcesEventKind::arrival_delayed; }
-constexpr auto last_value(MissionKind) { return MissionKind::hold; }
-constexpr auto last_value(MissionStatus) { return MissionStatus::released; }
+constexpr auto last_value(MissionKind) { return MissionKind::ground_recon; }
+constexpr auto last_value(MissionStatus) { return MissionStatus::observing; }
+constexpr auto last_value(ReconResult) { return ReconResult::observed; }
 constexpr auto last_value(GroundStatus) { return GroundStatus::destroyed; }
 constexpr auto last_value(WarStatus) { return WarStatus::draw; }
 constexpr auto last_value(geography::SiteKind) { return geography::SiteKind::urban_land; }
@@ -961,10 +976,16 @@ struct CampaignArchive {
                 !v.stockpiles_.contains(mission.launch_stock)) {
                 invalid_checkpoint();
             }
-            if ((position_order(mission.kind) && (!mission.ground_unit || !mission.ground_journey ||
+            if ((geographic_ground_order(mission.kind) && (!mission.ground_unit || !mission.ground_journey ||
                                                  mission.status == MissionStatus::preparing)) ||
                 ((mission.status == MissionStatus::holding || mission.status == MissionStatus::released) &&
-                    mission.kind != MissionKind::hold)) {
+                    mission.kind != MissionKind::hold) ||
+                (mission.status == MissionStatus::observing &&
+                    (mission.kind != MissionKind::ground_recon || mission.recon_result != ReconResult::partial)) ||
+                (mission.recon_result != ReconResult::none && mission.kind != MissionKind::ground_recon) ||
+                (mission.kind == MissionKind::ground_recon &&
+                    ((mission.status == MissionStatus::completed && mission.recon_result == ReconResult::none) ||
+                     (mission.detections && mission.recon_result != ReconResult::observed)))) {
                 invalid_checkpoint();
             }
             if (mission.ground_unit) {
@@ -981,6 +1002,7 @@ struct CampaignArchive {
                     }
                     check_journey(journey.route, journey.progress, *mission.ground_destination);
                     if ((mission.status == MissionStatus::holding || mission.status == MissionStatus::released ||
+                         mission.recon_result != ReconResult::none ||
                          (mission.kind == MissionKind::move && mission.status == MissionStatus::completed)) &&
                         journey.progress.leg != journey.route.legs.size()) {
                         invalid_checkpoint();
@@ -1082,6 +1104,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 8 || rules != 7) &&
         (schema != 7 || rules != 6) &&
         (schema != 6 || rules != 6) &&
         (schema != 5 || rules != 6) &&

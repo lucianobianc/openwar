@@ -491,6 +491,7 @@ std::string action_label(MissionKind kind)
     case MissionKind::attack: return "Attack";
     case MissionKind::move: return "Move";
     case MissionKind::hold: return "Hold";
+    case MissionKind::ground_recon: return "Ground Recon";
     }
     return {};
 }
@@ -787,6 +788,7 @@ Color mission_color(MissionStatus status)
     case MissionStatus::scheduled:
     case MissionStatus::preparing: return route_carrier;
     case MissionStatus::in_progress:
+    case MissionStatus::observing:
     case MissionStatus::holding: return accent;
     case MissionStatus::completed: return {169, 224, 159, 255};
     case MissionStatus::failed: return {255, 157, 164, 255};
@@ -923,6 +925,9 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                             label(draft.action.kind == MissionKind::hold ? "Friendly destination. Holds until released." :
                                   "Friendly or neutral destination. No capture.", x, y + 262, 14, muted, width);
                         }
+                        if (draft.action.kind == MissionKind::ground_recon) {
+                            label("One observation tick. Forest limits sighting.", x, y + 262, 14, muted, width);
+                        }
                     } else if (preview.abstract_duration_seconds) {
                         label("Duration " + std::to_string(*preview.abstract_duration_seconds) + " s after launch",
                               x, y + 114, 15, ink, width);
@@ -1003,7 +1008,8 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
         if (marker->kind == MarkerKind::unit && session.permissions().faction == marker->faction) {
             const auto actions = session.actions_for(UnitId{marker->id});
             for (std::size_t i = 0; i < actions.size(); ++i) {
-                button(action_button(area, i), action_label(actions[i].kind).c_str());
+                const auto kind = actions[i].kind;
+                button(action_button(area, i), kind == MissionKind::ground_recon ? "Gnd Recon" : action_label(kind).c_str());
             }
             if (session.permissions().may_issue_orders && actions.empty()) {
                 label("No orders available from this formation.", x, y + 159, 14, muted, width);

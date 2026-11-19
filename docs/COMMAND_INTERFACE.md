@@ -337,6 +337,15 @@ formation reaches its point. Select the active mission and choose
 CLI performs the same action with `--cancel ID`. Before arrival the same
 cancellation control ends a travelling order. Hold has no duration control.
 
+**Gnd Recon** appears for eligible ground reconnaissance formations and
+opens a geographic **Ground Recon** draft. The preview shows travel, fuel
+and the one-tick observation phase. Mission inspection shows arrival,
+observation, detections and partial or interrupted outcomes using the
+commanding faction's reports. The **Recon** action remains the abstract
+operation. The CLI uses `--ground-order ground-recon:EAST,SOUTH,UP[:UNIT]`
+for an exact point and `--order ground-recon:SECTOR[:UNIT]` for the sector
+anchor. Use `--order recon:SECTOR[:UNIT]` for abstract reconnaissance.
+
 Phase 1 established draft review with a destination and reported control.
 Phase 3 extends that workflow with an engine preview and mission history.
 
@@ -344,7 +353,7 @@ Phase 3 extends that workflow with an engine preview and mission history.
 
 Use **Missions (M)** to open the faction-authorized mission list. Selecting
 an entry centres the map on its geographic destination or strategic sector
-objective. The list retains scheduled, preparing, active, holding, completed,
+objective. The list retains scheduled, preparing, active, holding, observing, completed,
 failed, cancelled and released entries. Inspection shows the engine-assigned formation,
 recorded timing and events, known travel progress, and equipment and stock
 commitments. The observer can still inspect either faction or the whole

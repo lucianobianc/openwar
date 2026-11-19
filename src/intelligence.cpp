@@ -166,15 +166,35 @@ bool CampaignState::observe_road(FactionId faction, std::uint32_t road, SectorId
     return !closed;
 }
 
-std::uint32_t CampaignState::observe(FactionId faction, SectorId sector)
+bool CampaignState::ground_recon_visibility(geography::Point point, SectorId sector) const
+{
+    const auto tile = movement_map_.tiles.find({point.east / movement_map_.tile_mm,
+                                                point.south / movement_map_.tile_mm});
+    const auto cover = tile == movement_map_.tiles.end() ? movement_map_.default_tile.cover : tile->second.cover;
+    return world_.sector(sector).properties.terrain != Terrain::forest && cover != geography::Cover::forest;
+}
+
+std::uint32_t CampaignState::observe(FactionId faction, SectorId sector, ObservationScope scope)
 {
     auto& store = intelligence_.at(faction);
     const auto tick = clock_.tick();
     const auto& state = sector_state(sector);
-    const bool open = world_.sector(sector).properties.terrain != Terrain::forest;
-    store.sectors.insert_or_assign(sector, SectorReport{sector, state.controller, tick, 1000,
-        state.controller == faction, state.control == ControlState::contested, open});
-    if (!open) {
+    const bool detects_contacts = scope != ObservationScope::territory &&
+        world_.sector(sector).properties.terrain != Terrain::forest;
+    SectorReport report{sector, state.controller, tick, 1000, state.controller == faction,
+        state.control == ControlState::contested, detects_contacts && scope == ObservationScope::sector_survey};
+    if (!report.surveyed && scope != ObservationScope::sector_survey) {
+        if (const auto prior = store.sectors.find(sector); prior != store.sectors.end()) {
+            report.earlier_survey_tick = prior->second.surveyed ? std::optional{prior->second.observed_tick} :
+                                                                prior->second.earlier_survey_tick;
+            if (report.earlier_survey_tick == tick) {
+                report.surveyed = true;
+                report.earlier_survey_tick.reset();
+            }
+        }
+    }
+    store.sectors.insert_or_assign(sector, report);
+    if (!detects_contacts) {
         return 0;
     }
     if (std::ranges::any_of(installations_, [this, sector](const auto& state) {

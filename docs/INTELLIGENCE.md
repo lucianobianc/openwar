@@ -91,6 +91,23 @@ adotar regra determinística simples: maior `observed_at`, depois confiança,
 depois `source_id`, e adicionar trilha de auditoria. Evitar qualquer verdade
 oculta para desempatar o que a facção acredita.
 
+### Ground reconnaissance reports
+
+Ground Recon uses the existing faction intelligence store and its confidence
+and aging rules. Geography visible in planning remains the static map and
+the faction's reported road and sector conditions. A hidden contact can
+interrupt a mission in execution. The draft and preview use reported data.
+
+Arrival refreshes the objective's territorial report. After one observation
+tick, an open objective can produce current contact and installation
+reports using the existing sector-level detection filters. Forest at the
+sector or objective tile limits the mission to a territorial report.
+Contact-free observation leaves the objective without a new complete survey.
+Earlier complete survey timestamps still govern when older contacts were
+superseded. Incidental observation from other movement crossings and
+engagements follows its existing rules. Reports remain with the observing
+faction, including when a later interruption ends the mission.
+
 ## 6. Relatórios e comunicações
 
 Uma observação pode ser publicada imediatamente na v0 (default configurável),

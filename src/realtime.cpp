@@ -279,10 +279,16 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
             } else {
                 out << " (historical assignment)";
             }
-            if (position_order(mission.kind)) {
+            if (geographic_ground_order(mission.kind)) {
                 const auto& point = *mission.ground_destination;
                 out << " | formation " << static_cast<std::uint32_t>(*mission.ground_unit)
                     << " | destination mm " << point.east << ',' << point.south << ',' << point.elevation;
+            }
+            if (mission.kind == MissionKind::ground_recon) {
+                out << " | " << ground_recon_result(mission);
+                if (mission.detections) {
+                    out << " (" << mission.detections << ')';
+                }
             }
             if (mission.status == MissionStatus::completed && mission.kind == MissionKind::recon) {
                 out << " | " << mission.detections << " detected";

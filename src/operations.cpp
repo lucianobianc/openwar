@@ -70,6 +70,7 @@ std::string_view mission_name(MissionKind kind)
     case MissionKind::attack: return "attack";
     case MissionKind::move: return "move";
     case MissionKind::hold: return "hold";
+    case MissionKind::ground_recon: return "ground-recon";
     }
     throw std::invalid_argument("Unknown mission kind");
 }
@@ -85,8 +86,19 @@ std::string_view mission_status_name(MissionStatus status)
     case MissionStatus::cancelled: return "cancelled";
     case MissionStatus::holding: return "holding";
     case MissionStatus::released: return "released";
+    case MissionStatus::observing: return "observing";
     }
     throw std::invalid_argument("Unknown mission status");
+}
+
+std::string_view ground_recon_result(const Mission& mission)
+{
+    switch (mission.recon_result) {
+    case ReconResult::none: return "no objective observation";
+    case ReconResult::partial: return "partial observation, territorial report only";
+    case ReconResult::observed: return mission.detections ? "contacts detected" : "no contacts detected";
+    }
+    throw std::invalid_argument("Unknown ground reconnaissance result");
 }
 
 bool CampaignState::can_issue_orders(FactionId actor) const
@@ -128,7 +140,8 @@ std::vector<MissionKind> CampaignState::available_orders(FactionId actor, UnitId
 
     std::vector<MissionKind> actions;
     if (combat_.enabled && ground_speed(id)) {
-        for (const auto kind : {MissionKind::defend, MissionKind::attack, MissionKind::move, MissionKind::hold}) {
+        for (const auto kind : {MissionKind::defend, MissionKind::attack, MissionKind::move, MissionKind::hold,
+                                MissionKind::ground_recon}) {
             if (ground_order_equipment(id, kind)) {
                 actions.push_back(kind);
             }
@@ -193,7 +206,8 @@ MissionPlan CampaignState::plan_sector_order(FactionId faction, MissionKind kind
     if (position_order(kind)) {
         return {{}, "move and hold require an exact geographic destination"};
     }
-    if (kind == MissionKind::attack || (combat_.enabled && kind == MissionKind::defend)) {
+    if (kind == MissionKind::attack || kind == MissionKind::ground_recon ||
+        (combat_.enabled && kind == MissionKind::defend)) {
         return plan_ground_order(faction, kind, target, {}, formation);
     }
     return plan_air_order(faction, kind, target, faction_view(faction, false), formation);
@@ -366,7 +380,8 @@ bool CampaignState::can_cancel_order(FactionId actor, MissionId id) const
     return can_issue_orders(actor) && found != missions_.end() &&
         (found->second.status == MissionStatus::scheduled ||
          (found->second.ground_unit && found->second.manual &&
-          (found->second.status == MissionStatus::in_progress || found->second.status == MissionStatus::holding)));
+          (found->second.status == MissionStatus::in_progress || found->second.status == MissionStatus::holding ||
+           found->second.status == MissionStatus::observing)));
 }
 
 bool CampaignState::cancel_order(FactionId actor, MissionId id)
