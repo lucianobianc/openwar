@@ -191,6 +191,48 @@ are stock units. Values are baseline → recovery.
 | Offensive / Defensive | 340 → 452 | 68 → 68 | 0 → 2 | 27 → 18 | 27 → 18 |
 | Defensive / Offensive | 322 → 339 | 68 → 68 | 6 → 12 | 32 → 43 | 32 → 43 |
 
+### Maneuver allocation comparison
+
+The baseline is the workshop-recovery build at `ac658f1`. The scenario
+and all initial inventories are identical across this comparison. The
+revised Defensive planner keeps one armed stationary formation at a quiet
+priority site and can assign the surplus elsewhere. Threatened sites
+retain their previous protection.
+
+| Seed | WEST / EAST | Garrison reassignments | Last combat | Captures | Repairs / arrivals | Back in action | Quiet hours | Outcome |
+|---|---|---:|---|---|---|---|---|---|
+| 7, 42 | Balanced / Balanced | 0 → 0 | 16:20 → 16:20 | 7 → 7 | 7/5 → 7/5 | 3 → 3 | 3 → 3 | EAST capitulation victory at 19:40 in both |
+| 42 | Offensive / Defensive | 0 → 1 | 5:20 → 3:20 | 3 → 3 | 2/2 → 3/6 | 1 → 0 | 42 → 43 | Time-limit draw at 48:00 in both |
+| 42 | Defensive / Offensive | 0 → 1 | 12:20 → 16:20 | 3 → 7 | 12/4 → 7/5 | 4 → 3 | 36 → 3 | 48:00 draw → EAST capitulation victory at 19:40 |
+
+At hour six, the numbers of idle, attack-ready WEST/EAST formations were
+1/2 → 1/2 for Balanced/Balanced, 1/2 → 2/3 for Offensive/Defensive, and
+1/1 → 1/2 for Defensive/Offensive. These counts apply equipment, supply,
+mobility and commitment checks before garrison, strategic recovery and
+route checks. The corresponding numbers with a feasible route to at
+least one authored attack objective were 1/2 → 1/2, 0/2 → 0/3, and
+1/1 → 1/2. A feasible route does not confer an assignment.
+
+In the Offensive/Defensive baseline, EAST armor was retained at sector
+122 with a feasible attack at hour six. EAST mechanized waited for a
+replacement, and EAST scouts were destroyed. WEST armor was broken,
+WEST scouts had no ready occupying equipment, and WEST mechanized had
+no confirmed attack target at that sample. By hour 12, neither faction
+had an authored objective that passed the attack target checks. At hour
+47, the revised run had two WEST and three EAST attack-ready formations
+but still no such objective. In the reverse baseline, WEST armor was
+initially limited by faction recovery and its garrison. Its late attack
+options disappeared, and WEST mechanized and scouts plus all three EAST
+maneuver formations were destroyed. Headquarters and support platoons
+lack occupying equipment for Attack and Defend assignments. The recon
+flights use air orders, and at least one side continued reconnaissance
+late in each baseline draw.
+
+No run fought into the second day. Releasing redundant coverage changed
+the opening and one outcome. The late draw still needs usable objectives
+and routes from current faction reports, while capitulation ends the
+other campaigns before a second day can begin.
+
 ## Source data and reproduction
 
 - `valley.osm.pbf` is a fixed, filtered OSM extract obtained on 18 November 2026

@@ -1416,6 +1416,42 @@ void test_strategic_command()
             defensive.kind == MissionKind::defend && defensive.target == objective && defensive.ground_unit == UnitId{1},
             "Doctrines did not change the mission priority or preserve the quiet command-post garrison");
 
+    auto covered = tradeoff;
+    covered.operations.doctrines[0] = StrategicDoctrine::defensive;
+    stores.id = StockpileId{21};
+    covered.stockpiles.push_back(stores);
+    constexpr UnitId support{5};
+    covered.units.push_back({support, "Command post support", west, approach});
+    covered.combat_units.push_back({support, stores.id});
+    auto support_type = covered.equipment_types.front();
+    support_type.id = EquipmentTypeId{4};
+    support_type.can_occupy = false;
+    covered.equipment_types.push_back(support_type);
+    covered.equipment.push_back({EquipmentId{6}, support_type.id, support});
+
+    CampaignState relieved(covered, 42);
+    const auto hold = relieved.issue_ground_order(west, MissionKind::hold,
+        *relieved.combat_units().at(support).position, support);
+    require(hold.mission.has_value() &&
+            relieved.issue_order(west, MissionKind::recon, objective).mission,
+            "Could not establish a quiet garrison and observe the threatened objective");
+    relieved.advance_ticks(10);
+    const auto reassigned = relieved.faction_view(west);
+    require(reassigned.missions.front().status == MissionStatus::holding &&
+            reassigned.missions.back().kind == MissionKind::defend &&
+            reassigned.missions.back().ground_unit == UnitId{3} &&
+            std::ranges::any_of(reassigned.events, [](const auto& event) {
+                return event.reason == "strategy: reassigned surplus garrison";
+            }), "Support did not release a maneuver formation or lost its standing Hold");
+
+    CampaignState reserved(covered, 42);
+    require(reserved.set_operational_reserve(west, UnitId{3}, true) &&
+            reserved.issue_order(west, MissionKind::recon, objective).mission,
+            "Could not configure operational reserve for a covered formation");
+    reserved.advance_ticks(10);
+    require(reserved.faction_view(west).missions.back().ground_unit == UnitId{1},
+            "Reallocation selected an operational reserve formation");
+
     auto staging = combat_example_scenario();
     staging.operations.planner_interval_ticks = 1;
     staging.operations.strategy_review_ticks = 5;

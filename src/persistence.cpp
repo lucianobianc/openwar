@@ -13,7 +13,7 @@ namespace {
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
 constexpr std::uint64_t schema_version = 14;
-constexpr std::uint64_t rules_version = 12;
+constexpr std::uint64_t rules_version = 13;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
 
@@ -1174,6 +1174,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 14 || rules != 12) &&
         (schema != 13 || rules != 11) &&
         (schema != 12 || rules != 10) &&
         (schema != 11 || rules != 9) &&

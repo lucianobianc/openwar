@@ -87,14 +87,21 @@ each faction in Campaign settings. Both factions use Balanced by default.
 - **Offensive** tries the existing advance and approach-survey priorities first.
   Remaining order slots can respond to reported threats. Garrisons at
   threatened objectives and command posts remain in place.
-- **Defensive** dispatches defenses first and keeps local garrisons at confirmed
-  friendly objectives and command posts even when they are quiet. Other
-  eligible formations can respond to threats or advance using spare order slots.
+- **Defensive** dispatches defenses first. It retains local garrisons at
+  threatened sites. At quiet, confirmed friendly objectives and command
+  posts, it keeps one stationary formation with a ready weapon and ammunition.
+  It prefers an existing Hold, then the smallest ready occupying strength
+  and lowest formation ID. If no credible cover exists, it retains the
+  previous garrison. Surplus formations still need to pass the usual order
+  checks, including operational reserve and commitment checks.
 
 All three use the same faction reports, objective scores, deterministic tie
 breaks, recovery rules, and mission eligibility checks. Doctrine choices
 affect autonomous orders and leave equipment, combat and manual orders under
-their existing rules.
+their existing rules. A dispatched surplus formation records a garrison
+reassignment in the operations log. Checkpoint rules version 13 applies
+the revised allocation at future planning ticks. Earlier checkpoints
+retain their saved orders and use the revised planner when resumed.
 
 ### Autonomous force recovery
 
@@ -116,8 +123,8 @@ and destroyed or surrendered formations cannot receive replacements.
 Existing player orders use their normal eligibility rules.
 
 Checkpoint schema 14 stores the recovery setting. The Move order, service
-jobs and finite reserve items use the usual checkpoint state. Earlier saves
-and scenarios that omit the setting retain their original planning behavior.
+jobs and finite reserve items use the usual checkpoint state. Automatic workshop
+returns are disabled when earlier saves or scenarios omit the setting.
 
 ### Operational reserve
 

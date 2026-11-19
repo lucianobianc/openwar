@@ -163,6 +163,7 @@ bool CampaignState::update_strategy(FactionId faction)
     std::size_t ready = 0;
     std::map<SectorId, std::size_t> garrisons;
     std::vector<UnitId> guards;
+    std::map<UnitId, std::size_t> quiet_garrisons;
     for (const auto& [id, state] : combat_units_) {
         const auto& unit = units_.at(id);
         if (unit.faction != faction) {
@@ -179,9 +180,12 @@ bool CampaignState::update_strategy(FactionId faction)
             ready += strength;
             garrisons[unit.sector] += strength;
             if (friendly(view, faction, unit.sector) &&
-                (doctrine == StrategicDoctrine::defensive || threatened(view, unit.sector)) &&
                 (priorities.contains(unit.sector) || command_sites.contains(unit.sector))) {
-                guards.push_back(id);
+                if (threatened(view, unit.sector)) {
+                    guards.push_back(id);
+                } else if (doctrine == StrategicDoctrine::defensive) {
+                    quiet_garrisons.emplace(id, strength);
+                }
             }
         }
     }
@@ -228,11 +232,17 @@ bool CampaignState::update_strategy(FactionId faction)
     }
     const auto limit = operations_.max_autonomous_missions;
     bool changed = false;
+    std::set<UnitId> released_garrisons;
     const auto dispatch = [&](Mission mission, std::string_view reason) {
         const auto target = mission.target;
+        const auto formation = *mission.ground_unit;
         const auto id = commit_ground_mission(std::move(mission));
         view.missions.push_back(missions_.at({faction, id}));
         record_event(operations_log_, {tick, faction, target, id, std::string(reason)});
+        if (released_garrisons.contains(formation)) {
+            record_event(operations_log_, {tick, faction, units_.at(formation).sector, id,
+                "strategy: reassigned surplus garrison"});
+        }
         ++assigned;
         changed = true;
         busy.insert(target);
@@ -260,6 +270,53 @@ bool CampaignState::update_strategy(FactionId faction)
             if (auto order = plan_ground_mission(faction, MissionKind::move, stock.sector, view, {},
                                                 stock.access_point, nullptr, id)) {
                 dispatch(std::move(*order), "strategy: return to workshop");
+            }
+        }
+    }
+
+    if (!quiet_garrisons.empty()) {
+        // Quiet sites need one stationary formation capable of fighting. Prefer support
+        // units and existing holds so maneuver equipment remains available.
+        std::map<SectorId, std::tuple<bool, std::size_t, UnitId>> cover;
+        for (const auto& [id, state] : combat_units_) {
+            const auto& unit = units_.at(id);
+            if (unit.faction != faction || state.status != GroundStatus::holding ||
+                (!priorities.contains(unit.sector) && !command_sites.contains(unit.sector)) ||
+                !friendly(view, faction, unit.sector) || threatened(view, unit.sector)) {
+                continue;
+            }
+            const bool holding_position = std::ranges::any_of(view.missions, [&](const auto& mission) {
+                return mission.ground_unit == id && mission.status == MissionStatus::holding &&
+                       mission.target == unit.sector;
+            });
+            if (!holding_position && formation_committed(id)) {
+                continue;
+            }
+            const auto& stock = stockpiles_.at(state.stores);
+            constexpr auto ammo = static_cast<std::size_t>(Resource::ammunition);
+            if (stock.quantity[ammo] <= stock.reserved[ammo] ||
+                !std::ranges::any_of(equipment_, [&](const auto& entry) {
+                    const auto& item = entry.second;
+                    const auto& type = equipment_types_.at(item.assignment.type);
+                    return item.assignment.unit == id && type.category != EquipmentCategory::helicopter &&
+                           type.combat_power && (item.status == EquipmentStatus::available ||
+                           item.status == EquipmentStatus::ready || item.status == EquipmentStatus::in_operation);
+                })) {
+                continue;
+            }
+            const auto strength = quiet_garrisons.contains(id) ? quiet_garrisons.at(id) : 0;
+            const auto candidate = std::tuple{!holding_position, strength, id};
+            const auto [position, inserted] = cover.try_emplace(unit.sector, candidate);
+            if (!inserted && candidate < position->second) {
+                position->second = candidate;
+            }
+        }
+        for (const auto& [id, strength] : quiet_garrisons) {
+            const auto retained = cover.find(units_.at(id).sector);
+            if (retained == cover.end() || std::get<2>(retained->second) == id) {
+                guards.push_back(id);
+            } else {
+                released_garrisons.insert(id);
             }
         }
     }
