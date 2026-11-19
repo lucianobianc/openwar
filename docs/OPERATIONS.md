@@ -49,6 +49,33 @@ Tipos v0: RECON, ATTACK, DEFEND, OCCUPY, ESCORT, PATROL, RESUPPLY;
 SEAD/SAR podem ser especializações posteriores. Missão de helicóptero só
 faz captura territorial indiretamente, permitindo posterior ocupação terrestre.
 
+### Formation assignment in the current engine
+
+The command request may carry a formation ID. `CommandSession` passes it to
+the same ground or abstract operation planner used for automatic assignment.
+The commanding faction must own the requested formation and have permission
+to issue orders. A scheduled, preparing, or executing order prevents a
+second assignment to the formation. To issue a different order, the operator
+must use the existing cancellation rules or wait for the current order to end.
+
+The engine checks the requested formation's available equipment, readiness,
+and applicable mobility, facility, intelligence, and stock requirements.
+Only that formation is considered for an explicit request. A refusal may
+identify an active commitment, unavailable equipment or facility, insufficient
+resources, or an infeasible route. A ground order commits a whole formation
+through its existing equipment reservation. An abstract operation assigns
+one eligible item of equipment within the formation.
+
+Without an ID, a ground order selects the eligible formation with the
+shortest route duration. An abstract operation selects eligible equipment
+with the lowest fuel requirement. The existing deterministic ID order
+breaks ties. Autonomous planning uses this automatic mode.
+
+Preview checks the current state without committing equipment or stock.
+Confirmation repeats the same checks before reserving resources. The existing
+scenario and checkpoint formats already represent the committed formation
+or equipment assignment.
+
 ## 4. Fluxo de planejamento
 
 1. Receber snapshot de `FactionView`, forças próprias, prontidão e recursos

@@ -35,14 +35,15 @@ std::vector<OrderAction> CommandSession::actions_for(UnitId formation) const
     return actions;
 }
 
-OrderPreview CommandSession::preview(MissionKind kind, const OrderTarget& target) const
+OrderPreview CommandSession::preview(MissionKind kind, const OrderTarget& target,
+                                   std::optional<UnitId> formation) const
 {
     const auto tick = campaign_.clock().tick();
     if (!permissions().may_issue_orders) {
         return {tick, "player has no authority for this faction"};
     }
     const auto plan = std::visit([&](auto destination) {
-        return campaign_.preview_order(*faction_, kind, destination);
+        return campaign_.preview_order(*faction_, kind, destination, formation);
     }, target);
     OrderPreview result{tick, plan.reason};
     if (!plan.candidate) {
@@ -63,15 +64,16 @@ OrderPreview CommandSession::preview(MissionKind kind, const OrderTarget& target
     return result;
 }
 
-OrderResult CommandSession::submit(MissionKind kind, const OrderTarget& target)
+OrderResult CommandSession::submit(MissionKind kind, const OrderTarget& target,
+                                   std::optional<UnitId> formation)
 {
     if (!permissions().may_issue_orders) {
         return {{}, "player has no authority for this faction"};
     }
     if (const auto* point = std::get_if<geography::Point>(&target)) {
-        return campaign_.issue_ground_order(*faction_, kind, *point);
+        return campaign_.issue_ground_order(*faction_, kind, *point, formation);
     }
-    return campaign_.issue_order(*faction_, kind, std::get<SectorId>(target));
+    return campaign_.issue_order(*faction_, kind, std::get<SectorId>(target), formation);
 }
 
 bool CommandSession::can_cancel(FactionId owner, MissionId id) const

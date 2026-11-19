@@ -441,10 +441,14 @@ public:
     std::span<const OperationsEvent> observer_operations_log() const { return operations_log_; }
     bool can_issue_orders(FactionId actor) const;
     std::vector<MissionKind> available_orders(FactionId actor, UnitId unit) const;
-    MissionPlan preview_order(FactionId actor, MissionKind kind, SectorId target) const;
-    MissionPlan preview_order(FactionId actor, MissionKind kind, geography::Point destination) const;
-    OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target);
-    OrderResult issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination);
+    MissionPlan preview_order(FactionId actor, MissionKind kind, SectorId target,
+                            std::optional<UnitId> formation = {}) const;
+    MissionPlan preview_order(FactionId actor, MissionKind kind, geography::Point destination,
+                            std::optional<UnitId> formation = {}) const;
+    OrderResult issue_order(FactionId actor, MissionKind kind, SectorId target,
+                            std::optional<UnitId> formation = {});
+    OrderResult issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination,
+                            std::optional<UnitId> formation = {});
     bool can_cancel_order(FactionId actor, MissionId id) const;
     bool cancel_order(FactionId actor, MissionId id);
     bool combat_enabled() const { return combat_.enabled; }
@@ -525,8 +529,12 @@ private:
     bool update_strategy(FactionId faction);
     void dispatch_reinforcement(FactionId faction, const FactionView& view, const StrategicPlan& plan);
     OrderResult schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual);
-    MissionPlan plan_sector_order(FactionId faction, MissionKind kind, SectorId target) const;
-    MissionPlan plan_air_order(FactionId faction, MissionKind kind, SectorId target, const FactionView& view) const;
+    bool formation_committed(UnitId unit) const;
+    std::string_view order_authority_refusal(FactionId actor, std::optional<UnitId> formation) const;
+    MissionPlan plan_sector_order(FactionId faction, MissionKind kind, SectorId target,
+                                 std::optional<UnitId> formation = {}) const;
+    MissionPlan plan_air_order(FactionId faction, MissionKind kind, SectorId target, const FactionView& view,
+                              std::optional<UnitId> formation = {}) const;
     OrderResult commit_order(MissionPlan plan, bool manual);
     void release_unspent_mission_stock(Mission& mission);
     void release_air_mission_equipment(const Mission& mission, EquipmentStatus standby);
@@ -537,13 +545,15 @@ private:
     MissionId next_mission_id(FactionId faction) const;
     void initialize_combat(const ScenarioDefinition& scenario);
     MissionPlan plan_ground_order(FactionId faction, MissionKind kind, SectorId target,
-                                  std::optional<geography::Point> destination = {}) const;
+                                  std::optional<geography::Point> destination = {},
+                                  std::optional<UnitId> formation = {}) const;
     std::string_view ground_target_refusal(const FactionView& view, FactionId faction,
                                            MissionKind kind, SectorId target) const;
     std::optional<Mission> plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,
                                               const FactionView& view, std::span<const UnitId> excluded,
                                               std::optional<geography::Point> destination = {},
-                                              std::string_view* refusal = nullptr) const;
+                                              std::string_view* refusal = nullptr,
+                                              std::optional<UnitId> formation = {}) const;
     MissionId commit_ground_mission(Mission mission);
     void update_combat();
     void move_combat_unit(CombatUnit& unit, geography::Point position);
@@ -555,7 +565,8 @@ private:
     geography::Route legacy_ground_route(geography::Point origin, std::span<const SectorId> steps,
                                          geography::Point destination, std::uint32_t speed) const;
     std::uint32_t ground_speed(UnitId id) const;
-    std::optional<EquipmentId> ground_order_equipment(UnitId unit, MissionKind kind) const;
+    std::optional<EquipmentId> ground_order_equipment(UnitId unit, MissionKind kind,
+                                                       std::string_view* refusal = nullptr) const;
     bool ground_opposition(SectorId sector, FactionId faction) const;
     enum class GroundStep { no_fuel, blocked, travelling, arrived };
     GroundStep advance_ground(CombatUnit& unit, GroundJourney& journey, bool withdrawing);

@@ -156,6 +156,12 @@ if printf '%s\n' "$friendly" | grep -E 'East field group|EAST intelligence|^Fron
 fi
 reject --demo combat --faction WEST --order attack:2 --ticks 1
 
+explicit=$("$openwar" --demo combat --faction WEST --order attack:1:1 --ticks 0)
+printf '%s\n' "$explicit" | grep -F 'Mission 1 attack to sector 1 | scheduled | equipment 1 reserved'
+reject --demo combat --faction WEST --order attack:1:2 --ticks 0
+reject --demo combat --faction WEST --order attack:1:4294967296 --ticks 0
+reject --demo combat --faction WEST --order attack:1:1 --order attack:1:1 --ticks 0
+
 campaign=$("$openwar" --demo campaign --seed 42 --ticks 3000 --events)
 printf '%s\n' "$campaign" | grep -Fx 'Campaign summary | seed 42'
 printf '%s\n' "$campaign" | grep -E '^War: (.* victory|draw) at tick [0-9]+ '
@@ -238,6 +244,9 @@ EOF
     "$openwar" --scenario "$geographic" --faction WEST --ground-order defend:20266672,15133974,165151 \
         --ticks 0 --save "$scratch/point-order.ows"
     cmp "$scratch/sector-order.ows" "$scratch/point-order.ows"
+    "$openwar" --scenario "$geographic" --faction WEST --ground-order defend:20266672,15133974,165151:1 \
+        --ticks 0 --save "$scratch/explicit-point-order.ows"
+    cmp "$scratch/point-order.ows" "$scratch/explicit-point-order.ows"
     reject --load "$scratch/point-order.ows" --faction EAST --cancel 1 --ticks 0
     reject --load "$scratch/point-order.ows" --cancel 1 --ticks 0
     reject --load "$scratch/point-order.ows" --faction WEST --ground-order defend:20266672,15133974 --ticks 0

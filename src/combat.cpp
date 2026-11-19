@@ -219,15 +219,17 @@ void CampaignState::initialize_combat(const ScenarioDefinition& scenario)
     victory_since_.resize(victory_objectives_.size());
 }
 
-OrderResult CampaignState::issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination)
+OrderResult CampaignState::issue_ground_order(FactionId actor, MissionKind kind, geography::Point destination,
+                                              std::optional<UnitId> formation)
 {
-    return commit_order(preview_order(actor, kind, destination), true);
+    return commit_order(preview_order(actor, kind, destination, formation), true);
 }
 
-MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, geography::Point destination) const
+MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, geography::Point destination,
+                                         std::optional<UnitId> formation) const
 {
-    if (!can_issue_orders(actor)) {
-        return {{}, "player has no authority for this faction"};
+    if (const auto refusal = order_authority_refusal(actor, formation); !refusal.empty()) {
+        return {{}, refusal};
     }
     if (!combat_.enabled || (kind != MissionKind::attack && kind != MissionKind::defend)) {
         return {{}, "ground operations unavailable"};
@@ -237,11 +239,12 @@ MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, geog
         (!authored_geography_ && destination.elevation != 0)) {
         return {{}, "ground destination is out of bounds"};
     }
-    return plan_ground_order(actor, kind, static_cast<SectorId>(*target), destination);
+    return plan_ground_order(actor, kind, static_cast<SectorId>(*target), destination, formation);
 }
 
 MissionPlan CampaignState::plan_ground_order(FactionId faction, MissionKind kind, SectorId target,
-                                            std::optional<geography::Point> destination) const
+                                            std::optional<geography::Point> destination,
+                                             std::optional<UnitId> formation) const
 {
     if (!combat_.enabled || war_ended()) {
         return {{}, "ground operations unavailable"};
@@ -250,8 +253,11 @@ MissionPlan CampaignState::plan_ground_order(FactionId faction, MissionKind kind
     if (const auto refusal = ground_target_refusal(view, faction, kind, target); !refusal.empty()) {
         return {{}, refusal};
     }
+    if (formation && !combat_units_.contains(*formation)) {
+        return {{}, "selected formation has no ground deployment"};
+    }
     std::string_view refusal = "no eligible supplied ground unit with a known route";
-    auto chosen = plan_ground_mission(faction, kind, target, view, {}, destination, &refusal);
+    auto chosen = plan_ground_mission(faction, kind, target, view, {}, destination, &refusal, formation);
     if (!chosen) {
         return {{}, refusal};
     }
@@ -282,34 +288,37 @@ std::string_view CampaignState::ground_target_refusal(const FactionView& view, F
 std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, MissionKind kind, SectorId target,
                                                        const FactionView& view, std::span<const UnitId> excluded,
                                                        std::optional<geography::Point> destination,
-                                                       std::string_view* refusal) const
+                                                       std::string_view* refusal, std::optional<UnitId> formation) const
 {
     const auto objective = destination.value_or(ground_anchor(target));
     std::optional<Mission> chosen;
     std::int64_t best_duration = 0;
     for (const auto& [id, combat] : combat_units_) {
         const auto& unit = units_.at(id);
-        if (unit.faction != faction ||
-            std::ranges::find(excluded, id) != excluded.end() ||
-            std::ranges::any_of(view.missions, [&](const auto& mission) {
-                return (mission.status == MissionStatus::preparing || active_ground(mission.status)) &&
-                       equipment_.at(mission.equipment).assignment.unit == id;
-            })) {
+        if (unit.faction != faction || (formation && id != *formation) ||
+            std::ranges::find(excluded, id) != excluded.end() || formation_committed(id)) {
+            continue;
+        }
+        const auto equipment = ground_order_equipment(id, kind, formation ? refusal : nullptr);
+        if (!equipment) {
             continue;
         }
         const auto speed = ground_speed(id);
         if (!speed) {
+            if (formation && refusal)
+                *refusal = "selected formation has no available ground mobility";
             continue;
         }
         const auto& stores = stockpiles_.at(combat.stores);
-        const auto equipment = ground_order_equipment(id, kind);
-        if (!equipment) {
-            continue;
-        }
         std::vector<SectorId> path;
         auto route = ground_route(combat, objective, view, path);
         if (route.status == geography::RouteStatus::limit_exceeded && refusal) {
             *refusal = "ground route search limit exceeded";
+        } else if (formation && refusal) {
+            if (route.status != geography::RouteStatus::found)
+                *refusal = "selected formation has no route with current faction reports";
+            else if (route.fuel_ml > fuel_balance(stores, combat))
+                *refusal = "selected formation has insufficient fuel for the route";
         }
         if (route.status != geography::RouteStatus::found ||
             route.fuel_ml > fuel_balance(stores, combat) || (chosen && route.duration_us >= best_duration)) {
@@ -328,14 +337,19 @@ std::optional<Mission> CampaignState::plan_ground_mission(FactionId faction, Mis
     return chosen;
 }
 
-std::optional<EquipmentId> CampaignState::ground_order_equipment(UnitId id, MissionKind kind) const
+std::optional<EquipmentId> CampaignState::ground_order_equipment(UnitId id, MissionKind kind,
+                                                                std::string_view* refusal) const
 {
     const auto combat = combat_units_.find(id);
     if (combat == combat_units_.end() || combat->second.status != GroundStatus::holding) {
+        if (refusal)
+            *refusal = "selected ground formation is unavailable";
         return {};
     }
     const auto& stores = stockpiles_.at(combat->second.stores);
     if (!free_stock(stores, supply) || (kind == MissionKind::attack && !free_stock(stores, ammo))) {
+        if (refusal)
+            *refusal = "selected formation lacks unreserved supplies or ammunition";
         return {};
     }
     const auto equipment = std::ranges::find_if(equipment_, [&](const auto& entry) {
@@ -343,7 +357,12 @@ std::optional<EquipmentId> CampaignState::ground_order_equipment(UnitId id, Miss
         return item.assignment.unit == id && item.status == EquipmentStatus::available &&
             equipment_types_.at(item.assignment.type).can_occupy;
     });
-    return equipment == equipment_.end() ? std::nullopt : std::optional{equipment->first};
+    if (equipment == equipment_.end()) {
+        if (refusal)
+            *refusal = "selected formation has no available equipment that can occupy territory";
+        return {};
+    }
+    return equipment->first;
 }
 
 MissionId CampaignState::commit_ground_mission(Mission mission)

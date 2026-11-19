@@ -96,17 +96,37 @@ bool CampaignState::can_issue_orders(FactionId actor) const
     return operations_.enabled && operations_.player == actor && !war_ended();
 }
 
+bool CampaignState::formation_committed(UnitId id) const
+{
+    const auto faction = units_.at(id).faction;
+    const auto first = missions_.lower_bound({faction, MissionId{}});
+    const auto last = missions_.upper_bound({faction, MissionId{std::numeric_limits<std::uint32_t>::max()}});
+    return std::ranges::any_of(first, last, [&](const auto& entry) {
+        const auto& mission = entry.second;
+        return active(mission.status) && equipment_.at(mission.equipment).assignment.unit == id;
+    });
+}
+
+std::string_view CampaignState::order_authority_refusal(FactionId actor, std::optional<UnitId> formation) const
+{
+    if (!can_issue_orders(actor))
+        return "player has no authority for this faction";
+    if (formation) {
+        const auto unit = units_.find(*formation);
+        if (unit == units_.end() || unit->second.faction != actor)
+            return "selected formation is not under your command";
+        if (formation_committed(*formation))
+            return "selected formation already has an active order";
+    }
+    return {};
+}
+
 std::vector<MissionKind> CampaignState::available_orders(FactionId actor, UnitId id) const
 {
-    const auto unit = units_.find(id);
-    if (!can_issue_orders(actor) || unit == units_.end() || unit->second.faction != actor ||
-        std::ranges::any_of(missions_, [&](const auto& entry) {
-            const auto& mission = entry.second;
-            return mission.faction == actor && active(mission.status) &&
-                   equipment_.at(mission.equipment).assignment.unit == id;
-        })) {
+    if (!order_authority_refusal(actor, id).empty()) {
         return {};
     }
+    const auto unit = units_.find(id);
 
     std::vector<MissionKind> actions;
     if (combat_.enabled && ground_speed(id)) {
@@ -145,17 +165,19 @@ std::vector<MissionKind> CampaignState::available_orders(FactionId actor, UnitId
     return actions;
 }
 
-MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, SectorId target) const
+MissionPlan CampaignState::preview_order(FactionId actor, MissionKind kind, SectorId target,
+                                         std::optional<UnitId> formation) const
 {
-    if (!can_issue_orders(actor)) {
-        return {{}, "player has no authority for this faction"};
+    if (const auto refusal = order_authority_refusal(actor, formation); !refusal.empty()) {
+        return {{}, refusal};
     }
-    return plan_sector_order(actor, kind, target);
+    return plan_sector_order(actor, kind, target, formation);
 }
 
-OrderResult CampaignState::issue_order(FactionId actor, MissionKind kind, SectorId target)
+OrderResult CampaignState::issue_order(FactionId actor, MissionKind kind, SectorId target,
+                                       std::optional<UnitId> formation)
 {
-    return commit_order(preview_order(actor, kind, target), true);
+    return commit_order(preview_order(actor, kind, target, formation), true);
 }
 
 OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind, SectorId target, bool manual)
@@ -163,20 +185,21 @@ OrderResult CampaignState::schedule_mission(FactionId faction, MissionKind kind,
     return commit_order(plan_sector_order(faction, kind, target), manual);
 }
 
-MissionPlan CampaignState::plan_sector_order(FactionId faction, MissionKind kind, SectorId target) const
+MissionPlan CampaignState::plan_sector_order(FactionId faction, MissionKind kind, SectorId target,
+                                              std::optional<UnitId> formation) const
 {
     mission_name(kind);
     if (static_cast<std::uint32_t>(target) >= world_.sectors().size()) {
         return {{}, "target sector is out of bounds"};
     }
     if (kind == MissionKind::attack || (combat_.enabled && kind == MissionKind::defend)) {
-        return plan_ground_order(faction, kind, target);
+        return plan_ground_order(faction, kind, target, {}, formation);
     }
-    return plan_air_order(faction, kind, target, faction_view(faction, false));
+    return plan_air_order(faction, kind, target, faction_view(faction, false), formation);
 }
 
 MissionPlan CampaignState::plan_air_order(FactionId faction, MissionKind kind, SectorId target,
-                                         const FactionView& view) const
+                                         const FactionView& view, std::optional<UnitId> formation) const
 {
     if (kind != MissionKind::recon && !known_friendly(view, faction, target)) {
         return {{}, "target lacks confirmed friendly control"};
@@ -195,16 +218,15 @@ MissionPlan CampaignState::plan_air_order(FactionId faction, MissionKind kind, S
         }
     }
 
-    std::string_view refusal = "no eligible available equipment in range";
+    std::string_view refusal = formation ? "selected formation has no available equipment in range at a launch facility" :
+        "no eligible available equipment in range";
     std::optional<Mission> chosen;
     const auto& destination = world_.sector(target);
     for (const auto& [id, item] : equipment_) {
         const auto& unit = units_.at(item.assignment.unit);
-        if (unit.faction != faction || item.status != EquipmentStatus::available || !unit.facility ||
-            std::ranges::any_of(view.missions, [&](const auto& mission) {
-                return active(mission.status) &&
-                       equipment_.at(mission.equipment).assignment.unit == unit.id;
-            })) {
+        if (unit.faction != faction || (formation && unit.id != *formation) ||
+            item.status != EquipmentStatus::available || !unit.facility ||
+            formation_committed(unit.id)) {
             continue;
         }
         const auto& type = equipment_types_.at(item.assignment.type);
@@ -224,14 +246,16 @@ MissionPlan CampaignState::plan_air_order(FactionId faction, MissionKind kind, S
                 return entry.second.assignment.unit == unit.id &&
                        entry.second.status != EquipmentStatus::lost;
             }) != 1)) {
+            if (formation)
+                refusal = "selected formation cannot reposition to this facility";
             continue;
         }
         const auto& facility = facilities_.at(*unit.facility);
-        if (!facility.operational || !supports(facility)) {
+        const auto& stock = stockpiles_.at(facility.stockpile);
+        if (!facility.operational || !supports(facility) || (formation && stock.owner != faction)) {
             refusal = "launch facility unavailable";
             continue;
         }
-        const auto& stock = stockpiles_.at(facility.stockpile);
         const auto fuel = distance * 2 + 1;
         bool supplied = true;
         for (std::size_t i = 0; i < stock.quantity.size(); ++i) {

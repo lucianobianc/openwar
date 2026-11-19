@@ -305,14 +305,24 @@ The standalone viewer and CLI submit existing orders through the headless
 formation actions and cancellation eligibility. A command session reads
 its own faction. Observer sessions may change their inspection perspective.
 
-The viewer keeps one local draft with a mission type and destination.
-Selecting a friendly formation offers actions it is equipped to perform.
-On confirmation the campaign validates current authority, resources and
-intelligence, then assigns a participant using the existing mission rules.
+The viewer keeps one local draft with a mission type, destination and the
+selected formation's ID. Selecting a friendly formation offers actions it
+is equipped to perform. The draft shows the formation name and ID and uses
+explicit assignment by default. **Use automatic** opts into assignment by the
+engine. **Use selected** restores the original formation in the draft.
+
 Choosing a geographic point submits a ground attack or ground defense.
-Sector-based actions use the clicked strategic sector. Cancelling a
-mission follows the same eligibility rule as the CLI, with a separate
-confirmation in the viewer.
+Sector-based actions use the clicked strategic sector. On confirmation
+the campaign checks command authority, active commitments and the current
+eligibility of the requested formation. The viewer reports a refusal if
+the selected formation is no longer eligible. Cancelling a mission follows
+the same eligibility rule as the CLI and has a separate confirmation in
+the viewer.
+
+The CLI supports `--order TYPE:SECTOR[:UNIT]` and
+`--ground-order TYPE:EAST,SOUTH,UP[:UNIT]`. UNIT is a numeric formation
+ID. Omitting it retains automatic assignment, including the existing
+deterministic candidate ranking.
 
 Phase 1 established draft review with a destination and reported control.
 Phase 3 extends that workflow with an engine preview and mission history.
@@ -336,9 +346,11 @@ local draft preview. Road conditions and contact overlays continue to use
 the perspective's intelligence reports. Abstract air operations show their sector objective
 and programmed duration. They have no geographic flight path or travel ETA.
 
-The viewer requests previews through `CommandSession`. Confirmed orders
-from the CLI and viewer use the same planner and validation. The draft shows the currently eligible formation and
-estimated travel time and fuel for ground movement. Ground estimates use
+The viewer requests previews through `CommandSession`, including the
+formation ID for explicit requests. Confirmed orders from the CLI and viewer
+use the same planner and validation. The draft shows eligibility or a refusal
+and estimates travel time and fuel for ground movement. Automatic previews
+show the current candidate. Ground estimates use
 reported territorial and road conditions. Current speed and faction road
 reports inform the displayed remaining travel ETA. Delays due to unobserved
 opposition are outside that estimate. The preview neither creates a mission

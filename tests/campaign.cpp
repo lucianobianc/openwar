@@ -1759,6 +1759,107 @@ struct CheckpointFiles {
     }
 };
 
+void test_explicit_formation_assignment()
+{
+    constexpr auto west = FactionId::west;
+    constexpr UnitId fast{1}, enemy{2}, slow{3}, first_flight{4}, second_flight{5};
+    constexpr EquipmentId slow_item{4}, flight_item{6};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr SectorId sector{1};
+    constexpr geography::Point destination{751'000, 251'000, 0};
+    auto scenario = combat_example_scenario(west);
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.units.push_back({slow, "Slow ground formation", west, SectorId{0}});
+    auto slow_type = scenario.equipment_types.front();
+    slow_type.id = EquipmentTypeId{3};
+    slow_type.ground_speed_kph = 10;
+    scenario.equipment_types.push_back(slow_type);
+    scenario.equipment.push_back({slow_item, slow_type.id, slow});
+    auto slow_stock = *std::ranges::find(scenario.stockpiles, StockpileId{10}, &Stockpile::id);
+    slow_stock.id = StockpileId{13};
+    scenario.stockpiles.push_back(slow_stock);
+    scenario.combat_units.push_back({slow, slow_stock.id});
+
+    for (const auto unit : {first_flight, second_flight}) {
+        scenario.units.push_back({unit, "West flight", west, SectorId{0}, {}, FacilityId{1}});
+    }
+    EquipmentType flight{EquipmentTypeId{4}, "Test helicopter", west, EquipmentCategory::helicopter,
+                         {}, {}, {}, {}, 3600, 2};
+    flight.preparation.costs[fuel] = 2;
+    scenario.equipment_types.push_back(flight);
+    scenario.equipment.push_back({EquipmentId{5}, flight.id, first_flight});
+    scenario.equipment.push_back({flight_item, flight.id, second_flight});
+    auto& launch_stock = *std::ranges::find(scenario.stockpiles, StockpileId{1}, &Stockpile::id);
+    launch_stock.quantity[fuel] = 30;
+
+    CampaignState campaign(scenario, 42);
+    CommandSession command(campaign, west);
+    const auto automatic = command.preview(MissionKind::attack, destination);
+    const auto explicit_plan = command.preview(MissionKind::attack, destination, slow);
+    require(automatic.formation == fast && explicit_plan.formation == slow &&
+            automatic.route && explicit_plan.route && explicit_plan.route->duration_us > automatic.route->duration_us,
+            "Preview replaced the requested slower formation");
+    require(campaign.equipment().at(slow_item).status == EquipmentStatus::available &&
+            campaign.faction_view(west).missions.empty(), "Preview reserved ground equipment");
+    require(command.submit(MissionKind::attack, destination, enemy).reason ==
+                "selected formation is not under your command" &&
+            command.submit(MissionKind::attack, destination, UnitId{999}).reason ==
+                "selected formation is not under your command",
+            "Unknown and opposing formation identifiers disclosed different information");
+
+    const auto order = command.submit(MissionKind::attack, destination, slow);
+    const auto missions = campaign.faction_view(west).missions;
+    require(order.mission && missions.size() == 1 && missions.front().ground_unit == slow &&
+            missions.front().equipment == slow_item && missions.front().ground_journey &&
+            missions.front().ground_journey->route.duration_us == explicit_plan.route->duration_us &&
+            campaign.equipment().at(slow_item).status == EquipmentStatus::reserved &&
+            campaign.equipment().at(EquipmentId{1}).status == EquipmentStatus::available,
+            "Confirmation did not commit the explicit ground preview");
+    require(command.submit(MissionKind::attack, sector, slow).reason ==
+                "selected formation already has an active order" &&
+            campaign.faction_view(west).missions == missions,
+            "A conflicting order replaced the active mission");
+
+    CampaignState changed(scenario, 42);
+    CommandSession changed_session(changed, west);
+    require(changed_session.preview(MissionKind::attack, sector, slow).formation == slow &&
+            changed.lose_equipment(slow_item), "Could not change ground readiness after preview");
+    const auto declined = changed_session.submit(MissionKind::attack, sector, slow);
+    require(!declined.mission && declined.reason.starts_with("selected formation") &&
+            changed.faction_view(west).missions.empty() &&
+            changed.equipment().at(EquipmentId{1}).status == EquipmentStatus::available,
+            "Confirmation failed to revalidate lost equipment or reserved a substitute");
+    require(changed_session.submit(MissionKind::attack, sector).mission.has_value() &&
+            changed.faction_view(west).missions.front().ground_unit == fast,
+            "Automatic assignment without a formation stopped selecting the eligible candidate");
+
+    const auto air = command.preview(MissionKind::recon, sector, second_flight);
+    require(command.preview(MissionKind::recon, sector).formation == first_flight &&
+            air.formation == second_flight && air.launch_reservation[fuel] == 5 &&
+            campaign.stockpiles().at(StockpileId{1}).reserved[fuel] == 0,
+            "Air preview substituted a candidate or prematurely reserved launch stock");
+    require(command.submit(MissionKind::recon, sector, second_flight).mission.has_value() &&
+            campaign.faction_view(west).missions.back().equipment == flight_item &&
+            campaign.stockpiles().at(StockpileId{1}).reserved[fuel] == air.launch_reservation[fuel],
+            "Explicit air order did not commit the previewed equipment and resources");
+
+    const CheckpointFiles files;
+    const auto halfway = files.directory / "explicit-formation.ows";
+    campaign.advance_ticks(1);
+    campaign.save(halfway);
+    auto resumed = CampaignState::load(halfway);
+    resumed.advance_ticks(8);
+    campaign.advance_ticks(8);
+    const auto first = files.directory / "resumed.ows";
+    const auto second = files.directory / "continuous.ows";
+    resumed.save(first);
+    campaign.save(second);
+    std::ifstream resumed_bytes(first, std::ios::binary), continuous_bytes(second, std::ios::binary);
+    require(std::equal(std::istreambuf_iterator<char>(resumed_bytes), std::istreambuf_iterator<char>(),
+                       std::istreambuf_iterator<char>(continuous_bytes), std::istreambuf_iterator<char>()),
+            "Explicit missions diverged after checkpoint resume");
+}
+
 void test_geographic_ground_operations()
 {
     using namespace geography;
@@ -2704,6 +2805,7 @@ int main()
     test_forces_and_maintenance();
     test_operations_and_intelligence();
     test_command_session();
+    test_explicit_formation_assignment();
     test_recon_revisit();
     test_mission_preparation_reservation();
     test_destroyed_reinforcement();

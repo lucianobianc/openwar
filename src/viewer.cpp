@@ -77,10 +77,18 @@ Layout layout()
 
 struct OrderDraft {
     OrderAction action;
+    UnitId selected_formation;
+    std::string selected_name;
+    bool automatic = false;
     std::optional<OrderTarget> target{};
     geography::Point pin{};
     SectorId sector{};
     std::optional<OrderPreview> preview{};
+
+    std::optional<UnitId> requested_formation() const
+    {
+        return automatic ? std::nullopt : std::optional{selected_formation};
+    }
 };
 
 struct CommandFeedback {
@@ -460,6 +468,11 @@ Rectangle review_button(Rectangle panel, bool confirm)
     return {panel.x + (confirm ? 148 : 15), panel.y + 192, confirm ? 184.f : 123.f, 32};
 }
 
+Rectangle assignment_button(Rectangle panel)
+{
+    return {panel.x + 173, panel.y + 165, 159, 24};
+}
+
 Rectangle cancel_mission_button(Rectangle area)
 {
     return {area.x + 15, area.y + 159, 146, 29};
@@ -490,6 +503,13 @@ bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rect
             controls.feedback.reset();
             return false;
         }
+        if (controls.draft && clicked(assignment_button(panel))) {
+            auto& draft = *controls.draft;
+            draft.automatic = !draft.automatic;
+            draft.preview.reset();
+            controls.feedback.reset();
+            return false;
+        }
         if (!clicked(review_button(panel, true))) {
             return false;
         }
@@ -503,8 +523,10 @@ bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rect
         if (!controls.draft->target) {
             return false;
         }
-        const auto result = session.submit(controls.draft->action.kind, *controls.draft->target);
+        auto& draft = *controls.draft;
+        const auto result = session.submit(draft.action.kind, *draft.target, draft.requested_formation());
         if (!result.mission) {
+            draft.preview.reset();
             controls.feedback = CommandFeedback{std::string(result.reason), false};
             return false;
         }
@@ -520,7 +542,7 @@ bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rect
             const auto actions = session.actions_for(UnitId{marker->id});
             for (std::size_t i = 0; i < actions.size(); ++i) {
                 if (clicked(action_button(panel, i))) {
-                    controls.draft = OrderDraft{actions[i]};
+                    controls.draft = OrderDraft{actions[i], UnitId{marker->id}, marker->label};
                     controls.feedback.reset();
                     break;
                 }
@@ -849,7 +871,9 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
     if (controls.draft) {
         const auto& draft = *controls.draft;
         label(action_label(draft.action.kind) + " order draft", x, y, 21, ink, width);
-        label("Assignment is automatic on confirmation.", x, y + 29, 14, muted, width);
+        const auto assignment = draft.automatic ? "Automatic assignment on confirmation" :
+            "Explicit #" + std::to_string(static_cast<std::uint32_t>(draft.selected_formation)) + " / " + draft.selected_name;
+        label(assignment, x, y + 29, 14, muted, width);
         if (draft.target) {
             const auto id = static_cast<std::uint32_t>(draft.sector);
             const auto& tile = snapshot.tiles.at(id);
@@ -863,7 +887,8 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
             if (draft.preview) {
                 const auto& preview = *draft.preview;
                 if (preview.formation) {
-                    label("Eligible now / " + preview.formation_name, x, y + 93, 15, accent, width);
+                    label(draft.automatic ? "Candidate / " + preview.formation_name : "Selected formation eligible",
+                          x, y + 93, 15, accent, width);
                     if (preview.route) {
                         const auto us = preview.route->duration_us;
                         const auto seconds = us / 1'000'000 + (us % 1'000'000 != 0);
@@ -871,6 +896,8 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                               " mL estimated", x, y + 114, 15, ink, width);
                         label("Uses faction reports. Conditions may change.", x, y + 139, 14, muted, width);
                         label("Ground fuel is drawn during travel.", x, y + 227, 14, muted, width);
+                        label(draft.action.kind == MissionKind::attack ? "Requires supplies and ammunition." :
+                              "Requires supplies.", x, y + 248, 14, muted, width);
                     } else if (preview.abstract_duration_seconds) {
                         label("Duration " + std::to_string(*preview.abstract_duration_seconds) + " s after launch",
                               x, y + 114, 15, ink, width);
@@ -892,7 +919,7 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                     }
                 } else {
                     wrapped_label("Unavailable / " + std::string(preview.reason), x, y + 99, 14, route_preview, width);
-                    label("Choose another objective to revise the draft.", x, y + 139, 14, muted, width);
+                    label("Revise the draft or discard it.", x, y + 139, 14, muted, width);
                 }
                 label("Preview at tick " + std::to_string(preview.tick), x, y + 159, 13, muted, width);
             }
@@ -901,6 +928,7 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
             label(draft.action.geographic_destination ? "Click a destination on the map." :
                   "Click the target sector on the map.", x, y + 71, 16, accent, width);
         }
+        button(assignment_button(area), draft.automatic ? "Use selected" : "Use automatic");
         button(review_button(area, false), "Discard draft");
         return;
     }
@@ -1215,7 +1243,7 @@ void run(CampaignState& campaign, std::optional<FactionId> faction,
         if (controls.draft && controls.draft->target &&
             (!controls.draft->preview || controls.draft->preview->tick != snapshot.tick)) {
             auto& draft = *controls.draft;
-            draft.preview = session.preview(draft.action.kind, *draft.target);
+            draft.preview = session.preview(draft.action.kind, *draft.target, draft.requested_formation());
         }
         if (!mission_click && handle_command_input(controls, snapshot, screen.details, session)) {
             snapshot = session.snapshot(controls.perspective);

@@ -26,8 +26,8 @@ Options
   --events     Show timestamped campaign events.
   --seed N     Override the seed (32-bit for fixed demos, 64-bit for procedural).
   --faction WEST|EAST  Use one faction's view in an operational checkpoint or demo.
-  --order TYPE:SECTOR  Queue a recon, patrol, defend, reposition, or attack order.
-  --ground-order TYPE:EAST,SOUTH,UP  Submit a ground order at a point in millimetres.
+  --order TYPE:SECTOR[:UNIT]  Queue a recon, patrol, defend, reposition, or attack order.
+  --ground-order TYPE:EAST,SOUTH,UP[:UNIT]  Submit an order at a point in millimetres.
   --cancel ID         Cancel an eligible order before advancing time.
   --help       Show this help.
 
@@ -143,11 +143,21 @@ void apply_order(openwar::CommandSession& session, std::string_view order, bool 
     if (separator == std::string_view::npos) {
         throw std::invalid_argument(geographic ? "Expected ground order TYPE:EAST,SOUTH,UP" : "Expected order TYPE:SECTOR");
     }
+    auto destination = order.substr(separator + 1);
+    std::optional<UnitId> formation;
+    if (const auto suffix = destination.find(':'); suffix != std::string_view::npos) {
+        const auto id = parse_number(destination.substr(suffix + 1), "order formation");
+        if (id > UINT32_MAX) {
+            throw std::out_of_range("Order formation must fit in 32 bits");
+        }
+        formation = UnitId{static_cast<std::uint32_t>(id)};
+        destination = destination.substr(0, suffix);
+    }
     OrderTarget target;
     if (geographic) {
-        target = parse_ground_target(order.substr(separator + 1));
+        target = parse_ground_target(destination);
     } else {
-        const auto sector = parse_number(order.substr(separator + 1), "--order sector");
+        const auto sector = parse_number(destination, "--order sector");
         if (sector > UINT32_MAX) {
             throw std::out_of_range("Order sector must fit in 32 bits");
         }
@@ -156,7 +166,7 @@ void apply_order(openwar::CommandSession& session, std::string_view order, bool 
     for (const auto kind : {MissionKind::recon, MissionKind::patrol, MissionKind::defend,
                            MissionKind::reposition, MissionKind::attack}) {
         if (order.substr(0, separator) == mission_name(kind)) {
-            const auto result = session.submit(kind, target);
+            const auto result = session.submit(kind, target, formation);
             if (!result.mission) {
                 throw std::invalid_argument(std::string(result.reason));
             }

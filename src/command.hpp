@@ -45,8 +45,10 @@ public:
     // Only observer sessions may switch their inspection perspective.
     viewer::Snapshot snapshot(std::optional<FactionId> observer_perspective = {}) const;
     std::vector<OrderAction> actions_for(UnitId formation) const;
-    OrderPreview preview(MissionKind kind, const OrderTarget& target) const;
-    OrderResult submit(MissionKind kind, const OrderTarget& target);
+    OrderPreview preview(MissionKind kind, const OrderTarget& target,
+                         std::optional<UnitId> formation = {}) const;
+    OrderResult submit(MissionKind kind, const OrderTarget& target,
+                       std::optional<UnitId> formation = {});
     bool can_cancel(FactionId owner, MissionId id) const;
     CancelResult cancel(FactionId owner, MissionId id);
 
