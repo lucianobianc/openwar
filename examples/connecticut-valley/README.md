@@ -6,7 +6,7 @@ River. The projected extent is eastings 682000–714000 m and northings
 16×16 strategic sectors and a 160×160 terrain lattice. The imported terrain
 samples range from approximately 56 to 607 m above the supplied datum.
 
-Both fictional scenarios use `valley-world.owgeo`, the same standalone
+All authored scenarios use `valley-world.owgeo`, the same standalone
 physical world. `valley-demo.owscenario` reproduces the original deployment,
 with WEST and EAST outposts at sectors 122 and 175. The WEST route crosses the
 Connecticut River and uses both roads and terrain. The original demonstration
@@ -25,6 +25,89 @@ valley=examples/connecticut-valley
 
 The original combined `connecticut-valley.owgeo` is still accepted by
 `--scenario`.
+
+## Valley Junction campaign
+
+**Connecticut Valley - Valley Junction** is a separate scenario for evaluating
+autonomous operations and exercising the command interface. Two fictional task
+forces deploy on opposite sides of a neutral belt. They contest the central
+junction in sector 121 and two secondary junctions in sectors 105 and 137.
+Both sides can win by securing and holding sector 121 for one simulated hour.
+The campaign also uses the engine's command-collapse conditions and a four-hour
+time limit.
+
+| Force | Initial deployment and organization |
+|---|---|
+| WEST | Command in sector 120, rear depot in 119, recon platoon in 104 and support platoon in 136. Its armor company fields heavier tanks with support trucks. |
+| EAST | Command in sector 122, rear depot in 123, recon platoon in 106 and support platoon in 138. Its mechanized company and larger scout inventory give it more light maneuver equipment. |
+| Both | Six formations per faction under a task-force headquarters. Each side includes an armor company, a mixed mechanized company, a recon platoon, a support platoon, and a two-aircraft reconnaissance flight. |
+
+The workshops and aviation facilities are fictional. The geographic site
+catalog remains available for inspection. Deployment points use existing
+imported road nodes, and the engine resolves the terrain and bridge geometry
+during routing. Initial order previews to the central junction found a
+4.28 km route using three imported bridge segments from WEST and a 0.19 km
+route from EAST. EAST gets early access to the objective by design. The
+carrier router found all eight initial supply legs under the initial
+territorial restrictions.
+
+Two carriers per faction share the finite lift on their depot networks.
+Initial shipments move ammunition and supplies to mobile formations, materials
+to the workshop, and fuel to the reconnaissance flight. Recurring
+policies replenish selected mobile stores and facilities. Forward units share
+limited workshop capacity. Workshops can make spare parts while their
+materials last.
+
+Open the scenario from **New campaign → Connecticut Valley → Valley Junction**.
+Use **Observer** for autonomous play, or **WEST commander** or **EAST commander**
+to issue orders. For a first manual order, select one of the maneuver
+companies, choose **Attack**, and click the initially neutral central junction.
+Use **Missions (M)** and the **Routes** layer to follow operations. Zoom in or
+cycle overlapping markers to inspect formations that share a sector.
+
+```sh
+scenario=examples/connecticut-valley/valley-junction.owscenario
+./openwar --scenario "$scenario" --ticks 240 --seed 42 --events --save valley-full.ows
+./openwar --scenario "$scenario" --ticks 45 --seed 42 --save valley-mid.ows
+./openwar --load valley-mid.ows --ticks 195 --save valley-resumed.ows
+cmp valley-full.ows valley-resumed.ows
+```
+
+### Reference run
+
+Seed 42 reached a WEST victory at tick 132, after 2 h 12 min of simulated
+time. EAST captured the two secondary sectors at ticks 17 and 18. WEST took
+the central sector at tick 54 and later captured both secondary sectors.
+Both sides launched their first attack on the central objective at tick 4
+and used the existing coordinated-strategy and aerial reconnaissance rules.
+
+| Metric | WEST | EAST |
+|---|---:|---:|
+| Orders scheduled / launched | 16 / 16 | 11 / 10 |
+| Orders completed / failed | 14 / 2 | 4 / 7 |
+| Reconnaissance missions completed | 11 | 2 |
+| Equipment lost / surviving but unavailable | 7 / 1 | 10 / 1 |
+| Shipments delivered / cancelled | 4 / 2 | 6 / 2 |
+
+The run recorded 14 engagement intervals with ammunition expended, 32 military
+sector crossings, 42 carrier sector crossings and five sector captures. Ten of
+16 shipments were delivered, four were cancelled and two remained open when the
+campaign ended. The stockpile ledger recorded consumption of 118 L of fuel,
+29 supply units, 29 ammunition units, 16 material units and two spare parts.
+The carriers' combined whole-litre tank balances fell by another 34 L.
+The headless GCC build on an AMD EPYC 9V74 Linux host took 45.2 s and used
+approximately 50 MiB peak RSS, including event output and checkpoint writing.
+Resuming at tick 45 produced a byte-identical final checkpoint. Seeds 0 and 7
+produced the same winner, end tick, engagement count and delivery count.
+
+EAST's opening reach gave it early territorial gains, and WEST's ground force
+prevailed in all three measured runs. Reconnaissance flights are
+abstract sector missions with a duration and fuel cost. Air-defense assets use
+the existing equipment and ground-combat model. Hierarchy is displayed in
+inspection, with orders assigned by the engine's current formation rules.
+Initial WEST previews of both secondary junctions hit the geographic search
+budget. Later movement reached both through the campaign's evolving control
+and routing state.
 
 ## Source data and reproduction
 

@@ -38,7 +38,8 @@ openwar_gui_CPPFLAGS = $(AM_CPPFLAGS) $(RAYLIB_CFLAGS) \
 	-DOPENWAR_DATA_DIR='"$(pkgdatadir)"' -DOPENWAR_SOURCE_DATA_DIR='"$(abs_srcdir)/examples"'
 nobase_dist_pkgdata_DATA = examples/procedural.toml examples/connecticut-valley/README.md \
 	examples/connecticut-valley/valley-world.owgeo examples/connecticut-valley/connecticut-valley.owgeo \
-	examples/connecticut-valley/valley-demo.owscenario examples/connecticut-valley/valley-autonomous.owscenario
+	examples/connecticut-valley/valley-demo.owscenario examples/connecticut-valley/valley-autonomous.owscenario \
+	examples/connecticut-valley/valley-junction.owscenario
 openwar_gui_LDADD = libcampaign.a $(RAYLIB_LIBS)
 
 else
@@ -57,4 +58,5 @@ EXTRA_DIST = tests/cli.sh tests/fixtures/closed-bridge-schema4.ows tests/fixture
 	examples/connecticut-valley/connecticut-valley.owgeo examples/connecticut-valley/valley.osm.pbf \
 	examples/connecticut-valley/valley-elevation.tif \
 	examples/connecticut-valley/valley-world.json examples/connecticut-valley/valley-world.owgeo \
-	examples/connecticut-valley/valley-demo.owscenario examples/connecticut-valley/valley-autonomous.owscenario
+	examples/connecticut-valley/valley-demo.owscenario examples/connecticut-valley/valley-autonomous.owscenario \
+	examples/connecticut-valley/valley-junction.owscenario

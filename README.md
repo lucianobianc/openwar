@@ -356,14 +356,17 @@ valley=examples/connecticut-valley
 ./openwar --inspect-world "$valley/valley-world.owgeo"
 ./openwar --scenario "$valley/valley-demo.owscenario" --ticks 40 --events
 ./openwar --scenario "$valley/valley-autonomous.owscenario" --ticks 40 --events
-./openwar-gui --scenario "$valley/valley-autonomous.owscenario"
+./openwar-gui --scenario "$valley/valley-junction.owscenario"
 ```
 
-The two scenarios reference the same 32×32 km `OWGEO 2` world. Both use terrain
+The three authored scenarios reference the same 32×32 km `OWGEO 2` world. They use terrain
 and roads resolved offline from a fixed OpenStreetMap extract and a Copernicus
 DEM. The independent `OWSCENARIO 1` files declare fictional deployments,
 resources, and objectives. The autonomous variant reverses the initial
-territorial corridors and enables faction planning. The original combined
+territorial corridors and enables faction planning. Valley Junction adds
+mixed formations, competing objectives and finite resupply across multiple
+fronts. See the [Valley Junction campaign notes](examples/connecticut-valley/README.md#valley-junction-campaign)
+for the order of battle and reference results. The original combined
 `connecticut-valley.owgeo` remains available through `--scenario`.
 See the [scenario format](docs/SCENARIOS.md#22-current-format-owscenario-1),
 [import guide](docs/GEOGRAPHIC_IMPORT.md) and [source attribution](examples/connecticut-valley/README.md).

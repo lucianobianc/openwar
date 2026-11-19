@@ -1,0 +1,218 @@
+OWSCENARIO 1
+world "valley-world.owgeo"
+# @name "Connecticut Valley - Valley Junction"
+# @description "Two fictional task forces contend for shared junction sectors while finite depots sustain ground formations and reconnaissance flights."
+
+# Coordinates are local map millimetres at existing imported road nodes. All military sites are fictional.
+point west_depot 14948621 14986450 151852
+point west_hq 16398810 15507144 145078
+point west_armor 17639255 15095345 98002
+point west_mech 17546441 14599168 79962
+point west_scout 17454172 13440584 80700
+point west_security 17433896 16460319 126070
+point west_workshop 16324573 14349727 164376
+point west_air 15158963 14277161 207209
+point east_depot 22192041 15424893 202123
+point east_hq 21742950 15825454 164375
+point east_armor 20177391 15443926 155606
+point east_mech 20073717 15631701 155007
+point east_scout 20757773 13210474 217117
+point east_security 20880612 16528499 155529
+point east_workshop 21989801 15385886 196901
+point east_air 22461380 14337057 228575
+point central_crossing 19985580 15421105 174942
+point north_junction 19895875 12039901 181155
+point south_junction 19825317 16552188 145640
+point west_objective 17695212 15850073 115424
+point east_objective 21283350 15623637 178843
+
+timing 60 10 2 2 14400
+operations 3 12 3 21600 2400 14400
+combat 3 480 720 240 3600 14400
+
+# WEST and EAST begin adjacent to neutral objectives. Public reports provide the initial planning picture.
+control 119 WEST 1
+control 120 WEST 3
+control 104 WEST 0
+control 136 WEST 0
+control 123 EAST 1
+control 122 EAST 3
+control 106 EAST 0
+control 138 EAST 0
+control 121 NEUTRAL 3
+control 105 NEUTRAL 1
+control 137 NEUTRAL 2
+public 119
+public 120
+public 121
+public 122
+public 123
+public 104
+public 105
+public 106
+public 136
+public 137
+public 138
+
+objective WEST central_crossing 9
+objective WEST south_junction 6
+objective WEST north_junction 4
+objective WEST west_objective 6
+objective WEST east_objective 2
+victory WEST 3600 121
+command_site WEST 120
+
+objective EAST central_crossing 9
+objective EAST north_junction 6
+objective EAST south_junction 4
+objective EAST east_objective 6
+objective EAST west_objective 2
+victory EAST 3600 121
+command_site EAST 122
+
+# Stock columns are capacity and initial balance for oil reserve, crude, fuel, materials, parts, supplies and ammunition.
+stock 1 WEST west_depot    0 0 340 18 80 140 130    0 0 300 12 65 125 105
+stock 2 WEST west_workshop    0 0 90 18 40 55 45    0 0 42 4 16 18 16
+stock 3 WEST west_air    0 0 125 0 24 12 0    0 0 85 0 12 0 0
+stock 10 WEST -    0 0 55 0 8 35 35    0 0 24 0 3 18 14
+stock 11 WEST -    0 0 65 0 8 45 45    0 0 35 0 2 35 26
+stock 12 WEST -    0 0 62 0 8 45 45    0 0 30 0 2 29 24
+stock 13 WEST -    0 0 48 0 8 35 35    0 0 29 0 2 28 18
+stock 14 WEST -    0 0 55 0 8 38 38    0 0 24 0 3 24 21
+installation 1 2 1 1 100 3 1 0    0 0 0 2 0 0 0    0 0 0 0 1 0 0    "WEST field workshop"
+facility 1 2 2 2 1
+facility 2 3 1 1 1
+
+stock 101 EAST east_depot    0 0 340 18 80 140 130    0 0 300 12 65 125 105
+stock 102 EAST east_workshop    0 0 90 18 40 55 45    0 0 42 4 16 18 16
+stock 103 EAST east_air    0 0 125 0 24 12 0    0 0 85 0 12 0 0
+stock 110 EAST -    0 0 55 0 8 35 35    0 0 24 0 3 18 14
+stock 111 EAST -    0 0 65 0 8 45 45    0 0 30 0 2 33 27
+stock 112 EAST -    0 0 62 0 8 45 45    0 0 30 0 2 29 24
+stock 113 EAST -    0 0 48 0 8 35 35    0 0 29 0 2 28 18
+stock 114 EAST -    0 0 55 0 8 38 38    0 0 24 0 3 24 21
+installation 101 102 1 1 100 3 1 0    0 0 0 2 0 0 0    0 0 0 0 1 0 0    "EAST field workshop"
+facility 101 102 2 2 1
+facility 102 103 1 1 1
+
+# Equipment models use only the categories and effects already implemented by the engine.
+type 1 WEST tank 58 1 34 0 7200 360 1 default "Heavy armor"
+type 2 WEST transport 26 1 37 0 7200 360 1 default "Mechanized carrier"
+type 3 WEST transport 18 1 47 0 7200 360 1 default "Scout vehicle"
+type 4 WEST transport 3 0 29 0 7200 360 1 valley "Support truck"
+type 5 WEST air_defense_vehicle 12 0 35 0 7200 360 1 default "Air-defense vehicle"
+type 6 WEST helicopter 0 0 0 5 7200 360 1 default "Reconnaissance helicopter"
+
+type 101 EAST tank 47 1 39 0 7200 360 1 default "Medium armor"
+type 102 EAST transport 31 1 41 0 7200 360 1 default "Mechanized carrier"
+type 103 EAST transport 18 1 52 0 7200 360 1 default "Scout vehicle"
+type 104 EAST transport 3 0 29 0 7200 360 1 valley "Support truck"
+type 105 EAST air_defense_team 8 0 24 0 7200 360 1 default "Air-defense team"
+type 106 EAST helicopter 0 0 0 6 7200 360 1 default "Reconnaissance helicopter"
+
+unit 1 WEST west_hq 10 1 78 "WEST Valley Task Force"
+unit 2 WEST west_armor 11 1 83 "WEST Armor Company"
+unit 3 WEST west_mech 12 1 81 "WEST Mechanized Company"
+unit 4 WEST west_scout 13 0 82 "WEST Recon Platoon"
+unit 5 WEST west_security 14 0 76 "WEST Support Platoon"
+unit 6 WEST west_air 0 2 80 "WEST Recon Flight"
+identity 1 land support battalion
+identity 2 land armor company
+parent 2 1
+identity 3 land mechanized-infantry company
+parent 3 1
+identity 4 land reconnaissance platoon
+parent 4 1
+identity 5 land support platoon
+parent 5 1
+identity 6 air reconnaissance unspecified
+parent 6 1
+equipment 1 4 1
+equipment 2 5 1
+equipment 3 1 2
+equipment 4 1 2
+equipment 5 1 2
+equipment 6 4 2
+equipment 7 2 3
+equipment 8 2 3
+equipment 9 1 3
+equipment 10 5 3
+equipment 11 3 4
+equipment 12 3 4
+equipment 13 4 5
+equipment 14 5 5
+equipment 15 6 6
+equipment 16 6 6
+
+unit 101 EAST east_hq 110 101 78 "EAST Valley Task Force"
+unit 102 EAST east_armor 111 101 83 "EAST Armor Company"
+unit 103 EAST east_mech 112 101 81 "EAST Mechanized Company"
+unit 104 EAST east_scout 113 0 82 "EAST Recon Platoon"
+unit 105 EAST east_security 114 0 76 "EAST Support Platoon"
+unit 106 EAST east_air 0 102 80 "EAST Recon Flight"
+identity 101 land support battalion
+identity 102 land armor company
+parent 102 101
+identity 103 land mechanized-infantry company
+parent 103 101
+identity 104 land reconnaissance platoon
+parent 104 101
+identity 105 land support platoon
+parent 105 101
+identity 106 air reconnaissance unspecified
+parent 106 101
+equipment 101 104 101
+equipment 102 105 101
+equipment 103 101 102
+equipment 104 101 102
+equipment 105 102 102
+equipment 106 104 102
+equipment 107 102 103
+equipment 108 102 103
+equipment 109 102 103
+equipment 110 101 103
+equipment 111 105 103
+equipment 112 103 104
+equipment 113 103 104
+equipment 114 103 104
+equipment 115 104 105
+equipment 116 105 105
+equipment 117 106 106
+equipment 118 106 106
+
+# Depot carriers share finite lift. Replenishment depends on the recipient remaining accessible.
+carrier 1 WEST west_depot 18 35 valley
+carrier 2 WEST west_depot 24 42 valley
+shipment 1 1 11 ammunition 14 6
+shipment 2 1 12 supplies 13 5
+shipment 3 1 2 materials 10 3
+shipment 4 1 3 fuel 16 2
+resupply 1 11 ammunition 22 32
+resupply 1 12 ammunition 20 28
+resupply 1 13 ammunition 19 25
+resupply 1 11 supplies 10 25
+resupply 1 12 supplies 10 25
+resupply 1 13 supplies 18 25
+resupply 1 11 fuel 28 37
+resupply 1 12 fuel 23 34
+resupply 1 13 fuel 11 23
+resupply 1 2 spare_parts 15 20
+resupply 1 3 fuel 38 55
+
+carrier 101 EAST east_depot 18 35 valley
+carrier 102 EAST east_depot 24 42 valley
+shipment 101 101 111 ammunition 14 6
+shipment 102 101 112 supplies 13 5
+shipment 103 101 102 materials 10 3
+shipment 104 101 103 fuel 16 2
+resupply 101 111 ammunition 22 32
+resupply 101 112 ammunition 20 28
+resupply 101 113 ammunition 19 25
+resupply 101 111 supplies 10 25
+resupply 101 112 supplies 10 25
+resupply 101 113 supplies 18 25
+resupply 101 111 fuel 28 37
+resupply 101 112 fuel 23 34
+resupply 101 113 fuel 11 23
+resupply 101 102 spare_parts 15 20
+resupply 101 103 fuel 38 55

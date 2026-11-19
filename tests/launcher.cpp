@@ -72,8 +72,8 @@ void test_discovery(const fs::path& root, const fs::path& bundled)
     require(std::ranges::find(catalog.worlds.at(other).metadata, "8 x 6 km") != catalog.worlds.at(other).metadata.end() &&
             std::ranges::find(catalog.worlds.at(other).metadata, "EPSG 32618") != catalog.worlds.at(other).metadata.end(),
             "Header inspection did not retain extent and geographic reference");
-    require(std::ranges::count_if(catalog.scenarios, [&](const auto& pair) { return pair.second.world == valley; }) == 2 &&
-            catalog.scenarios.size() == 4 && catalog.issues.size() == 3,
+    require(std::ranges::count_if(catalog.scenarios, [&](const auto& pair) { return pair.second.world == valley; }) == 3 &&
+            catalog.scenarios.size() == 5 && catalog.issues.size() == 3,
             "Launcher failed to associate shared worlds, handle errors or deduplicate paths");
     const auto& field = catalog.scenarios.at(fs::canonical(bundled / "valley-demo.owscenario"));
     require(field.name == "Connecticut Valley - Field Deployment" &&
@@ -82,6 +82,9 @@ void test_discovery(const fs::path& root, const fs::path& bundled)
             std::ranges::find(field.details, "Time limit 24 h") != field.details.end() &&
             std::ranges::any_of(field.details, [](const auto& row) { return row.starts_with("WEST objective"); }),
             "Scenario summary omitted its authored factions, timing or objectives");
+    const auto& junction = catalog.scenarios.at(fs::canonical(bundled / "valley-junction.owscenario"));
+    require(junction.world == valley && junction.name == "Connecticut Valley - Valley Junction" &&
+            junction.commanders == field.commanders, "Launcher omitted the advanced campaign or its roles");
     require(catalog.add(custom) == other, "Selecting the same world again duplicated its catalog entry");
     try {
         (void)read_geographic_world(other);
@@ -130,6 +133,21 @@ void test_start_and_resume(const fs::path& root, const fs::path& bundled)
             "Launcher changed procedural or combined-demo compatibility");
 }
 
+void test_valley_junction(const fs::path& bundled)
+{
+    auto campaign = open_campaign_scenario(bundled / "valley-junction.owscenario", {}, 42);
+    require(campaign.units().size() == 12 && campaign.carriers().size() == 4 &&
+            campaign.shipments().size() == 8, "Valley Junction deployment did not load");
+    campaign.advance_ticks(4);
+    for (const auto side : {FactionId::west, FactionId::east}) {
+        const auto view = campaign.faction_view(side, false);
+        require(std::ranges::any_of(view.missions, [](const Mission& mission) {
+                    return !mission.manual && mission.kind == MissionKind::attack &&
+                        mission.target == SectorId{121} && mission.ground_journey && mission.launch_tick;
+                }), "Both sides must launch autonomous geographic operations for the shared objective");
+    }
+}
+
 }  // namespace
 
 int main()
@@ -140,6 +158,7 @@ int main()
         const TestFiles files;
         test_discovery(files.directory, fixtures);
         test_start_and_resume(files.directory, fixtures);
+        test_valley_junction(fixtures);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
