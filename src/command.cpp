@@ -27,7 +27,7 @@ std::vector<OrderAction> CommandSession::actions_for(UnitId formation) const
     std::vector<OrderAction> actions;
     if (faction_) {
         for (const auto kind : campaign_.available_orders(*faction_, formation)) {
-            const bool geographic = kind == MissionKind::attack ||
+            const bool geographic = position_order(kind) || kind == MissionKind::attack ||
                 (kind == MissionKind::defend && campaign_.combat_enabled());
             actions.push_back({kind, geographic});
         }

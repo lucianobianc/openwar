@@ -175,9 +175,7 @@ void fit_map(ViewControls& controls, const Snapshot& snapshot, Rectangle map)
 
 bool active_mission_marker(const Marker& marker)
 {
-    return marker.mission_status == MissionStatus::scheduled ||
-           marker.mission_status == MissionStatus::preparing ||
-           marker.mission_status == MissionStatus::in_progress;
+    return marker.mission_status && mission_active(*marker.mission_status);
 }
 
 bool marker_visible(const Marker& marker, const ViewControls& controls)
@@ -473,9 +471,14 @@ Rectangle assignment_button(Rectangle panel)
     return {panel.x + 173, panel.y + 165, 159, 24};
 }
 
+Rectangle current_position_button(Rectangle panel)
+{
+    return {panel.x + 15, panel.y + 103, 175, 29};
+}
+
 Rectangle cancel_mission_button(Rectangle area)
 {
-    return {area.x + 15, area.y + 159, 146, 29};
+    return {area.x + 15, area.y + 169, 146, 29};
 }
 
 std::string action_label(MissionKind kind)
@@ -486,6 +489,8 @@ std::string action_label(MissionKind kind)
     case MissionKind::defend: return "Defend";
     case MissionKind::reposition: return "Reposition";
     case MissionKind::attack: return "Attack";
+    case MissionKind::move: return "Move";
+    case MissionKind::hold: return "Hold";
     }
     return {};
 }
@@ -510,14 +515,28 @@ bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rect
             controls.feedback.reset();
             return false;
         }
+        if (controls.draft && !controls.draft->target && controls.draft->action.kind == MissionKind::hold &&
+            clicked(current_position_button(panel))) {
+            if (const auto* marker = selected_marker(snapshot, controls); marker && !marker->estimated) {
+                auto& draft = *controls.draft;
+                draft.sector = marker->sector;
+                draft.pin = marker->position;
+                draft.target = draft.pin;
+                controls.feedback.reset();
+            }
+            return false;
+        }
         if (!clicked(review_button(panel, true))) {
             return false;
         }
         if (controls.cancel_prompt) {
             const auto key = *controls.cancel_prompt;
+            const auto* marker = selected_marker(snapshot, controls);
+            const bool holding = marker && marker->mission_status == MissionStatus::holding;
             const auto result = session.cancel(*key.faction, MissionId{key.id});
             controls.cancel_prompt.reset();
-            controls.feedback = CommandFeedback{std::string(result.reason), result.cancelled};
+            controls.feedback = CommandFeedback{holding && result.cancelled ? "Holding position released" :
+                                                std::string(result.reason), result.cancelled};
             return result.cancelled;
         }
         if (!controls.draft->target) {
@@ -531,7 +550,7 @@ bool handle_command_input(ViewControls& controls, const Snapshot& snapshot, Rect
             return false;
         }
         const auto id = static_cast<std::uint32_t>(*result.mission);
-        controls.feedback = CommandFeedback{"Order #" + std::to_string(id) + " scheduled", true};
+        controls.feedback = CommandFeedback{"Order #" + std::to_string(id) + " " + std::string(result.reason), true};
         controls.selected = controls.draft->sector;
         controls.object = MarkerKey{MarkerKind::mission, session.permissions().faction, id};
         controls.draft.reset();
@@ -767,10 +786,12 @@ Color mission_color(MissionStatus status)
     switch (status) {
     case MissionStatus::scheduled:
     case MissionStatus::preparing: return route_carrier;
-    case MissionStatus::in_progress: return accent;
+    case MissionStatus::in_progress:
+    case MissionStatus::holding: return accent;
     case MissionStatus::completed: return {169, 224, 159, 255};
     case MissionStatus::failed: return {255, 157, 164, 255};
-    case MissionStatus::cancelled: return muted;
+    case MissionStatus::cancelled:
+    case MissionStatus::released: return muted;
     }
     return muted;
 }
@@ -898,6 +919,10 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
                         label("Ground fuel is drawn during travel.", x, y + 227, 14, muted, width);
                         label(draft.action.kind == MissionKind::attack ? "Requires supplies and ammunition." :
                               "Requires supplies.", x, y + 248, 14, muted, width);
+                        if (position_order(draft.action.kind)) {
+                            label(draft.action.kind == MissionKind::hold ? "Friendly destination. Holds until released." :
+                                  "Friendly or neutral destination. No capture.", x, y + 262, 14, muted, width);
+                        }
                     } else if (preview.abstract_duration_seconds) {
                         label("Duration " + std::to_string(*preview.abstract_duration_seconds) + " s after launch",
                               x, y + 114, 15, ink, width);
@@ -927,16 +952,22 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
         } else {
             label(draft.action.geographic_destination ? "Click a destination on the map." :
                   "Click the target sector on the map.", x, y + 71, 16, accent, width);
+            if (draft.action.kind == MissionKind::hold) {
+                button(current_position_button(area), "Use current position");
+            }
         }
         button(assignment_button(area), draft.automatic ? "Use selected" : "Use automatic");
         button(review_button(area, false), "Discard draft");
         return;
     }
     if (controls.cancel_prompt) {
-        label("Cancel mission #" + std::to_string(controls.cancel_prompt->id) + "?", x, y, 21, ink, width);
+        const auto* marker = selected_marker(snapshot, controls);
+        const bool holding = marker && marker->mission_status == MissionStatus::holding;
+        label(std::string(holding ? "Release hold #" : "Cancel mission #") +
+              std::to_string(controls.cancel_prompt->id) + "?", x, y, 21, ink, width);
         label("Resources already used remain spent.", x, y + 39, 15, muted, width);
         button(review_button(area, false), "Back");
-        button(review_button(area, true), "Confirm cancellation", true);
+        button(review_button(area, true), holding ? "Confirm release" : "Confirm cancellation", true);
         return;
     }
     if (controls.show_missions) {
@@ -979,7 +1010,8 @@ void draw_details(const Snapshot& snapshot, const ViewControls& controls, const 
             }
         } else if (marker->kind == MarkerKind::mission && marker->faction &&
                    session.can_cancel(*marker->faction, MissionId{marker->id})) {
-            button(cancel_mission_button(area), "Cancel mission");
+            button(cancel_mission_button(area), marker->mission_status == MissionStatus::holding ?
+                   "Release hold" : "Cancel mission");
         }
         if (!marker->inspection.empty()) {
             const auto visible = inspection_rows(area);

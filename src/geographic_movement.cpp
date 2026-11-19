@@ -857,7 +857,7 @@ bool allows_leg(const Map& map, const Leg& leg, const SectorAccess& allowed, std
 }
 
 std::int64_t advance(const Map& map, const Route& route, Progress& progress, std::int64_t duration_us,
-    const CrossingObserver& observer, const RoadAccess& road_allowed)
+    const CrossingObserver& observer, const RoadAccess& road_allowed, const SectorAccess& sector_allowed)
 {
     if (duration_us < 0)
         throw std::invalid_argument("negative movement time");
@@ -874,9 +874,15 @@ std::int64_t advance(const Map& map, const Route& route, Progress& progress, std
         const auto first_crossing = progress.crossings.size();
         record_crossings(map, leg, progress, progress.leg_elapsed_us + spent);
         bool stopped = false;
-        for (auto i = first_crossing; observer && i < progress.crossings.size(); ++i) {
+        for (auto i = first_crossing; (observer || sector_allowed) && i < progress.crossings.size(); ++i) {
             const auto& crossing = progress.crossings[i];
-            if (!observer(crossing)) {
+            if (sector_allowed && !sector_allowed(crossing.to)) {
+                spent = crossing.elapsed_us - progress.elapsed_us - 1;
+                progress.crossings.resize(i);
+                stopped = true;
+                break;
+            }
+            if (observer && !observer(crossing)) {
                 spent = crossing.elapsed_us - progress.elapsed_us;
                 progress.crossings.resize(i + 1);
                 stopped = true;

@@ -274,11 +274,15 @@ void report_operations(std::ostream& out, const CampaignState& campaign, Faction
                 << mission_name(mission.kind) << " to sector " << static_cast<std::uint32_t>(mission.target)
                 << " | " << mission_status_name(mission.status)
                 << " | equipment " << static_cast<std::uint32_t>(mission.equipment);
-            if (mission.status == MissionStatus::scheduled || mission.status == MissionStatus::preparing ||
-                mission.status == MissionStatus::in_progress) {
+            if (mission_active(mission.status)) {
                 out << ' ' << equipment_status_name(campaign.equipment().at(mission.equipment).status);
             } else {
                 out << " (historical assignment)";
+            }
+            if (position_order(mission.kind)) {
+                const auto& point = *mission.ground_destination;
+                out << " | formation " << static_cast<std::uint32_t>(*mission.ground_unit)
+                    << " | destination mm " << point.east << ',' << point.south << ',' << point.elevation;
             }
             if (mission.status == MissionStatus::completed && mission.kind == MissionKind::recon) {
                 out << " | " << mission.detections << " detected";

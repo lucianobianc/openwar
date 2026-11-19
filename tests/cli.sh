@@ -161,6 +161,14 @@ printf '%s\n' "$explicit" | grep -F 'Mission 1 attack to sector 1 | scheduled | 
 reject --demo combat --faction WEST --order attack:1:2 --ticks 0
 reject --demo combat --faction WEST --order attack:1:4294967296 --ticks 0
 reject --demo combat --faction WEST --order attack:1:1 --order attack:1:1 --ticks 0
+reject --demo combat --faction WEST --order move:1:1 --ticks 0
+reject --demo combat --faction WEST --ground-order hold:751000,251000,0:1 --ticks 0
+relocated=$("$openwar" --demo combat --faction WEST --ground-order move:751000,251000,0:1 --ticks 2)
+printf '%s\n' "$relocated" | grep -F 'Mission 1 move to sector 1 | completed | equipment 1 (historical assignment) | formation 1 | destination mm 751000,251000,0'
+held=$("$openwar" --demo combat --faction WEST --ground-order hold:250000,250000,0:1 --ticks 1)
+printf '%s\n' "$held" | grep -F 'Mission 1 hold to sector 0 | holding | equipment 1 in operation'
+released=$("$openwar" --demo combat --faction WEST --ground-order hold:250000,250000,0:1 --cancel 1 --ticks 0)
+printf '%s\n' "$released" | grep -F 'Mission 1 hold to sector 0 | released | equipment 1 (historical assignment)'
 
 campaign=$("$openwar" --demo campaign --seed 42 --ticks 3000 --events)
 printf '%s\n' "$campaign" | grep -Fx 'Campaign summary | seed 42'

@@ -560,7 +560,7 @@ private:
     geography::Point ground_anchor(SectorId sector) const;
     geography::Profile ground_profile(UnitId id) const;
     geography::Route ground_route(const CombatUnit& combat, geography::Point destination, const FactionView& view,
-                                  std::vector<SectorId>& path) const;
+                                  std::vector<SectorId>& path, bool diagnose_fuel = false) const;
     geography::Map movement_geometry() const;
     geography::Route legacy_ground_route(geography::Point origin, std::span<const SectorId> steps,
                                          geography::Point destination, std::uint32_t speed) const;
@@ -568,8 +568,9 @@ private:
     std::optional<EquipmentId> ground_order_equipment(UnitId unit, MissionKind kind,
                                                        std::string_view* refusal = nullptr) const;
     bool ground_opposition(SectorId sector, FactionId faction) const;
-    enum class GroundStep { no_fuel, blocked, travelling, arrived };
-    GroundStep advance_ground(CombatUnit& unit, GroundJourney& journey, bool withdrawing);
+    enum class GroundStep { no_fuel, blocked, territorial_access_lost, travelling, arrived };
+    GroundStep advance_ground(CombatUnit& unit, GroundJourney& journey, bool withdrawing,
+                              const geography::SectorAccess& sector_allowed = {});
     void release_ground_equipment(EquipmentId id);
     void resolve_engagements();
     void update_territory();

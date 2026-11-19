@@ -683,7 +683,7 @@ void test_command_session()
             "Command perspective switched factions or observer inspection was lost");
     require_throws<std::invalid_argument>([&] { (void)opposing.snapshot(); }, "Unauthorized command snapshot was exposed");
     const auto actions = commander.actions_for(formation);
-    require(actions.size() == 2 && std::ranges::all_of(actions, &OrderAction::geographic_destination) &&
+    require(actions.size() == 4 && std::ranges::all_of(actions, &OrderAction::geographic_destination) &&
             std::ranges::any_of(actions, [](const auto& action) { return action.kind == MissionKind::attack; }),
             "Ground formation did not offer its supported geographic commands");
     const auto rejected = commander.submit(MissionKind::attack, SectorId{2});
@@ -1860,6 +1860,128 @@ void test_explicit_formation_assignment()
             "Explicit missions diverged after checkpoint resume");
 }
 
+void test_ground_position_orders()
+{
+    constexpr auto west = FactionId::west;
+    constexpr auto east = FactionId::east;
+    constexpr UnitId formation{1};
+    constexpr EquipmentId vehicle{1};
+    constexpr StockpileId stores{10};
+    constexpr SectorId neutral{1};
+    constexpr geography::Point origin{250'000, 250'000, 0};
+    constexpr geography::Point destination{751'000, 251'000, 0};
+    constexpr auto fuel = static_cast<std::size_t>(Resource::fuel);
+    constexpr auto ammo = static_cast<std::size_t>(Resource::ammunition);
+    auto scenario = combat_example_scenario(west);
+    scenario.operations.planner_interval_ticks = 0;
+    scenario.operations.territory_half_life_seconds = 360 * 60;
+    scenario.objectives.clear();
+    scenario.victory_objectives.clear();
+    CampaignState campaign(scenario, 42);
+    CommandSession command(campaign, west), opponent(campaign, east);
+    const auto actions = command.actions_for(formation);
+    for (const auto kind : {MissionKind::move, MissionKind::hold}) {
+        require(std::ranges::any_of(actions, [kind](const auto& action) {
+            return action.kind == kind && action.geographic_destination;
+        }), "Ground position order was unavailable in the command interface");
+    }
+    require(!command.submit(MissionKind::move, neutral, formation).mission &&
+            !command.submit(MissionKind::hold, destination, formation).mission,
+            "A position order accepted a sector-only or neutral Hold objective");
+    const auto preview = command.preview(MissionKind::move, destination, formation);
+    require(preview.formation == formation && preview.route && preview.route->destination == destination &&
+            preview.route->fuel_ml == 1000 && campaign.equipment().at(vehicle).status == EquipmentStatus::available,
+            "Explicit Move preview used the wrong formation, goal or fuel");
+    const auto move = command.submit(MissionKind::move, destination, formation);
+    require(move.mission.has_value(), "Cannot Move to a reported neutral position without a campaign objective");
+    campaign.advance_ticks(6);
+    const auto moved = campaign.faction_view(west).missions.front();
+    require(moved.ground_unit == formation && moved.status == MissionStatus::completed &&
+            campaign.combat_units().at(formation).position == destination &&
+            campaign.units().at(formation).sector == neutral && campaign.stockpiles().at(stores).sector == neutral &&
+            campaign.stockpiles().at(stores).quantity[fuel] == 19 &&
+            campaign.sector_state(neutral).controller == FactionId::neutral &&
+            !campaign.sector_state(neutral).occupier,
+            "Move did not reach the exact point or initiated a conquest");
+
+    const auto hold = command.submit(MissionKind::hold, origin, formation);
+    require(hold.mission && hold.reason == "scheduled", "Cannot order Hold after repositioning");
+    campaign.advance_ticks(3);
+    require(campaign.faction_view(west).missions.back().status == MissionStatus::holding &&
+            campaign.combat_units().at(formation).position == origin &&
+            campaign.equipment().at(vehicle).status == EquipmentStatus::in_operation &&
+            command.actions_for(formation).empty() && command.can_cancel(west, *hold.mission) &&
+            !opponent.cancel(west, *hold.mission).cancelled &&
+            !command.submit(MissionKind::move, destination).mission &&
+            command.submit(MissionKind::move, destination, formation).reason ==
+                "selected formation already has an active order",
+            "Arrival failed to commit Hold or exposed it to reassignment or unauthorized release");
+    const auto snapshot = command.snapshot();
+    require(snapshot.mission_markers.size() == 2 &&
+            snapshot.markers.at(snapshot.mission_markers.front()).mission_status == MissionStatus::holding &&
+            snapshot.markers.at(snapshot.mission_markers.back()).mission_status == MissionStatus::completed,
+            "Command snapshot did not distinguish standing Hold from completed Move");
+
+    const CheckpointFiles files;
+    const auto checkpoint = files.directory / "holding.ows";
+    campaign.save(checkpoint);
+    auto restored = CampaignState::load(checkpoint);
+    CommandSession resumed(restored, west);
+    for (auto* state : {&campaign, &restored}) {
+        state->advance_ticks(8);
+        require(state->faction_view(west).missions.back().status == MissionStatus::holding &&
+                state->combat_units().at(formation).position == origin,
+                "Hold expired or displaced the formation");
+    }
+    require(command.cancel(west, *hold.mission).cancelled && resumed.cancel(west, *hold.mission).cancelled &&
+            campaign.faction_view(west).missions.back().status == MissionStatus::released &&
+            campaign.combat_units().at(formation).position == origin &&
+            campaign.equipment().at(vehicle).status == EquipmentStatus::available,
+            "Authorized release failed to free the formation at its current position");
+    const auto uninterrupted = files.directory / "continuous.ows";
+    const auto reloaded = files.directory / "resumed.ows";
+    campaign.save(uninterrupted);
+    restored.save(reloaded);
+    std::ifstream continuous_bytes(uninterrupted, std::ios::binary), resumed_bytes(reloaded, std::ios::binary);
+    require(std::ranges::equal(std::istreambuf_iterator<char>(continuous_bytes), std::istreambuf_iterator<char>(),
+                               std::istreambuf_iterator<char>(resumed_bytes), std::istreambuf_iterator<char>()),
+            "Hold and release changed after checkpoint resume");
+
+    auto threatened = scenario;
+    threatened.units[1].sector = SectorId{0};
+    threatened.units[1].facility.reset();
+    std::ranges::find(threatened.stockpiles, StockpileId{11}, &Stockpile::id)->sector = SectorId{0};
+    CampaignState fighting(threatened, 42);
+    const auto at_origin = fighting.issue_ground_order(west, MissionKind::hold, origin, formation);
+    require(at_origin.mission && at_origin.reason == "holding" &&
+            fighting.faction_view(west).missions.back().status == MissionStatus::holding &&
+            fighting.stockpiles().at(stores).quantity[fuel] == 20,
+            "Hold at the current position was delayed or charged movement fuel");
+    fighting.advance_ticks(1);
+    require(fighting.faction_view(west).missions.back().status == MissionStatus::holding &&
+            fighting.stockpiles().at(stores).quantity[ammo] == 19 &&
+            std::ranges::any_of(fighting.observer_battle_log(), [](const auto& event) {
+                return event.reason == "engagement";
+            }), "Holding bypassed the existing combat rules");
+
+    auto changing = scenario;
+    changing.operations.planner_interval_ticks = 1;
+    changing.combat.critical_occupation_seconds = 60;
+    changing.objectives = {{east, neutral, 3}};
+    changing.equipment_types.front().ground_speed_kph = 4;
+    CampaignState access(changing, 42);
+    require(access.issue_ground_order(west, MissionKind::move, destination, formation).mission.has_value(),
+            "Initial neutral destination was unavailable to Move");
+    access.advance_ticks(6);
+    const auto interrupted = access.faction_view(west);
+    require(access.sector_state(neutral).controller == east && access.units().at(formation).sector == SectorId{0} &&
+            interrupted.missions.front().status == MissionStatus::failed &&
+            std::ranges::any_of(interrupted.events, [](const auto& event) {
+                return event.reason == "movement stopped: territorial access lost";
+            }),
+            "Move crossed into a destination lost to an opposing Attack");
+}
+
 void test_geographic_ground_operations()
 {
     using namespace geography;
@@ -1949,6 +2071,64 @@ void test_geographic_ground_operations()
     const auto continuous = bytes(batched, "batched.ows");
     require(bytes(stepped, "stepped.ows") == continuous && bytes(restored, "restored.ows") == continuous,
             "The geographic journey changed across batching or a checkpoint");
+
+    const auto move = [&](CampaignState& campaign) {
+        const auto order = campaign.issue_ground_order(west, MissionKind::move, destination, formation);
+        require(order.mission.has_value(), "Could not order an exact geographic Move across the bridge");
+        return *order.mission;
+    };
+    CampaignState moving(scenario, 42);
+    move(moving);
+    const auto journey = moving.faction_view(west).missions.back().ground_journey;
+    require(journey && journey->route.duration_us == 290'000'000 && journey->route.fuel_ml == 2300 &&
+            std::ranges::any_of(journey->route.legs, [](const auto& leg) { return leg.road.has_value(); }) &&
+            std::ranges::any_of(journey->route.legs, [](const auto& leg) { return !leg.road; }),
+            "Move did not reuse the mixed road/off-road profile or exact cost");
+    moving.advance_ticks(1);
+    moving.save(partial);
+    auto resumed_move = CampaignState::load(partial);
+    resumed_move.advance_ticks(4);
+    moving.advance_ticks(4);
+    require(bytes(resumed_move, "resumed-move.ows") == bytes(moving, "continuous-move.ows") &&
+            moving.combat_units().at(formation).position == destination &&
+            moving.faction_view(west).missions.back().status == MissionStatus::completed &&
+            moving.stockpiles().at(stores).quantity[fuel] == 17 &&
+            moving.combat_units().at(formation).movement_fuel_credit_ml == 700,
+            "Mixed Move changed after resume or did not account for fuel exactly");
+
+    CampaignState cancelled_move(scenario, 42), dry_move(scenario, 42), blocked_move(scenario, 42);
+    const auto cancel_id = move(cancelled_move);
+    move(dry_move);
+    blocked_move.set_road_closed(1, true);
+    move(blocked_move);
+    require(blocked_move.faction_view(west).missions.back().ground_journey == journey,
+            "Move leaked the hidden bridge closure while planning");
+    cancelled_move.advance_ticks(1);
+    const auto stopped_move = cancelled_move.combat_units().at(formation).position;
+    require(cancelled_move.cancel_order(west, cancel_id), "Could not cancel an active Move");
+    cancelled_move.advance_ticks(1);
+    require(cancelled_move.combat_units().at(formation).position == stopped_move &&
+            cancelled_move.stockpiles().at(stores).quantity[fuel] == 19,
+            "Cancelling Move refunded fuel or changed the actual position");
+    dry_move.advance_ticks(1);
+    ResourceAmounts drained_move{};
+    drained_move[fuel] = 19;
+    require(dry_move.consume(stores, drained_move), "Could not deplete fuel during Move");
+    dry_move.advance_ticks(3);
+    blocked_move.advance_ticks(1);
+    for (const auto* state : {&dry_move, &blocked_move}) {
+        const auto view = state->faction_view(west);
+        require(view.missions.back().status == MissionStatus::failed &&
+                view.events.back().reason == (state == &dry_move ? "movement stopped: no fuel" :
+                                              "movement stopped: route obstructed") &&
+                state->equipment().at(EquipmentId{1}).status == EquipmentStatus::available,
+                "Interrupted Move retained the mission or lost the cause");
+    }
+    require(blocked_move.faction_view(west).roads.at(1).closed && blocked_move.faction_view(east).roads.empty(),
+            "Move did not learn the obstruction through faction observation");
+    const auto refuel = dry_move.preview_order(west, MissionKind::move, destination, formation);
+    require(!refuel.candidate && refuel.reason == "selected formation has insufficient fuel for the route",
+            "Move preview accepted an unaffordable route");
 
     require(restored.issue_ground_order(west, MissionKind::defend, origin).mission.has_value() &&
             restored.faction_view(west).missions.back().ground_journey->route.duration_us == 230'000'000,
@@ -2683,6 +2863,32 @@ void test_legacy_road_checkpoint()
             "Migrated closure did not survive a new-format checkpoint");
 }
 
+void test_legacy_defend_checkpoint()
+{
+    // Written by f263b1a with a manual Defend to (300000,250000,0) in the combat demo.
+    const auto* configured = std::getenv("LEGACY_DEFEND_CHECKPOINT");
+    auto campaign = CampaignState::load(configured ? configured : "tests/fixtures/defend-schema7.ows");
+    constexpr auto west = FactionId::west;
+    constexpr geography::Point destination{300'000, 250'000, 0};
+    const auto scheduled = campaign.faction_view(west).missions.front();
+    require(scheduled.kind == MissionKind::defend && scheduled.status == MissionStatus::scheduled &&
+            scheduled.ground_destination == destination && scheduled.ground_unit == UnitId{1},
+            "Schema 7 Defend lost its assignment, geographic point or original order kind");
+    const CheckpointFiles files;
+    const auto rewritten = files.directory / "defend.ows";
+    campaign.save(rewritten);
+    auto resumed = CampaignState::load(rewritten);
+    for (auto* state : {&campaign, &resumed}) {
+        state->advance_ticks(1);
+        require(state->faction_view(west).missions.front().status == MissionStatus::completed &&
+                state->combat_units().at(UnitId{1}).position == destination &&
+                state->equipment().at(EquipmentId{1}).status == EquipmentStatus::available,
+                "Migrated Defend did not complete or was converted into a standing Hold");
+    }
+    require(campaign.faction_view(west).missions == resumed.faction_view(west).missions,
+            "Defend diverged after rewriting a schema 7 checkpoint");
+}
+
 void test_checkpoints()
 {
     const CheckpointFiles files;
@@ -2817,6 +3023,7 @@ int main()
     test_procedural_campaign();
     test_large_procedural_campaigns();
     test_ground_movement();
+    test_ground_position_orders();
     test_geographic_ground_operations();
     test_geographic_transport();
     test_geographic_mobile_delivery();
@@ -2824,6 +3031,7 @@ int main()
     test_depleted_withdrawal();
     test_checkpoints();
     test_legacy_road_checkpoint();
+    test_legacy_defend_checkpoint();
     test_independent_geographic_scenarios();
     test_long_geographic_dispatch();
 }

@@ -133,12 +133,11 @@ For example, `identity 1 land mechanized-infantry battalion` declares the
 organization of unit 1 independently of any `equipment` records. Omitted
 identity defaults to unspecified. Cyclic command relationships are invalid.
 
-Checkpoint schema 6 stores the declared identity for each military unit.
-Simulation rules remain at version 6. The reader accepts the previously
-supported schema/rules combinations and supplies unspecified identity for
-older checkpoints. Saving a migrated checkpoint writes schema 6, which
-requires a reader that supports schema 6. The scenario fingerprint includes
-declared identity.
+Checkpoint schemas from 6 onward store the declared identity for each military
+unit. The reader accepts the previously supported schema and rules versions
+and supplies unspecified identity for older checkpoints. Saving a migrated
+checkpoint writes the current schema 8 with rules version 7. The scenario
+fingerprint includes declared identity.
 
 Faction names are `WEST` and `EAST`. `NEUTRAL` can own sectors and fixed
 stocks. Flags use 0 or 1. Resource vectors list seven nonnegative integers

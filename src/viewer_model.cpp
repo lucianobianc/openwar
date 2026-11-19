@@ -19,8 +19,7 @@ std::span<const Entry> recent(std::span<const Entry> events)
 
 bool active_mission(const Mission& mission)
 {
-    return mission.status == MissionStatus::scheduled || mission.status == MissionStatus::preparing ||
-        mission.status == MissionStatus::in_progress;
+    return mission_active(mission.status);
 }
 
 Event operation_event(const OperationsEvent& event)
@@ -73,7 +72,8 @@ void add_missions(Snapshot& snapshot, const CampaignState& campaign, std::span<c
         rows.push_back(std::string(faction_name(mission.faction)) + (mission.manual ? " / Player order" : " / Autonomous"));
         rows.push_back(number_label("Formation", assigned.id) + " / " + number_label("Equipment", mission.equipment));
         const auto history = by_mission.find({mission.faction, mission.id});
-        const auto launched = mission.launch_tick != 0;
+        const auto launched = mission.launch_tick != 0 ||
+            mission.status == MissionStatus::holding || mission.status == MissionStatus::released;
         if (history != by_mission.end()) {
             rows.push_back("First recorded tick " + std::to_string(history->second.front()->tick));
         }
@@ -128,6 +128,9 @@ void add_missions(Snapshot& snapshot, const CampaignState& campaign, std::span<c
             }
         }
         if (active_mission(mission)) {
+            if (mission.status == MissionStatus::holding) {
+                rows.push_back("Holding until released or interrupted");
+            }
             rows.push_back(number_label("Committed equipment", mission.equipment));
             rows.push_back(number_label("Mission stockpile", mission.launch_stock));
         }

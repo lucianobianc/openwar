@@ -21,8 +21,19 @@ enum class FacilityId : std::uint32_t;
 enum class UnitId : std::uint32_t;
 enum class MissionId : std::uint32_t {};
 enum class ContactId : std::uint32_t {};
-enum class MissionKind { recon, patrol, defend, reposition, attack };
-enum class MissionStatus { scheduled, preparing, in_progress, completed, failed, cancelled };
+enum class MissionKind { recon, patrol, defend, reposition, attack, move, hold };
+enum class MissionStatus { scheduled, preparing, in_progress, completed, failed, cancelled, holding, released };
+
+constexpr bool position_order(MissionKind kind)
+{
+    return kind == MissionKind::move || kind == MissionKind::hold;
+}
+
+constexpr bool mission_active(MissionStatus status)
+{
+    return status == MissionStatus::scheduled || status == MissionStatus::preparing ||
+           status == MissionStatus::in_progress || status == MissionStatus::holding;
+}
 
 struct OperationsSettings {
     bool enabled = false;

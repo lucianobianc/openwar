@@ -139,7 +139,8 @@ simulation rules version. The launcher shows the record on the resume screen.
 Default settings produce the same checkpoint as direct launch in the same
 build. Checkpoints through schema 6 resume without a custom setup record, and
 the normal checkpoint reader resumes custom campaigns offline from resolved
-state. The simulation rules version remains 6.
+state. Checkpoint schema 8 with rules version 7 retains the same provenance
+record and also supports the Move and Hold mission states.
 
 ## 3. Origem do mundo e cenário-base
 

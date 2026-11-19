@@ -311,7 +311,7 @@ is equipped to perform. The draft shows the formation name and ID and uses
 explicit assignment by default. **Use automatic** opts into assignment by the
 engine. **Use selected** restores the original formation in the draft.
 
-Choosing a geographic point submits a ground attack or ground defense.
+Choosing a geographic point submits a ground Attack, Defend, Move or Hold.
 Sector-based actions use the clicked strategic sector. On confirmation
 the campaign checks command authority, active commitments and the current
 eligibility of the requested formation. The viewer reports a refusal if
@@ -324,6 +324,19 @@ The CLI supports `--order TYPE:SECTOR[:UNIT]` and
 ID. Omitting it retains automatic assignment, including the existing
 deterministic candidate ranking.
 
+For **Move** and **Hold**, use `--ground-order` with an exact point in signed
+millimetres. For example, `--ground-order move:751000,251000,0:1` orders
+formation 1 to that point if the destination is eligible. Move admits
+reported friendly or neutral destinations. Hold requires a reported friendly
+destination. In a Hold draft, **Use current position** copies the selected
+formation's exact coordinates. The draft still requires confirmation.
+
+**Move** reports completion at arrival. **Hold** remains active when the
+formation reaches its point. Select the active mission and choose
+**Release hold**, then confirm to free the formation where it stands. The
+CLI performs the same action with `--cancel ID`. Before arrival the same
+cancellation control ends a travelling order. Hold has no duration control.
+
 Phase 1 established draft review with a destination and reported control.
 Phase 3 extends that workflow with an engine preview and mission history.
 
@@ -331,8 +344,8 @@ Phase 3 extends that workflow with an engine preview and mission history.
 
 Use **Missions (M)** to open the faction-authorized mission list. Selecting
 an entry centres the map on its geographic destination or strategic sector
-objective. The list retains scheduled, preparing, active, completed, failed
-and cancelled entries. Inspection shows the engine-assigned formation,
+objective. The list retains scheduled, preparing, active, holding, completed,
+failed, cancelled and released entries. Inspection shows the engine-assigned formation,
 recorded timing and events, known travel progress, and equipment and stock
 commitments. The observer can still inspect either faction or the whole
 campaign.

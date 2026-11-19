@@ -159,9 +159,11 @@ struct Progress {
 [[nodiscard]] Progress begin(const Route& route, std::int64_t fuel_ml);
 // Return unspent time. A closed upcoming segment or insufficient fuel stops at the current position.
 // An observer can stop the journey at the crossing it receives by returning false.
+// Sector access can stop the journey before entering the next sector.
 using CrossingObserver = std::function<bool(const SectorCrossing&)>;
 std::int64_t advance(const Map& map, const Route& route, Progress& progress, std::int64_t duration_us,
-    const CrossingObserver& observer = {}, const RoadAccess& road_allowed = {});
+    const CrossingObserver& observer = {}, const RoadAccess& road_allowed = {},
+    const SectorAccess& sector_allowed = {});
 [[nodiscard]] Point position_at(const Leg& leg, std::int64_t elapsed_us);
 [[nodiscard]] std::int64_t horizontal_distance(Point a, Point b);
 [[nodiscard]] bool allows_leg(const Map& map, const Leg& leg, const SectorAccess& allowed,

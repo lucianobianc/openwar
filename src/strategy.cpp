@@ -10,12 +10,6 @@
 namespace openwar {
 namespace {
 
-bool active_order(const Mission& mission)
-{
-    return mission.status == MissionStatus::scheduled || mission.status == MissionStatus::preparing ||
-           mission.status == MissionStatus::in_progress;
-}
-
 bool friendly(const FactionView& view, FactionId faction, SectorId sector)
 {
     const auto report = view.sectors.find(sector);
@@ -200,7 +194,7 @@ bool CampaignState::update_strategy(FactionId faction)
     std::size_t assigned = 0;
     std::set<SectorId> busy;
     for (const auto& mission : view.missions) {
-        if (active_order(mission)) {
+        if (mission_active(mission.status)) {
             busy.insert(mission.target);
             assigned += !mission.manual;
         }

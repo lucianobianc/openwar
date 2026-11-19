@@ -9,12 +9,6 @@ namespace {
 
 constexpr auto supplies = static_cast<std::size_t>(Resource::supplies);
 
-bool military_order_active(MissionStatus status)
-{
-    return status == MissionStatus::scheduled || status == MissionStatus::preparing ||
-           status == MissionStatus::in_progress;
-}
-
 WarStatus winner(FactionId faction)
 {
     return faction == FactionId::west ? WarStatus::west_victory : WarStatus::east_victory;
@@ -168,7 +162,7 @@ void CampaignState::capture_sector(SectorId sector, FactionId faction)
             }
         }
         for (auto& [key, mission] : missions_) {
-            if (mission.launch_stock != id || !military_order_active(mission.status)) {
+            if (mission.launch_stock != id || !mission_active(mission.status)) {
                 continue;
             }
             release_unspent_mission_stock(mission);
@@ -328,7 +322,7 @@ void CampaignState::conclude_war(WarStatus status, std::string_view cause)
 {
     war_result_ = {status, clock_.tick(), std::string(cause)};
     for (auto& [key, mission] : missions_) {
-        if (!military_order_active(mission.status)) {
+        if (!mission_active(mission.status)) {
             continue;
         }
         release_unspent_mission_stock(mission);

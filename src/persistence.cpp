@@ -12,8 +12,8 @@ namespace {
 
 constexpr std::string_view signature = "OPENWAR-CHECKPOINT\n";
 // Change the schema version for layout changes and the rules version for changes to simulation outcomes.
-constexpr std::uint64_t schema_version = 7;
-constexpr std::uint64_t rules_version = 6;
+constexpr std::uint64_t schema_version = 8;
+constexpr std::uint64_t rules_version = 7;
 constexpr std::size_t header_size = signature.size() + 16;
 constexpr std::size_t checksum_size = 8;
 
@@ -246,6 +246,9 @@ template<class A> void fields(A& a, Field<A, Mission>& v)
     a(v.id, v.faction, v.kind, v.target, v.equipment, v.launch_stock, v.fuel, v.duration_ticks, v.status,
       v.launch_tick, v.detections, v.manual, v.relocation, v.ground_unit, v.ground_path);
     if constexpr (A::reading) {
+        if (a.version < 8 && (position_order(v.kind) || v.status > MissionStatus::cancelled)) {
+            invalid_checkpoint();
+        }
         if (a.version == 1) {
             std::size_t leg{};
             std::uint64_t progress{};
@@ -319,8 +322,8 @@ constexpr auto last_value(MilitaryEchelon) { return MilitaryEchelon::division; }
 constexpr auto last_value(EquipmentStatus) { return EquipmentStatus::lost; }
 constexpr auto last_value(ServiceKind) { return ServiceKind::repair; }
 constexpr auto last_value(ForcesEventKind) { return ForcesEventKind::arrival_delayed; }
-constexpr auto last_value(MissionKind) { return MissionKind::attack; }
-constexpr auto last_value(MissionStatus) { return MissionStatus::cancelled; }
+constexpr auto last_value(MissionKind) { return MissionKind::hold; }
+constexpr auto last_value(MissionStatus) { return MissionStatus::released; }
 constexpr auto last_value(GroundStatus) { return GroundStatus::destroyed; }
 constexpr auto last_value(WarStatus) { return WarStatus::draw; }
 constexpr auto last_value(geography::SiteKind) { return geography::SiteKind::urban_land; }
@@ -958,9 +961,14 @@ struct CampaignArchive {
                 !v.stockpiles_.contains(mission.launch_stock)) {
                 invalid_checkpoint();
             }
+            if ((position_order(mission.kind) && (!mission.ground_unit || !mission.ground_journey ||
+                                                 mission.status == MissionStatus::preparing)) ||
+                ((mission.status == MissionStatus::holding || mission.status == MissionStatus::released) &&
+                    mission.kind != MissionKind::hold)) {
+                invalid_checkpoint();
+            }
             if (mission.ground_unit) {
-                const bool active = mission.status == MissionStatus::scheduled ||
-                    mission.status == MissionStatus::in_progress;
+                const bool active = mission_active(mission.status);
                 if (!mission.ground_destination || !map.valid_position(*mission.ground_destination) ||
                     map.sector(*mission.ground_destination) != static_cast<std::uint32_t>(mission.target) ||
                     (active && !mission.ground_journey)) {
@@ -972,6 +980,11 @@ struct CampaignArchive {
                         invalid_checkpoint();
                     }
                     check_journey(journey.route, journey.progress, *mission.ground_destination);
+                    if ((mission.status == MissionStatus::holding || mission.status == MissionStatus::released ||
+                         (mission.kind == MissionKind::move && mission.status == MissionStatus::completed)) &&
+                        journey.progress.leg != journey.route.legs.size()) {
+                        invalid_checkpoint();
+                    }
                     if (active && v.combat_units_.at(*mission.ground_unit).position !=
                             mission.ground_journey->progress.position) {
                         invalid_checkpoint();
@@ -1069,6 +1082,7 @@ CampaignState CampaignState::load(const std::filesystem::path& path)
     std::uint64_t schema{}, rules{};
     archive(schema, rules);
     if ((schema != schema_version || rules != rules_version) &&
+        (schema != 7 || rules != 6) &&
         (schema != 6 || rules != 6) &&
         (schema != 5 || rules != 6) &&
         (schema != 4 || rules != 5) &&

@@ -54,7 +54,7 @@ faz captura territorial indiretamente, permitindo posterior ocupação terrestre
 The command request may carry a formation ID. `CommandSession` passes it to
 the same ground or abstract operation planner used for automatic assignment.
 The commanding faction must own the requested formation and have permission
-to issue orders. A scheduled, preparing, or executing order prevents a
+to issue orders. A scheduled, preparing, executing, or holding order prevents a
 second assignment to the formation. To issue a different order, the operator
 must use the existing cancellation rules or wait for the current order to end.
 
@@ -75,6 +75,40 @@ Preview checks the current state without committing equipment or stock.
 Confirmation repeats the same checks before reserving resources. The existing
 scenario and checkpoint formats already represent the committed formation
 or equipment assignment.
+
+### Move and Hold
+
+**Move** relocates a formation to an exact geographic point in a sector
+reported with sufficient confidence as friendly or neutral. It needs mobile
+ground equipment, available supplies, and enough fuel for the route. The
+formation completes the order on arrival and stays at the destination.
+Move can expose a formation to combat through the normal engagement rules.
+Starting territorial occupation still requires an active Attack order.
+Presence still contributes to contested control under the existing rules.
+
+**Hold** requires available mobile defensive equipment and a position in a
+reported friendly sector. The formation uses the same journey and fuel rules
+as Move. A Hold at the formation's current point commits immediately. On
+arrival from elsewhere, it enters the active `holding` status. The formation
+continues to participate in normal combat, supply, and readiness updates.
+The commitment lasts until the commander releases it or a simulation event
+interrupts it. Release leaves the formation in place and records `released`.
+Cancelling before arrival records `cancelled`. Both retain travel costs
+already incurred.
+
+Both orders use confirmed friendly sectors for transit and faction road
+reports for planning. Execution checks actual road conditions and territorial
+access. A change in control can stop movement before entry. Obstruction,
+insufficient fuel, withdrawal, or loss of the committed equipment can end
+the mission with a recorded reason. Ground **Defend** retains its existing
+completion rule on reaching the assigned point in uncontested friendly
+territory. Autonomous planners continue to issue their existing mission types.
+
+Checkpoint schema 8 and rules version 7 add Move, Hold, and their statuses
+while retaining the existing journey fields. The reader accepts older
+checkpoints, including schema 7 with rules version 6. Stored Defend orders
+retain their kind and completion rule. Older builds cannot read the new
+checkpoint version. Hold currently has no duration option.
 
 ## 4. Fluxo de planejamento
 
