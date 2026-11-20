@@ -1,0 +1,801 @@
+OWSCENARIO 1
+world "pilot.owgeo"
+# @name "Central Korea inland pilot (36 formations per faction)"
+# @description "Two fictional task forces rotate independent formations across northern and central approaches over a 72-hour campaign."
+
+# Coordinates are local map millimetres at existing imported road nodes. All military sites are fictional.
+point west_depot 18942563 20429784 281080
+point west_hq 20234552 21327105 334700
+point west_armor 21665045 21477237 231472
+point west_scout 21331920 18601796 296747
+point west_security 21339662 22627842 214969
+point west_workshop 20654941 20508137 225040
+point west_air 18942563 20429784 281080
+point east_depot 26866229 21212341 140023
+point east_hq 24551242 21770168 210646
+point east_armor 24551242 21770168 210646
+point east_scout 24348777 19340147 185554
+point east_security 24478069 23962018 299310
+point east_workshop 24551242 21770168 210646
+point east_air 26866229 21212341 140023
+point central_crossing 23317169 21999728 334226
+point north_junction 22749374 19522092 266696
+point south_junction 23313994 22002778 334445
+point west_objective 21665045 21477237 231472
+point east_objective 24551242 21770168 210646
+
+# Five-minute ticks, 30-minute planning, and 40-minute combat resolution.
+timing 300 6 1 1 259200
+operations 6 12 13 43200 10800 43200
+force_recovery 1
+combat 8 3600 5400 1800 43200 86400
+
+# The northern and central approaches each have two independently assignable formations.
+# Two southern formations provide additional depth on the flank.
+control 249 WEST 1
+control 250 WEST 3
+control 226 WEST 0
+control 274 WEST 0
+control 253 EAST 1
+control 252 EAST 3
+control 228 EAST 0
+control 276 EAST 0
+control 251 NEUTRAL 3
+control 227 NEUTRAL 1
+control 275 NEUTRAL 2
+public 249
+public 250
+public 251
+public 252
+public 253
+public 226
+public 227
+public 228
+public 274
+public 275
+public 276
+
+objective WEST central_crossing 8
+objective WEST south_junction 6
+objective WEST north_junction 9
+objective WEST west_objective 6
+objective WEST east_objective 2
+objective WEST east_scout 3
+objective WEST east_security 3
+objective WEST east_depot 1
+victory WEST 43200 253
+command_site WEST 250
+command_site WEST 249
+
+objective EAST central_crossing 8
+objective EAST north_junction 9
+objective EAST south_junction 6
+objective EAST east_objective 6
+objective EAST west_objective 2
+objective EAST west_scout 3
+objective EAST west_security 3
+objective EAST west_depot 1
+victory EAST 43200 249
+command_site EAST 252
+command_site EAST 253
+
+# Stock columns are capacity and initial balance for oil reserve, crude, fuel, materials, parts, supplies and ammunition.
+stock 1 WEST west_depot    0 0 2100 96 192 640 640    0 0 1800 80 160 540 540
+stock 2 WEST west_workshop    0 0 90 18 40 55 45    0 0 42 4 16 18 16
+stock 3 WEST west_air    0 0 240 0 40 12 0    0 0 180 0 24 0 0
+stock 10 WEST -    0 0 55 0 8 35 35    0 0 24 0 3 18 14
+stock 11 WEST -    0 0 65 0 8 45 45    0 0 35 0 2 35 26
+stock 12 WEST -    0 0 62 0 8 45 45    0 0 30 0 2 29 24
+stock 13 WEST -    0 0 48 0 8 35 35    0 0 29 0 2 28 18
+stock 14 WEST -    0 0 55 0 8 38 38    0 0 24 0 3 24 21
+installation 1 2 1 1 100 3 1 0    0 0 0 2 0 0 0    0 0 0 0 1 0 0    "WEST field workshop"
+facility 1 2 3 3 1
+facility 2 3 1 1 1
+stock 4 WEST west_security 0 0 0 0 30 0 0    0 0 0 0 16 0 0
+facility 3 4 3 3 1
+stock 5 WEST west_scout 0 0 0 0 60 0 0    0 0 0 0 36 0 0
+facility 4 5 3 3 1
+stock 15 WEST -    0 0 110 0 12 70 70    0 0 65 0 4 52 52
+stock 16 WEST -    0 0 110 0 12 70 70    0 0 65 0 4 52 52
+stock 17 WEST -    0 0 110 0 12 70 70    0 0 65 0 4 52 52
+
+stock 101 EAST east_depot    0 0 2100 96 192 640 640    0 0 1800 80 160 540 540
+stock 102 EAST east_workshop    0 0 90 18 40 55 45    0 0 42 4 16 18 16
+stock 103 EAST east_air    0 0 240 0 40 12 0    0 0 180 0 24 0 0
+stock 110 EAST -    0 0 55 0 8 35 35    0 0 24 0 3 18 14
+stock 111 EAST -    0 0 65 0 8 45 45    0 0 30 0 2 33 27
+stock 112 EAST -    0 0 62 0 8 45 45    0 0 30 0 2 29 24
+stock 113 EAST -    0 0 48 0 8 35 35    0 0 29 0 2 28 18
+stock 114 EAST -    0 0 55 0 8 38 38    0 0 24 0 3 24 21
+installation 101 102 1 1 100 3 1 0    0 0 0 2 0 0 0    0 0 0 0 1 0 0    "EAST field workshop"
+facility 101 102 3 3 1
+facility 102 103 1 1 1
+stock 104 EAST east_security 0 0 0 0 30 0 0    0 0 0 0 16 0 0
+facility 103 104 3 3 1
+stock 105 EAST east_scout 0 0 0 0 60 0 0    0 0 0 0 36 0 0
+facility 104 105 3 3 1
+stock 115 EAST -    0 0 110 0 12 70 70    0 0 65 0 4 52 52
+stock 116 EAST -    0 0 110 0 12 70 70    0 0 65 0 4 52 52
+stock 117 EAST -    0 0 110 0 12 70 70    0 0 65 0 4 52 52
+
+# Equipment models use only the categories and effects already implemented by the engine.
+type 1 WEST tank 58 1 34 0 7200 360 1 default "Heavy armor"
+type 2 WEST transport 26 1 37 0 7200 360 1 default "Mechanized carrier"
+type 3 WEST transport 18 1 47 0 7200 360 1 default "Scout vehicle"
+type 4 WEST transport 3 0 29 0 7200 360 1 valley "Support truck"
+type 5 WEST air_defense_vehicle 12 0 35 0 7200 360 1 default "Air-defense vehicle"
+type 6 WEST helicopter 0 0 0 5 7200 360 1 default "Reconnaissance helicopter"
+
+type 101 EAST tank 47 1 39 0 7200 360 1 default "Medium armor"
+type 102 EAST transport 31 1 41 0 7200 360 1 default "Mechanized carrier"
+type 103 EAST transport 18 1 52 0 7200 360 1 default "Scout vehicle"
+type 104 EAST transport 3 0 29 0 7200 360 1 valley "Support truck"
+type 105 EAST air_defense_team 8 0 24 0 7200 360 1 default "Air-defense team"
+type 106 EAST helicopter 0 0 0 6 7200 360 1 default "Reconnaissance helicopter"
+
+unit 1 WEST west_hq 10 1 78 "WEST Valley Task Force"
+unit 2 WEST west_armor 11 1 83 "WEST Armor Company"
+unit 3 WEST west_security 12 3 81 "WEST Mechanized Company"
+unit 4 WEST west_scout 13 4 82 "WEST Recon Platoon"
+unit 5 WEST west_security 14 0 76 "WEST Support Platoon"
+unit 6 WEST west_air 0 2 80 "WEST Recon Flight"
+identity 1 land support battalion
+identity 2 land armor company
+parent 2 1
+identity 3 land mechanized-infantry company
+parent 3 1
+identity 4 land reconnaissance platoon
+parent 4 1
+identity 5 land support platoon
+parent 5 1
+identity 6 air reconnaissance unspecified
+parent 6 1
+equipment 1 4 1
+equipment 2 5 1
+equipment 3 1 2
+equipment 4 1 2
+equipment 5 1 2
+equipment 6 4 2
+equipment 7 2 3
+equipment 8 2 3
+equipment 9 1 3
+equipment 10 5 3
+equipment 11 3 4
+equipment 12 3 4
+equipment 13 4 5
+equipment 14 5 5
+equipment 15 6 6
+equipment 16 6 6
+replacement 17 1 2 "WEST depot reserve"
+replacement 18 1 2 "WEST depot reserve"
+replacement 19 2 3 "WEST depot reserve"
+replacement 20 2 3 "WEST depot reserve"
+
+unit 7 WEST west_scout 15 4 82 "WEST Northern Maneuver Company"
+identity 7 land mechanized-infantry company
+parent 7 1
+equipment 30 2 7
+equipment 31 2 7
+equipment 32 2 7
+replacement 50 2 7 "WEST depot reserve"
+replacement 51 2 7 "WEST depot reserve"
+unit 8 WEST west_security 16 3 82 "WEST Southern Maneuver Company"
+identity 8 land mechanized-infantry company
+parent 8 1
+equipment 33 2 8
+equipment 34 2 8
+equipment 35 2 8
+replacement 53 2 8 "WEST depot reserve"
+replacement 54 2 8 "WEST depot reserve"
+unit 9 WEST west_armor 17 1 82 "WEST Central Maneuver Company"
+identity 9 land mechanized-infantry company
+parent 9 1
+equipment 36 1 9
+equipment 37 1 9
+equipment 38 1 9
+replacement 56 1 9 "WEST depot reserve"
+replacement 57 1 9 "WEST depot reserve"
+replacement 60 3 4 "WEST depot reserve"
+replacement 61 3 4 "WEST depot reserve"
+
+unit 101 EAST east_hq 110 101 78 "EAST Valley Task Force"
+unit 102 EAST east_armor 111 101 83 "EAST Armor Company"
+unit 103 EAST east_security 112 103 81 "EAST Mechanized Company"
+unit 104 EAST east_scout 113 104 82 "EAST Recon Platoon"
+unit 105 EAST east_security 114 0 76 "EAST Support Platoon"
+unit 106 EAST east_air 0 102 80 "EAST Recon Flight"
+identity 101 land support battalion
+identity 102 land armor company
+parent 102 101
+identity 103 land mechanized-infantry company
+parent 103 101
+identity 104 land reconnaissance platoon
+parent 104 101
+identity 105 land support platoon
+parent 105 101
+identity 106 air reconnaissance unspecified
+parent 106 101
+equipment 101 104 101
+equipment 102 105 101
+equipment 103 101 102
+equipment 104 101 102
+equipment 105 102 102
+equipment 106 104 102
+equipment 107 102 103
+equipment 108 102 103
+equipment 109 102 103
+equipment 110 101 103
+equipment 111 105 103
+equipment 112 103 104
+equipment 113 103 104
+equipment 114 103 104
+equipment 115 104 105
+equipment 116 105 105
+equipment 117 106 106
+equipment 118 106 106
+replacement 119 101 102 "EAST depot reserve"
+replacement 120 101 102 "EAST depot reserve"
+replacement 121 102 103 "EAST depot reserve"
+replacement 122 102 103 "EAST depot reserve"
+
+unit 107 EAST east_scout 115 104 82 "EAST Northern Maneuver Company"
+identity 107 land mechanized-infantry company
+parent 107 101
+equipment 130 102 107
+equipment 131 102 107
+equipment 132 102 107
+replacement 150 102 107 "EAST depot reserve"
+replacement 151 102 107 "EAST depot reserve"
+unit 108 EAST east_security 116 103 82 "EAST Southern Maneuver Company"
+identity 108 land mechanized-infantry company
+parent 108 101
+equipment 133 102 108
+equipment 134 102 108
+equipment 135 102 108
+replacement 153 102 108 "EAST depot reserve"
+replacement 154 102 108 "EAST depot reserve"
+unit 109 EAST east_armor 117 101 82 "EAST Central Maneuver Company"
+identity 109 land mechanized-infantry company
+parent 109 101
+equipment 136 101 109
+equipment 137 101 109
+equipment 138 101 109
+replacement 156 101 109 "EAST depot reserve"
+replacement 157 101 109 "EAST depot reserve"
+replacement 160 103 104 "EAST depot reserve"
+replacement 161 103 104 "EAST depot reserve"
+
+# Depot carriers share finite lift. Replenishment depends on the recipient remaining accessible.
+carrier 1 WEST west_depot 22 60 valley
+carrier 2 WEST west_depot 28 70 valley
+shipment 1 1 11 ammunition 14 6
+shipment 2 1 12 supplies 13 5
+shipment 3 1 2 materials 10 3
+shipment 4 1 3 fuel 16 2
+resupply 1 11 ammunition 22 32
+resupply 1 12 ammunition 20 28
+resupply 1 13 ammunition 19 25
+resupply 1 11 supplies 10 25
+resupply 1 12 supplies 10 25
+resupply 1 13 supplies 18 25
+resupply 1 11 fuel 28 37
+resupply 1 12 fuel 23 34
+resupply 1 13 fuel 11 23
+resupply 1 2 spare_parts 15 20
+resupply 1 3 fuel 38 55
+resupply 1 4 spare_parts 8 16
+resupply 1 2 materials 4 12
+carrier 3 WEST west_depot 36 110 valley
+resupply 1 15 ammunition 45 60
+resupply 1 15 supplies 35 57
+resupply 1 15 fuel 45 75
+resupply 1 16 ammunition 45 60
+resupply 1 16 supplies 35 57
+resupply 1 16 fuel 45 75
+resupply 1 17 ammunition 45 60
+resupply 1 17 supplies 35 57
+resupply 1 17 fuel 45 75
+resupply 1 5 spare_parts 20 40
+resupply 1 3 spare_parts 12 28
+
+carrier 101 EAST east_depot 22 60 valley
+carrier 102 EAST east_depot 28 70 valley
+shipment 101 101 111 ammunition 14 6
+shipment 102 101 112 supplies 13 5
+shipment 103 101 102 materials 10 3
+shipment 104 101 103 fuel 16 2
+resupply 101 111 ammunition 22 32
+resupply 101 112 ammunition 20 28
+resupply 101 113 ammunition 19 25
+resupply 101 111 supplies 10 25
+resupply 101 112 supplies 10 25
+resupply 101 113 supplies 18 25
+resupply 101 111 fuel 28 37
+resupply 101 112 fuel 23 34
+resupply 101 113 fuel 11 23
+resupply 101 102 spare_parts 15 20
+resupply 101 103 fuel 38 55
+resupply 101 104 spare_parts 8 16
+resupply 101 102 materials 4 12
+carrier 103 EAST east_depot 36 110 valley
+resupply 101 115 ammunition 45 60
+resupply 101 115 supplies 35 57
+resupply 101 115 fuel 45 75
+resupply 101 116 ammunition 45 60
+resupply 101 116 supplies 35 57
+resupply 101 116 fuel 45 75
+resupply 101 117 ammunition 45 60
+resupply 101 117 supplies 35 57
+resupply 101 117 fuel 45 75
+resupply 101 105 spare_parts 20 40
+resupply 101 103 spare_parts 12 28
+
+# Additional subordinate battalions and independently assigned formations.
+stock 1000 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1000 WEST west_scout 1000 4 81 "WEST Northern Command 1"
+identity 1000 land support battalion
+parent 1000 1
+equipment 10000 4 1000
+stock 1001 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1001 WEST west_scout 1001 4 81 "WEST Northern Mechanized 1"
+identity 1001 land mechanized-infantry company
+parent 1001 1000
+equipment 10010 2 1001
+equipment 10011 2 1001
+equipment 10012 2 1001
+replacement 10015 2 1001 "WEST depot reserve"
+resupply 1 1001 fuel 28 55
+resupply 1 1001 supplies 15 40
+resupply 1 1001 ammunition 15 40
+stock 1002 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1002 WEST west_scout 1002 4 81 "WEST Northern Recon 1"
+identity 1002 land reconnaissance platoon
+parent 1002 1000
+equipment 10020 3 1002
+equipment 10021 3 1002
+equipment 10022 3 1002
+replacement 10025 3 1002 "WEST depot reserve"
+stock 1030 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1030 WEST west_armor 1030 1 81 "WEST Central Command 1"
+identity 1030 land support battalion
+parent 1030 1
+equipment 10300 4 1030
+stock 1031 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1031 WEST west_armor 1031 1 81 "WEST Central Mechanized 1"
+identity 1031 land mechanized-infantry company
+parent 1031 1030
+equipment 10310 2 1031
+equipment 10311 2 1031
+equipment 10312 2 1031
+replacement 10315 2 1031 "WEST depot reserve"
+resupply 1 1031 fuel 28 55
+resupply 1 1031 supplies 15 40
+resupply 1 1031 ammunition 15 40
+stock 1032 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1032 WEST west_armor 1032 1 81 "WEST Central Recon 1"
+identity 1032 land reconnaissance platoon
+parent 1032 1030
+equipment 10320 3 1032
+equipment 10321 3 1032
+equipment 10322 3 1032
+replacement 10325 3 1032 "WEST depot reserve"
+stock 1060 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1060 WEST west_security 1060 3 81 "WEST Southern Command 1"
+identity 1060 land support battalion
+parent 1060 1
+equipment 10600 4 1060
+stock 1061 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1061 WEST west_security 1061 3 81 "WEST Southern Mechanized 1"
+identity 1061 land mechanized-infantry company
+parent 1061 1060
+equipment 10610 2 1061
+equipment 10611 2 1061
+equipment 10612 2 1061
+replacement 10615 2 1061 "WEST depot reserve"
+resupply 1 1061 fuel 28 55
+resupply 1 1061 supplies 15 40
+resupply 1 1061 ammunition 15 40
+stock 1062 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1062 WEST west_security 1062 3 81 "WEST Southern Recon 1"
+identity 1062 land reconnaissance platoon
+parent 1062 1060
+equipment 10620 3 1062
+equipment 10621 3 1062
+equipment 10622 3 1062
+replacement 10625 3 1062 "WEST depot reserve"
+stock 1009 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1009 WEST west_scout 1009 4 81 "WEST Northern Armor 2"
+identity 1009 land armor company
+parent 1009 1000
+equipment 10090 1 1009
+equipment 10091 1 1009
+equipment 10092 1 1009
+replacement 10095 1 1009 "WEST depot reserve"
+stock 1010 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1010 WEST west_scout 1010 4 81 "WEST Northern Mechanized 2"
+identity 1010 land mechanized-infantry company
+parent 1010 1000
+equipment 10100 2 1010
+equipment 10101 2 1010
+equipment 10102 2 1010
+replacement 10105 2 1010 "WEST depot reserve"
+resupply 1 1010 fuel 28 55
+resupply 1 1010 supplies 15 40
+resupply 1 1010 ammunition 15 40
+stock 1011 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1011 WEST west_scout 1011 4 81 "WEST Northern Recon 2"
+identity 1011 land reconnaissance platoon
+parent 1011 1000
+equipment 10110 3 1011
+equipment 10111 3 1011
+equipment 10112 3 1011
+replacement 10115 3 1011 "WEST depot reserve"
+stock 1039 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1039 WEST west_armor 1039 1 81 "WEST Central Armor 2"
+identity 1039 land armor company
+parent 1039 1030
+equipment 10390 1 1039
+equipment 10391 1 1039
+equipment 10392 1 1039
+replacement 10395 1 1039 "WEST depot reserve"
+stock 1040 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1040 WEST west_armor 1040 1 81 "WEST Central Mechanized 2"
+identity 1040 land mechanized-infantry company
+parent 1040 1030
+equipment 10400 2 1040
+equipment 10401 2 1040
+equipment 10402 2 1040
+replacement 10405 2 1040 "WEST depot reserve"
+resupply 1 1040 fuel 28 55
+resupply 1 1040 supplies 15 40
+resupply 1 1040 ammunition 15 40
+stock 1041 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1041 WEST west_armor 1041 1 81 "WEST Central Recon 2"
+identity 1041 land reconnaissance platoon
+parent 1041 1030
+equipment 10410 3 1041
+equipment 10411 3 1041
+equipment 10412 3 1041
+replacement 10415 3 1041 "WEST depot reserve"
+stock 1069 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1069 WEST west_security 1069 3 81 "WEST Southern Armor 2"
+identity 1069 land armor company
+parent 1069 1060
+equipment 10690 1 1069
+equipment 10691 1 1069
+equipment 10692 1 1069
+replacement 10695 1 1069 "WEST depot reserve"
+stock 1070 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1070 WEST west_security 1070 3 81 "WEST Southern Mechanized 2"
+identity 1070 land mechanized-infantry company
+parent 1070 1060
+equipment 10700 2 1070
+equipment 10701 2 1070
+equipment 10702 2 1070
+replacement 10705 2 1070 "WEST depot reserve"
+resupply 1 1070 fuel 28 55
+resupply 1 1070 supplies 15 40
+resupply 1 1070 ammunition 15 40
+stock 1071 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1071 WEST west_security 1071 3 81 "WEST Southern Recon 2"
+identity 1071 land reconnaissance platoon
+parent 1071 1060
+equipment 10710 3 1071
+equipment 10711 3 1071
+equipment 10712 3 1071
+replacement 10715 3 1071 "WEST depot reserve"
+stock 1018 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1018 WEST west_scout 1018 4 81 "WEST Northern Armor 3"
+identity 1018 land armor company
+parent 1018 1000
+equipment 10180 1 1018
+equipment 10181 1 1018
+equipment 10182 1 1018
+replacement 10185 1 1018 "WEST depot reserve"
+stock 1019 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1019 WEST west_scout 1019 4 81 "WEST Northern Mechanized 3"
+identity 1019 land mechanized-infantry company
+parent 1019 1000
+equipment 10190 2 1019
+equipment 10191 2 1019
+equipment 10192 2 1019
+replacement 10195 2 1019 "WEST depot reserve"
+resupply 1 1019 fuel 28 55
+resupply 1 1019 supplies 15 40
+resupply 1 1019 ammunition 15 40
+stock 1020 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1020 WEST west_scout 1020 4 81 "WEST Northern Recon 3"
+identity 1020 land reconnaissance platoon
+parent 1020 1000
+equipment 10200 3 1020
+equipment 10201 3 1020
+equipment 10202 3 1020
+replacement 10205 3 1020 "WEST depot reserve"
+stock 1048 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1048 WEST west_armor 1048 1 81 "WEST Central Armor 3"
+identity 1048 land armor company
+parent 1048 1030
+equipment 10480 1 1048
+equipment 10481 1 1048
+equipment 10482 1 1048
+replacement 10485 1 1048 "WEST depot reserve"
+stock 1049 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1049 WEST west_armor 1049 1 81 "WEST Central Mechanized 3"
+identity 1049 land mechanized-infantry company
+parent 1049 1030
+equipment 10490 2 1049
+equipment 10491 2 1049
+equipment 10492 2 1049
+replacement 10495 2 1049 "WEST depot reserve"
+resupply 1 1049 fuel 28 55
+resupply 1 1049 supplies 15 40
+resupply 1 1049 ammunition 15 40
+stock 1050 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1050 WEST west_armor 1050 1 81 "WEST Central Recon 3"
+identity 1050 land reconnaissance platoon
+parent 1050 1030
+equipment 10500 3 1050
+equipment 10501 3 1050
+equipment 10502 3 1050
+replacement 10505 3 1050 "WEST depot reserve"
+stock 1078 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1078 WEST west_security 1078 3 81 "WEST Southern Armor 3"
+identity 1078 land armor company
+parent 1078 1060
+equipment 10780 1 1078
+equipment 10781 1 1078
+equipment 10782 1 1078
+replacement 10785 1 1078 "WEST depot reserve"
+stock 1079 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1079 WEST west_security 1079 3 81 "WEST Southern Mechanized 3"
+identity 1079 land mechanized-infantry company
+parent 1079 1060
+equipment 10790 2 1079
+equipment 10791 2 1079
+equipment 10792 2 1079
+replacement 10795 2 1079 "WEST depot reserve"
+resupply 1 1079 fuel 28 55
+resupply 1 1079 supplies 15 40
+resupply 1 1079 ammunition 15 40
+stock 1080 WEST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1080 WEST west_security 1080 3 81 "WEST Southern Recon 3"
+identity 1080 land reconnaissance platoon
+parent 1080 1060
+equipment 10800 3 1080
+equipment 10801 3 1080
+equipment 10802 3 1080
+replacement 10805 3 1080 "WEST depot reserve"
+stock 1100 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1100 EAST east_scout 1100 104 81 "EAST Northern Command 1"
+identity 1100 land support battalion
+parent 1100 101
+equipment 11000 104 1100
+stock 1101 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1101 EAST east_scout 1101 104 81 "EAST Northern Mechanized 1"
+identity 1101 land mechanized-infantry company
+parent 1101 1100
+equipment 11010 102 1101
+equipment 11011 102 1101
+equipment 11012 102 1101
+replacement 11015 102 1101 "EAST depot reserve"
+resupply 101 1101 fuel 28 55
+resupply 101 1101 supplies 15 40
+resupply 101 1101 ammunition 15 40
+stock 1102 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1102 EAST east_scout 1102 104 81 "EAST Northern Recon 1"
+identity 1102 land reconnaissance platoon
+parent 1102 1100
+equipment 11020 103 1102
+equipment 11021 103 1102
+equipment 11022 103 1102
+replacement 11025 103 1102 "EAST depot reserve"
+stock 1130 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1130 EAST east_armor 1130 101 81 "EAST Central Command 1"
+identity 1130 land support battalion
+parent 1130 101
+equipment 11300 104 1130
+stock 1131 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1131 EAST east_armor 1131 101 81 "EAST Central Mechanized 1"
+identity 1131 land mechanized-infantry company
+parent 1131 1130
+equipment 11310 102 1131
+equipment 11311 102 1131
+equipment 11312 102 1131
+replacement 11315 102 1131 "EAST depot reserve"
+resupply 101 1131 fuel 28 55
+resupply 101 1131 supplies 15 40
+resupply 101 1131 ammunition 15 40
+stock 1132 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1132 EAST east_armor 1132 101 81 "EAST Central Recon 1"
+identity 1132 land reconnaissance platoon
+parent 1132 1130
+equipment 11320 103 1132
+equipment 11321 103 1132
+equipment 11322 103 1132
+replacement 11325 103 1132 "EAST depot reserve"
+stock 1160 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1160 EAST east_security 1160 103 81 "EAST Southern Command 1"
+identity 1160 land support battalion
+parent 1160 101
+equipment 11600 104 1160
+stock 1161 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1161 EAST east_security 1161 103 81 "EAST Southern Mechanized 1"
+identity 1161 land mechanized-infantry company
+parent 1161 1160
+equipment 11610 102 1161
+equipment 11611 102 1161
+equipment 11612 102 1161
+replacement 11615 102 1161 "EAST depot reserve"
+resupply 101 1161 fuel 28 55
+resupply 101 1161 supplies 15 40
+resupply 101 1161 ammunition 15 40
+stock 1162 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1162 EAST east_security 1162 103 81 "EAST Southern Recon 1"
+identity 1162 land reconnaissance platoon
+parent 1162 1160
+equipment 11620 103 1162
+equipment 11621 103 1162
+equipment 11622 103 1162
+replacement 11625 103 1162 "EAST depot reserve"
+stock 1109 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1109 EAST east_scout 1109 104 81 "EAST Northern Armor 2"
+identity 1109 land armor company
+parent 1109 1100
+equipment 11090 101 1109
+equipment 11091 101 1109
+equipment 11092 101 1109
+replacement 11095 101 1109 "EAST depot reserve"
+stock 1110 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1110 EAST east_scout 1110 104 81 "EAST Northern Mechanized 2"
+identity 1110 land mechanized-infantry company
+parent 1110 1100
+equipment 11100 102 1110
+equipment 11101 102 1110
+equipment 11102 102 1110
+replacement 11105 102 1110 "EAST depot reserve"
+resupply 101 1110 fuel 28 55
+resupply 101 1110 supplies 15 40
+resupply 101 1110 ammunition 15 40
+stock 1111 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1111 EAST east_scout 1111 104 81 "EAST Northern Recon 2"
+identity 1111 land reconnaissance platoon
+parent 1111 1100
+equipment 11110 103 1111
+equipment 11111 103 1111
+equipment 11112 103 1111
+replacement 11115 103 1111 "EAST depot reserve"
+stock 1139 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1139 EAST east_armor 1139 101 81 "EAST Central Armor 2"
+identity 1139 land armor company
+parent 1139 1130
+equipment 11390 101 1139
+equipment 11391 101 1139
+equipment 11392 101 1139
+replacement 11395 101 1139 "EAST depot reserve"
+stock 1140 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1140 EAST east_armor 1140 101 81 "EAST Central Mechanized 2"
+identity 1140 land mechanized-infantry company
+parent 1140 1130
+equipment 11400 102 1140
+equipment 11401 102 1140
+equipment 11402 102 1140
+replacement 11405 102 1140 "EAST depot reserve"
+resupply 101 1140 fuel 28 55
+resupply 101 1140 supplies 15 40
+resupply 101 1140 ammunition 15 40
+stock 1141 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1141 EAST east_armor 1141 101 81 "EAST Central Recon 2"
+identity 1141 land reconnaissance platoon
+parent 1141 1130
+equipment 11410 103 1141
+equipment 11411 103 1141
+equipment 11412 103 1141
+replacement 11415 103 1141 "EAST depot reserve"
+stock 1169 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1169 EAST east_security 1169 103 81 "EAST Southern Armor 2"
+identity 1169 land armor company
+parent 1169 1160
+equipment 11690 101 1169
+equipment 11691 101 1169
+equipment 11692 101 1169
+replacement 11695 101 1169 "EAST depot reserve"
+stock 1170 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1170 EAST east_security 1170 103 81 "EAST Southern Mechanized 2"
+identity 1170 land mechanized-infantry company
+parent 1170 1160
+equipment 11700 102 1170
+equipment 11701 102 1170
+equipment 11702 102 1170
+replacement 11705 102 1170 "EAST depot reserve"
+resupply 101 1170 fuel 28 55
+resupply 101 1170 supplies 15 40
+resupply 101 1170 ammunition 15 40
+stock 1171 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1171 EAST east_security 1171 103 81 "EAST Southern Recon 2"
+identity 1171 land reconnaissance platoon
+parent 1171 1160
+equipment 11710 103 1171
+equipment 11711 103 1171
+equipment 11712 103 1171
+replacement 11715 103 1171 "EAST depot reserve"
+stock 1118 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1118 EAST east_scout 1118 104 81 "EAST Northern Armor 3"
+identity 1118 land armor company
+parent 1118 1100
+equipment 11180 101 1118
+equipment 11181 101 1118
+equipment 11182 101 1118
+replacement 11185 101 1118 "EAST depot reserve"
+stock 1119 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1119 EAST east_scout 1119 104 81 "EAST Northern Mechanized 3"
+identity 1119 land mechanized-infantry company
+parent 1119 1100
+equipment 11190 102 1119
+equipment 11191 102 1119
+equipment 11192 102 1119
+replacement 11195 102 1119 "EAST depot reserve"
+resupply 101 1119 fuel 28 55
+resupply 101 1119 supplies 15 40
+resupply 101 1119 ammunition 15 40
+stock 1120 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1120 EAST east_scout 1120 104 81 "EAST Northern Recon 3"
+identity 1120 land reconnaissance platoon
+parent 1120 1100
+equipment 11200 103 1120
+equipment 11201 103 1120
+equipment 11202 103 1120
+replacement 11205 103 1120 "EAST depot reserve"
+stock 1148 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1148 EAST east_armor 1148 101 81 "EAST Central Armor 3"
+identity 1148 land armor company
+parent 1148 1130
+equipment 11480 101 1148
+equipment 11481 101 1148
+equipment 11482 101 1148
+replacement 11485 101 1148 "EAST depot reserve"
+stock 1149 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1149 EAST east_armor 1149 101 81 "EAST Central Mechanized 3"
+identity 1149 land mechanized-infantry company
+parent 1149 1130
+equipment 11490 102 1149
+equipment 11491 102 1149
+equipment 11492 102 1149
+replacement 11495 102 1149 "EAST depot reserve"
+resupply 101 1149 fuel 28 55
+resupply 101 1149 supplies 15 40
+resupply 101 1149 ammunition 15 40
+stock 1150 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1150 EAST east_armor 1150 101 81 "EAST Central Recon 3"
+identity 1150 land reconnaissance platoon
+parent 1150 1130
+equipment 11500 103 1150
+equipment 11501 103 1150
+equipment 11502 103 1150
+replacement 11505 103 1150 "EAST depot reserve"
+stock 1178 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1178 EAST east_security 1178 103 81 "EAST Southern Armor 3"
+identity 1178 land armor company
+parent 1178 1160
+equipment 11780 101 1178
+equipment 11781 101 1178
+equipment 11782 101 1178
+replacement 11785 101 1178 "EAST depot reserve"
+stock 1179 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1179 EAST east_security 1179 103 81 "EAST Southern Mechanized 3"
+identity 1179 land mechanized-infantry company
+parent 1179 1160
+equipment 11790 102 1179
+equipment 11791 102 1179
+equipment 11792 102 1179
+replacement 11795 102 1179 "EAST depot reserve"
+resupply 101 1179 fuel 28 55
+resupply 101 1179 supplies 15 40
+resupply 101 1179 ammunition 15 40
+stock 1180 EAST - 0 0 110 0 12 70 70 0 0 65 0 4 52 52
+unit 1180 EAST east_security 1180 103 81 "EAST Southern Recon 3"
+identity 1180 land reconnaissance platoon
+parent 1180 1160
+equipment 11800 103 1180
+equipment 11801 103 1180
+equipment 11802 103 1180
+replacement 11805 103 1180 "EAST depot reserve"

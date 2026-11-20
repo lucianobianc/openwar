@@ -372,6 +372,14 @@ mixed formations, competing objectives and finite resupply across multiple
 fronts. See the [Valley Junction campaign notes](examples/connecticut-valley/README.md#valley-junction-campaign)
 for the order of battle and reference results. The original combined
 `connecticut-valley.owgeo` remains available through `--scenario`.
+
+
+The [Korean geographic theater](examples/korean-theater/README.md) includes
+a 144 × 104 km standalone world and a 48 × 48 km campaign pilot.
+
+```sh
+./openwar-gui --scenario examples/korean-theater/pilot-scale.owscenario
+```
 See the [scenario format](docs/SCENARIOS.md#22-current-format-owscenario-1),
 [import guide](docs/GEOGRAPHIC_IMPORT.md) and [source attribution](examples/connecticut-valley/README.md).
 

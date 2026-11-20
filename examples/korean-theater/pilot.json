@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "name": "Central Korea pilot",
+  "epsg": 5179,
+  "origin_m": [
+    1003000,
+    1962000
+  ],
+  "columns": 24,
+  "rows": 24,
+  "sector_m": 2000,
+  "tile_m": 200,
+  "vertical_datum": "EGM2008 orthometric heights, metres",
+  "sources": {
+    "osm": {
+      "url": "https://download.geofabrik.de/asia.html",
+      "license": "ODbL 1.0",
+      "attribution": "\u00a9 OpenStreetMap contributors",
+      "snapshot": "Geofabrik north and south Korea extracts; exact input identified by hash",
+      "wgs84_query_bounds": [
+        127.50881676134746,
+        37.198444342032175,
+        128.10319100565152,
+        37.682494902161444
+      ]
+    },
+    "dem": {
+      "url": "https://copernicus-dem-30m.s3.amazonaws.com/",
+      "license": "Copernicus DEM GLO-30 public licence",
+      "attribution": "Copernicus DEM \u00a9 DLR e.V. 2010\u20132014 and \u00a9 Airbus Defence and Space GmbH 2014\u20132018, provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+      "preprocessing": "Copernicus GLO-30 mosaic, averaged to 0.001\u00b0"
+    }
+  }
+}
