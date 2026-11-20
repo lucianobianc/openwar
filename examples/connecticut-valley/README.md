@@ -319,6 +319,82 @@ baseline and two in the revised run. This proximity measure records timing,
 and the regression tests the actual transition from missing intelligence to
 an eligible attack. No run fought into a second day.
 
+## Valley Junction 72-hour benchmark
+
+Choose **Valley Junction (72-hour benchmark)** under Connecticut Valley.
+The scenario uses the same geographic world with six independently
+assignable maneuver formations, three carriers, and twelve finite
+replacement items per faction. North, center, and south each have a
+workshop. Both sides can reach sector 105 from their northern deployment
+and sector 121 from their central deployment using the opening
+faction reports. The southern junction offers another opportunity,
+though WEST's opening route search to sector 137 reaches its budget.
+Opposing outposts and command positions provide follow-on objectives.
+The opposing rear depot is the terminal hold objective, with a
+12-hour hold. Each faction has two command sites for the existing
+12-hour capitulation confirmation window.
+
+The clock runs in five-minute ticks, with planning every 30 simulated
+minutes and combat resolution every 40. Stockpiles, workshop supplies,
+carrier lift and replacement inventories are finite.
+
+```sh
+scenario=examples/connecticut-valley/valley-junction-72h.owscenario
+./openwar --scenario "$scenario" --seed 42 --ticks 864 --events --save full.ows
+./openwar --scenario "$scenario" --seed 42 --ticks 144 --save mid.ows
+./openwar --load mid.ows --ticks 720 --save resumed.ows
+cmp full.ows resumed.ows
+```
+
+For different doctrines, select them in Campaign settings and start as
+Observer, then save a checkpoint and continue it with the headless CLI.
+
+### Benchmark results
+
+All four runs drew at the 72-hour time limit. The day-one counts below
+use firing sector-intervals, military sector crossings, and captures.
+All three measures were zero on days two and three. Air reconnaissance
+continued. The runs recorded 26–52 completed air observations per day
+on days two and three. Quiet hours are one-hour bins without firing,
+sector crossings, or captures.
+
+| Seeds | WEST / EAST | Day 1 fire / crossings / captures | Last fire | Quiet hours / final quiet stretch | Formations destroyed / equipment lost | Repairs / arrivals / formations back in combat | Deliveries |
+|---|---|---|---|---|---|---|---|
+| 7, 42 | Balanced / Balanced | 20 / 50 / 5 | 12:00 | 60 / 58:55 | 6 / 29 | 3 / 6 / 1 | 59 of 59 |
+| 42 | Offensive / Defensive | 23 / 42 / 5 | 11:20 | 61 / 60:40 | 7 / 30 | 2 / 4 / 2 | 61 of 62 |
+| 42 | Defensive / Offensive | 24 / 55 / 7 | 15:20 | 57 / 55:20 | 8 / 34 | 4 / 6 / 2 | 40 of 41 |
+
+A formation counts as back in combat when it fires after reorganization,
+a repair, or a replacement arrival. The seed-42 Offensive/Defensive
+run met the concurrency criterion. EAST Central Maneuver received
+replacements at 6:30 and 9:30, launched an Attack at 9:35, and fired
+in sector 121 at 10:00 and 10:40 while both sides fired in sector 105.
+WEST Armor also completed a repair at 6:10 and fired under its later
+Defend order at 10:40 while the northern engagement continued.
+Autonomous captures included the generated staging sectors 103 and
+107 and the authored WEST northern outpost in sector 104.
+
+Stockpile fuel consumption was 1,117 L (Balanced), 1,129 L
+(Offensive/Defensive), and 676 L (Defensive/Offensive), excluding
+shipment transfers and fuel drawn directly from carrier tanks. The
+corresponding ammunition consumption was 47, 47, and 54 units.
+Even the smallest final rear depot balance across these runs was
+1,372 L of fuel and 494 ammunition units.
+
+At hour 47, the 48 authored targets across the three seed-42 matchups
+were blocked by stale territorial reports (22), missing contact or
+complete survey (8), a stale contact (1), confirmed friendly control
+(12), or lack of an affordable, reachable route for an available
+formation (5). This is a snapshot of the target checks, rather than a
+count of orders issued. Separately, 11, 14, and 13 scheduled or active
+ground operations logged formation or equipment unavailability across
+the three matchups, respectively. Another 6, 3, and 5 ground operations
+failed when their formation withdrew or broke. Three or four formations
+still passed the basic attack-readiness checks in each matchup at hour 47,
+but none could route to an eligible authored target. Intelligence
+and route feasibility were the dominant late gates, with formation
+attrition reducing the pool that could exploit a new report.
+
 ## Source data and reproduction
 
 - `valley.osm.pbf` is a fixed, filtered OSM extract obtained on 18 November 2026

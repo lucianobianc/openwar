@@ -72,8 +72,8 @@ void test_discovery(const fs::path& root, const fs::path& bundled)
     require(std::ranges::find(catalog.worlds.at(other).metadata, "8 x 6 km") != catalog.worlds.at(other).metadata.end() &&
             std::ranges::find(catalog.worlds.at(other).metadata, "EPSG 32618") != catalog.worlds.at(other).metadata.end(),
             "Header inspection did not retain extent and geographic reference");
-    require(std::ranges::count_if(catalog.scenarios, [&](const auto& pair) { return pair.second.world == valley; }) == 4 &&
-            catalog.scenarios.size() == 6 && catalog.issues.size() == 3,
+    require(std::ranges::count_if(catalog.scenarios, [&](const auto& pair) { return pair.second.world == valley; }) == 5 &&
+            catalog.scenarios.size() == 7 && catalog.issues.size() == 3,
             "Launcher failed to associate shared worlds, handle errors or deduplicate paths");
     const auto& field = catalog.scenarios.at(fs::canonical(bundled / "valley-demo.owscenario"));
     require(field.name == "Connecticut Valley - Field Deployment" &&
@@ -95,6 +95,16 @@ void test_discovery(const fs::path& root, const fs::path& bundled)
     require(recovery.operations.autonomous_recovery && reserve.status == EquipmentStatus::reserve &&
             reserve.assignment.unit == UnitId{2} && reserve.assignment.reserve_source == "WEST depot reserve",
             "The authored replacement did not load into the assigned formation's finite reserve");
+    const auto benchmark_path = bundled / "valley-junction-72h.owscenario";
+    const auto& benchmark = catalog.scenarios.at(fs::canonical(benchmark_path));
+    require(benchmark.world == valley && benchmark.commanders == field.commanders &&
+            std::ranges::find(benchmark.details, "Time limit 72 h") != benchmark.details.end(),
+            "Launcher omitted the 72-hour benchmark or its authored time limit");
+    CampaignState benchmark_campaign(read_geographic_scenario(benchmark_path), 42);
+    require(benchmark_campaign.units().size() == 18 && benchmark_campaign.carriers().size() == 6 &&
+            std::ranges::count_if(benchmark_campaign.equipment(), [](const auto& item) {
+                return item.second.status == EquipmentStatus::reserve;
+            }) == 24, "The 72-hour benchmark did not load its formations, carriers and finite replacements");
     require(catalog.add(custom) == other, "Selecting the same world again duplicated its catalog entry");
     try {
         (void)read_geographic_world(other);

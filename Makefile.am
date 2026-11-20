@@ -45,7 +45,8 @@ nobase_dist_pkgdata_DATA = examples/procedural.toml examples/connecticut-valley/
 	examples/connecticut-valley/valley-world.owgeo examples/connecticut-valley/connecticut-valley.owgeo \
 	examples/connecticut-valley/valley-demo.owscenario examples/connecticut-valley/valley-autonomous.owscenario \
 	examples/connecticut-valley/valley-junction.owscenario \
-	examples/connecticut-valley/valley-junction-48h.owscenario
+	examples/connecticut-valley/valley-junction-48h.owscenario \
+	examples/connecticut-valley/valley-junction-72h.owscenario
 openwar_gui_LDADD = libcampaign.a $(RAYLIB_LIBS)
 
 else
@@ -68,4 +69,5 @@ EXTRA_DIST = tests/cli.sh tests/fixtures/closed-bridge-schema4.ows tests/fixture
 	examples/connecticut-valley/valley-world.json examples/connecticut-valley/valley-world.owgeo \
 	examples/connecticut-valley/valley-demo.owscenario examples/connecticut-valley/valley-autonomous.owscenario \
 	examples/connecticut-valley/valley-junction.owscenario \
-	examples/connecticut-valley/valley-junction-48h.owscenario
+	examples/connecticut-valley/valley-junction-48h.owscenario \
+	examples/connecticut-valley/valley-junction-72h.owscenario
